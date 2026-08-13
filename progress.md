@@ -8,10 +8,10 @@
 
 ## 任务清单
 - [x] T1 脚手架 + git（uv init + 依赖 + .gitignore/.env.example/app骨架）
-- [x] T2 基础设施 docker-compose（db: pgvector/pg16 + redis:7；health 验证延至 T12，Docker 安装中）
+- [x] T2 基础设施 docker-compose（db: pgvector/pg16 + redis:7；2026-08-13 已起容器双 healthy ✅）
 - [x] T3 核心横切（config/security/logging/errors/events/envelope/deps）
 - [x] T4 存储层（db/base/ORM models/repositories）
-- [ ] T5 Alembic 迁移（async env + 0001_init_schema）
+- [x] T5 Alembic 迁移（async env + 0001_init_schema）
 - [ ] T6 种子数据（seed.py 幂等）
 - [ ] T7 LLM 封装（core/llm.py）
 - [ ] T8 工具层（registry/executor/sandbox/time_now）
@@ -26,7 +26,9 @@
 - T2 完成（docker-compose 已写；health 验证延至 T12，Docker 安装中）
 - T3 完成（core 横切全通过）
 - T4 完成：models 补全 tool_definition/task/run_log + __init__ 导出 9 实体；repositories(user/conversation/message/agent/run_log) + owner 过滤；冒烟通过（import + configure_mappers 9 表可解析，ruff clean）
-- T5 进行中：alembic init + 异步 env + 0001_init_schema
+- T5 完成：alembic.ini + async env.py（URL 注入自 app config）+ autogenerate 0001_init_schema；upgrade head / downgrade -1 / 再 upgrade 均干净 ✅
+- T6 进行中：seed.py 幂等种子（org + 3 用户 + tl_time_now + published agent）
+- 环境备注：Docker Hub 国内不可达；本次用 daocloud 镜像一次性 pull + retag 到本地（未改 daemon.json）
 
 ## 恢复指引
 重启后恢复：读本账本 → `git log` 确认提交 → 从 T4 剩余项继续。
