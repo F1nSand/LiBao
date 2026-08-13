@@ -7,8 +7,8 @@
 前置条件：① Docker Desktop 用户手动安装（本机无 Docker）② Python 3.12（uv 安装）③ LLM 可用（DeepSeek key 或本地 Ollama，需支持工具调用）——执行中确认。
 
 ## 任务清单
-- [ ] T1 脚手架 + git（uv init + 依赖 + .gitignore/.env.example/app骨架）
-- [ ] T2 基础设施 docker-compose（db: pgvector/pg16 + redis:7）
+- [x] T1 脚手架 + git（uv init + 依赖 + .gitignore/.env.example/app骨架）
+- [x] T2 基础设施 docker-compose（db: pgvector/pg16 + redis:7；health 验证延至 T12，Docker 安装中）
 - [ ] T3 核心横切（config/security/logging/envelope/events/deps）
 - [ ] T4 存储层（db/base/ORM models/repositories）
 - [ ] T5 Alembic 迁移（async env + 0001_init_schema）

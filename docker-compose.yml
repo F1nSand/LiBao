@@ -1,0 +1,34 @@
+# 开发环境基础设施（docs 05 §2.1）
+# 说明：M0/M1 阶段后端与前端以本地进程运行，compose 只承载后端依赖的两个服务。
+# 注意：LangGraph checkpointer 表由应用 lifespan 的 saver.setup() 创建，与业务表同库。
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: agent-db
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: agent
+      POSTGRES_DB: agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: agent-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata: {}
