@@ -12,7 +12,7 @@
 - [x] T3 核心横切（config/security/logging/errors/events/envelope/deps）
 - [x] T4 存储层（db/base/ORM models/repositories）
 - [x] T5 Alembic 迁移（async env + 0001_init_schema）
-- [ ] T6 种子数据（seed.py 幂等）
+- [x] T6 种子数据（seed.py 幂等）
 - [ ] T7 LLM 封装（core/llm.py）
 - [ ] T8 工具层（registry/executor/sandbox/time_now）
 - [ ] T9 编排层（state/graph/nodes/context_builder/checkpointer）
@@ -27,7 +27,8 @@
 - T3 完成（core 横切全通过）
 - T4 完成：models 补全 tool_definition/task/run_log + __init__ 导出 9 实体；repositories(user/conversation/message/agent/run_log) + owner 过滤；冒烟通过（import + configure_mappers 9 表可解析，ruff clean）
 - T5 完成：alembic.ini + async env.py（URL 注入自 app config）+ autogenerate 0001_init_schema；upgrade head / downgrade -1 / 再 upgrade 均干净 ✅
-- T6 进行中：seed.py 幂等种子（org + 3 用户 + tl_time_now + published agent）
+- T6 完成：seed.py 幂等（org 默认组织 + admin/dev/viewer + time_now 工具 enabled + 时间助手 published v1 含 prefix_hash）；psql 核对 UTF-8/哈希正确，双跑幂等 ✅
+- T7 进行中：core/llm.py（ChatLiteLLM 封装）
 - 环境备注：Docker Hub 国内不可达；本次用 daocloud 镜像一次性 pull + retag 到本地（未改 daemon.json）
 
 ## 恢复指引
