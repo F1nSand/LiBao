@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.storage.models.conversation import Conversation
@@ -25,6 +25,14 @@ class ConversationRepository:
             .offset(offset)
         )
         return list((await self.session.execute(stmt)).scalars())
+
+    async def count_by_user(self, user_id: uuid.UUID) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.user_id == user_id, Conversation.deleted_at.is_(None))
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
 
     async def get_owned(self, conversation_id: uuid.UUID, user_id: uuid.UUID) -> Conversation | None:
         """按 owner 过滤取会话；非本人/已软删返回 None（上层映射 40401）。"""

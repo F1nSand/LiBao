@@ -45,3 +45,5 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# B008：FastAPI 惯用法（Depends() in 参数默认值）必报，跳过
+ignore = ["B008"]

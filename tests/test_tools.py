@@ -71,7 +71,12 @@ async def test_execute_timeout():
 
 
 async def test_execute_missing_handler():
-    spec = ToolSpec(id="t_nohandler", name="nohandler", description="d", params_schema={"type": "object", "properties": {}, "required": []})
+    spec = ToolSpec(
+        id="t_nohandler",
+        name="nohandler",
+        description="d",
+        params_schema={"type": "object", "properties": {}, "required": []},
+    )
     result = await executor.execute(spec, {})
     assert result.ok is False
     assert "未注册 handler" in result.error

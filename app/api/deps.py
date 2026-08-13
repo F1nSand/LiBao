@@ -44,7 +44,7 @@ async def get_current_user(
     try:
         payload = decode_token(credentials.credentials)
     except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail=str(ERR_UNAUTHORIZED))
+        raise HTTPException(status_code=401, detail=str(ERR_UNAUTHORIZED)) from None
 
     service = UserService()
     user = await service.get_by_id(db, uuid.UUID(payload["sub"]))

@@ -6,7 +6,7 @@ JWT：HS256，payload 必须含 role（前端 parseRole 依赖，FrontEnd/src/ut
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 import bcrypt
@@ -37,7 +37,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def create_access_token(user: TokenUser) -> str:
     settings = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload: dict[str, Any] = {
         "sub": str(user.id),
         "role": user.role,

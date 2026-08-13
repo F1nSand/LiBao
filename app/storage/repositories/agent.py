@@ -41,6 +41,29 @@ class AgentRepository:
         )
         return list((await self.session.execute(stmt)).scalars())
 
+    async def list_for_org(
+        self, org_id: uuid.UUID, *, limit: int = 50, offset: int = 0
+    ) -> list[AgentConfig]:
+        """管理页列表：published 优先，其余按创建倒序。"""
+        stmt = (
+            select(AgentConfig)
+            .where(AgentConfig.org_id == org_id, AgentConfig.deleted_at.is_(None))
+            .order_by(AgentConfig.status != "published", AgentConfig.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def count_for_org(self, org_id: uuid.UUID) -> int:
+        from sqlalchemy import func
+
+        stmt = (
+            select(func.count())
+            .select_from(AgentConfig)
+            .where(AgentConfig.org_id == org_id, AgentConfig.deleted_at.is_(None))
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
+
     async def list_versions(self, agent_id: uuid.UUID) -> list[AgentVersion]:
         stmt = (
             select(AgentVersion)

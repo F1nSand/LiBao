@@ -66,4 +66,8 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
             }
         )
 
-    return {"messages": tool_msgs, "tool_results": results, "run_logs": run_logs}
+    return {
+        "messages": tool_msgs,
+        "tool_results": results,
+        "run_logs": (state.get("run_logs") or []) + run_logs,
+    }

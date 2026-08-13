@@ -67,7 +67,8 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
         "active_tools": active_tools,
         "totals": totals,
         "flags": flags,
-        "run_logs": [
+        "run_logs": (state.get("run_logs") or [])
+        + [
             {
                 "node": "agent_execute",
                 "type": "llm",

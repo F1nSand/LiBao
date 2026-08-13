@@ -23,6 +23,7 @@ def _assemble_tool_calls(state: AgentState) -> list[dict[str, Any]]:
                 "input": r.get("input"),
                 "output": r.get("output"),
                 "ok": r.get("ok", False),
+                "status": "done" if r.get("ok", False) else "error",  # FrontEnd ToolCallRecord 读 status
                 "duration_ms": r.get("duration_ms", 0),
             }
         )

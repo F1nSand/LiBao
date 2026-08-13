@@ -17,7 +17,7 @@
 - [x] T8 工具层（registry/executor/sandbox/time_now）
 - [x] T9 编排层（state/graph/nodes/context_builder/checkpointer）
 - [x] T10 SSE 桥（orchestration/chat_stream.py）
-- [ ] T11 API 层（routers + main.py + schemas）
+- [x] T11 API 层（routers + main.py + schemas）
 - [ ] T12 集成验证（端到端验收）
 - [ ] T13 README 记录 M2+ 接缝
 
@@ -36,7 +36,10 @@
 - ⚠ deepseek-v4-flash 为推理模型，AIMessage.content 是 content blocks 列表（thinking + text）；T10 流式需只取 text 部分
 - T10 完成：chat_stream.py（producer/queue + 15s keepalive + messages/updates/values 三模式映射 + 持久化用户/assistant 消息 + run_logs + last_message_at）；pytest 序列精确断言过 ✅；全部 10 项测试通过
 - ⚠ LangGraph stream_mode="updates" 产出的是 {node: update} dict，不是 (node, update) 元组
-- T11 进行中：API 层（routers + main.py + schemas + services）
+- T11 完成：schemas + services(user/conversation/agent/serializers) + routers(auth/conversations/agents/chat/system) + main.py；uvicorn 实测：health/login(错码 40101 HTTP200)/me/agents/conversations CRUD(owner 隔离 40401、坏 agent 40404)/chat/stream 全过 ✅
+- ⚠ Windows 双坑落地：uvicorn 用自身 loop 工厂忽略事件循环策略 → main.py 里 patch `uvicorn.config.LOOP_FACTORIES["auto"/"asyncio"]` 指向 SelectorEventLoop；`uvicorn app.api.main:app` 直接可跑
+- ✅ M1 端到端实测：真实 DeepSeek 一次工具调用流式事件序列 = message_start→tool_call→tool_result→token*→status→done；双轮会话持久化 + 跨轮 resume（LLM 记得上一轮工具）+ run_logs 按 trace_id 落库
+- T12 进行中：集成验证（重启持久化 + 前端闭环）
 - 环境备注：Docker Hub 国内不可达；本次用 daocloud 镜像一次性 pull + retag 到本地（未改 daemon.json）
 
 ## 恢复指引

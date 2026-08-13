@@ -15,13 +15,14 @@ class MessageRepository:
         self.session = session
 
     async def list_by_conversation(
-        self, conversation_id: uuid.UUID, *, limit: int = 500
+        self, conversation_id: uuid.UUID, *, limit: int = 500, offset: int = 0
     ) -> list[Message]:
         stmt = (
             select(Message)
             .where(Message.conversation_id == conversation_id, Message.deleted_at.is_(None))
             .order_by(Message.created_at.asc())
             .limit(limit)
+            .offset(offset)
         )
         return list((await self.session.execute(stmt)).scalars())
 
