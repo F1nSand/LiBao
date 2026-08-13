@@ -18,7 +18,7 @@
 - [x] T9 编排层（state/graph/nodes/context_builder/checkpointer）
 - [x] T10 SSE 桥（orchestration/chat_stream.py）
 - [x] T11 API 层（routers + main.py + schemas）
-- [ ] T12 集成验证（端到端验收）
+- [ ] T12 集成验证（端到端验收，后端全过，前端闭环待做）
 - [ ] T13 README 记录 M2+ 接缝
 
 ## 执行记录
@@ -39,7 +39,8 @@
 - T11 完成：schemas + services(user/conversation/agent/serializers) + routers(auth/conversations/agents/chat/system) + main.py；uvicorn 实测：health/login(错码 40101 HTTP200)/me/agents/conversations CRUD(owner 隔离 40401、坏 agent 40404)/chat/stream 全过 ✅
 - ⚠ Windows 双坑落地：uvicorn 用自身 loop 工厂忽略事件循环策略 → main.py 里 patch `uvicorn.config.LOOP_FACTORIES["auto"/"asyncio"]` 指向 SelectorEventLoop；`uvicorn app.api.main:app` 直接可跑
 - ✅ M1 端到端实测：真实 DeepSeek 一次工具调用流式事件序列 = message_start→tool_call→tool_result→token*→status→done；双轮会话持久化 + 跨轮 resume（LLM 记得上一轮工具）+ run_logs 按 trace_id 落库
-- T12 进行中：集成验证（重启持久化 + 前端闭环）
+- T12 进行中：后端端到端 1-7 项全过（compose healthy/alembic/seed/uvicorn+health/login+信封/conversations+SSE chat+**重启持久化**）；**待续**：第 8 项前端闭环（cd ../FrontEnd && VITE_USE_MOCK=false npm run dev → 浏览器操作验证）
+- **暂停点：2026-08-13 用户指示"先存档暂停"**。恢复指引：账本 T12 只剩前端闭环；后端已提交，uvicorn 启动命令见账本 T11 备注
 - 环境备注：Docker Hub 国内不可达；本次用 daocloud 镜像一次性 pull + retag 到本地（未改 daemon.json）
 
 ## 恢复指引
