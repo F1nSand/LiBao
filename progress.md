@@ -9,7 +9,7 @@
 ## 任务清单
 - [x] T1 脚手架 + git（uv init + 依赖 + .gitignore/.env.example/app骨架）
 - [x] T2 基础设施 docker-compose（db: pgvector/pg16 + redis:7；health 验证延至 T12，Docker 安装中）
-- [ ] T3 核心横切（config/security/logging/envelope/events/deps）
+- [x] T3 核心横切（config/security/logging/errors/events/envelope/deps）
 - [ ] T4 存储层（db/base/ORM models/repositories）
 - [ ] T5 Alembic 迁移（async env + 0001_init_schema）
 - [ ] T6 种子数据（seed.py 幂等）
