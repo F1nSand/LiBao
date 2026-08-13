@@ -13,8 +13,8 @@
 - [x] T4 存储层（db/base/ORM models/repositories）
 - [x] T5 Alembic 迁移（async env + 0001_init_schema）
 - [x] T6 种子数据（seed.py 幂等）
-- [ ] T7 LLM 封装（core/llm.py）
-- [ ] T8 工具层（registry/executor/sandbox/time_now）
+- [x] T7 LLM 封装（core/llm.py）
+- [x] T8 工具层（registry/executor/sandbox/time_now）
 - [ ] T9 编排层（state/graph/nodes/context_builder/checkpointer）
 - [ ] T10 SSE 桥（orchestration/chat_stream.py）
 - [ ] T11 API 层（routers + main.py + schemas）
@@ -28,7 +28,10 @@
 - T4 完成：models 补全 tool_definition/task/run_log + __init__ 导出 9 实体；repositories(user/conversation/message/agent/run_log) + owner 过滤；冒烟通过（import + configure_mappers 9 表可解析，ruff clean）
 - T5 完成：alembic.ini + async env.py（URL 注入自 app config）+ autogenerate 0001_init_schema；upgrade head / downgrade -1 / 再 upgrade 均干净 ✅
 - T6 完成：seed.py 幂等（org 默认组织 + admin/dev/viewer + time_now 工具 enabled + 时间助手 published v1 含 prefix_hash）；psql 核对 UTF-8/哈希正确，双跑幂等 ✅
-- T7 进行中：core/llm.py（ChatLiteLLM 封装）
+- T7 完成：LLMService.build_model → ChatLiteLLM；DeepSeek ainvoke 实测返回 ✅（用户 .env 填了 key；model 需带前缀 `deepseek/`，已从 `deepseek-v4-flash` 改为 `deepseek/deepseek-v4-flash`）
+- T8 完成：registry(ToolSpec+aci/acis 按 id 排序) + executor(jsonschema→wait_for 超时→ToolResult) + sandbox(none/docker/microvm) + builtin tl_time_now；pytest 6 项全过 ✅
+- T9 进行中：orchestration（state/graph/nodes/context_builder/checkpointer）
+- ⚠ 注意：deepseek-v4-flash 为推理模型，AIMessage.content 是 content blocks 列表（thinking + text）；T9/T10 流式需只取 text 部分
 - 环境备注：Docker Hub 国内不可达；本次用 daocloud 镜像一次性 pull + retag 到本地（未改 daemon.json）
 
 ## 恢复指引
