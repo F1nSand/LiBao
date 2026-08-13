@@ -64,6 +64,14 @@ def get(tool_id: str) -> ToolSpec | None:
     return _REGISTRY.get(tool_id)
 
 
+def get_by_name(name: str) -> ToolSpec | None:
+    """按 ACI 函数名查找（模型 tool_call 里带的是 spec.name）。M1 要求函数名唯一（防遮蔽）。"""
+    for spec in _REGISTRY.values():
+        if spec.name == name:
+            return spec
+    return None
+
+
 def all_tools() -> list[ToolSpec]:
     return list(_REGISTRY.values())
 

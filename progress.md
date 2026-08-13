@@ -15,7 +15,7 @@
 - [x] T6 种子数据（seed.py 幂等）
 - [x] T7 LLM 封装（core/llm.py）
 - [x] T8 工具层（registry/executor/sandbox/time_now）
-- [ ] T9 编排层（state/graph/nodes/context_builder/checkpointer）
+- [x] T9 编排层（state/graph/nodes/context_builder/checkpointer）
 - [ ] T10 SSE 桥（orchestration/chat_stream.py）
 - [ ] T11 API 层（routers + main.py + schemas）
 - [ ] T12 集成验证（端到端验收）
@@ -30,8 +30,11 @@
 - T6 完成：seed.py 幂等（org 默认组织 + admin/dev/viewer + time_now 工具 enabled + 时间助手 published v1 含 prefix_hash）；psql 核对 UTF-8/哈希正确，双跑幂等 ✅
 - T7 完成：LLMService.build_model → ChatLiteLLM；DeepSeek ainvoke 实测返回 ✅（用户 .env 填了 key；model 需带前缀 `deepseek/`，已从 `deepseek-v4-flash` 改为 `deepseek/deepseek-v4-flash`）
 - T8 完成：registry(ToolSpec+aci/acis 按 id 排序) + executor(jsonschema→wait_for 超时→ToolResult) + sandbox(none/docker/microvm) + builtin tl_time_now；pytest 6 项全过 ✅
-- T9 进行中：orchestration（state/graph/nodes/context_builder/checkpointer）
-- ⚠ 注意：deepseek-v4-flash 为推理模型，AIMessage.content 是 content blocks 列表（thinking + text）；T9/T10 流式需只取 text 部分
+- T9 完成：state_schema + context_builder(compute_prefix_hash 与 seed 同算法) + 5 nodes + graph(build_graph) + checkpointer(PostgresCheckpointer/from_conn_string)；pytest 3 项全过（编译/mock 工具调用全程/前缀字节稳定）；真库 AsyncPostgresSaver + thread_id 走通，checkpoint 4 表已建 ✅
+- ⚠ Windows 关键坑：psycopg async 需 SelectorEventLoop，而 Windows 默认 ProactorEventLoop → main.py 启动前必须 `asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())`（T11 落地）
+- ⚠ LangGraph 节点 config 参数必须标注 `Optional[RunnableConfig]`（`RunnableConfig | None` 不被识别注入）；ruff UP045 已 noqa
+- ⚠ deepseek-v4-flash 为推理模型，AIMessage.content 是 content blocks 列表（thinking + text）；T10 流式需只取 text 部分
+- T10 进行中：orchestration/chat_stream.py（Graph→SSE 桥）
 - 环境备注：Docker Hub 国内不可达；本次用 daocloud 镜像一次性 pull + retag 到本地（未改 daemon.json）
 
 ## 恢复指引
