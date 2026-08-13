@@ -16,7 +16,7 @@
 - [x] T7 LLM 封装（core/llm.py）
 - [x] T8 工具层（registry/executor/sandbox/time_now）
 - [x] T9 编排层（state/graph/nodes/context_builder/checkpointer）
-- [ ] T10 SSE 桥（orchestration/chat_stream.py）
+- [x] T10 SSE 桥（orchestration/chat_stream.py）
 - [ ] T11 API 层（routers + main.py + schemas）
 - [ ] T12 集成验证（端到端验收）
 - [ ] T13 README 记录 M2+ 接缝
@@ -34,7 +34,9 @@
 - ⚠ Windows 关键坑：psycopg async 需 SelectorEventLoop，而 Windows 默认 ProactorEventLoop → main.py 启动前必须 `asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())`（T11 落地）
 - ⚠ LangGraph 节点 config 参数必须标注 `Optional[RunnableConfig]`（`RunnableConfig | None` 不被识别注入）；ruff UP045 已 noqa
 - ⚠ deepseek-v4-flash 为推理模型，AIMessage.content 是 content blocks 列表（thinking + text）；T10 流式需只取 text 部分
-- T10 进行中：orchestration/chat_stream.py（Graph→SSE 桥）
+- T10 完成：chat_stream.py（producer/queue + 15s keepalive + messages/updates/values 三模式映射 + 持久化用户/assistant 消息 + run_logs + last_message_at）；pytest 序列精确断言过 ✅；全部 10 项测试通过
+- ⚠ LangGraph stream_mode="updates" 产出的是 {node: update} dict，不是 (node, update) 元组
+- T11 进行中：API 层（routers + main.py + schemas + services）
 - 环境备注：Docker Hub 国内不可达；本次用 daocloud 镜像一次性 pull + retag 到本地（未改 daemon.json）
 
 ## 恢复指引

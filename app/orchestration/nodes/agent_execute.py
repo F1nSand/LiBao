@@ -2,9 +2,11 @@
 
 token 级流式不在此 yield：T10 用 graph.astream(stream_mode=["messages"]) 截获模型 chunk。
 测试注入：config["configurable"]["model"] 可覆盖模型（mock LLM）。
+run_log（type=llm）与 totals（token 累计）在此收集，T10 统一落库。
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Optional
 
 from langchain_core.runnables import RunnableConfig
@@ -22,8 +24,21 @@ def _resolve_model(state: AgentState, config: Optional[RunnableConfig]) -> Any: 
     return LLMService.build_model(agent.get("model"))
 
 
+def _text_of(response: Any) -> str:
+    """提取最终回答文本（兼容 content 为 str 或 content blocks 列表）。"""
+    content = getattr(response, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return str(content)
+
+
 async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig] = None) -> dict[str, Any]:  # noqa: UP045  LangGraph 需 Optional 形式
     agent = state.get("agent_config", {})
+    trace_id = (config or {}).get("configurable", {}).get("trace_id")
 
     active_tools = state.get("active_tools")
     if not active_tools:
@@ -31,11 +46,37 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
     if not active_tools:
         active_tools = state.get("active_tools", [])
 
-    model = _resolve_model(state, config)
-    model = model.bind_tools(active_tools)
+    model = _resolve_model(state, config).bind_tools(active_tools)
 
+    start = time.perf_counter()
     response = await model.ainvoke(build_context(state))
+    duration_ms = int((time.perf_counter() - start) * 1000)
+
+    # token 统计累计（totals 为 LastValue，读旧值再加）
+    totals = dict(state.get("totals", {}))
+    usage = getattr(response, "usage_metadata", None) or {}
+    totals["prompt_tokens"] = totals.get("prompt_tokens", 0) + int(usage.get("input_tokens", 0))
+    totals["completion_tokens"] = totals.get("completion_tokens", 0) + int(usage.get("output_tokens", 0))
+    totals["total_tokens"] = totals.get("total_tokens", 0) + int(usage.get("total_tokens", 0))
 
     flags = dict(state.get("flags", {}))
     flags["steps"] = flags.get("steps", 0) + 1
-    return {"messages": [response], "active_tools": active_tools, "flags": flags}
+
+    return {
+        "messages": [response],
+        "active_tools": active_tools,
+        "totals": totals,
+        "flags": flags,
+        "run_logs": [
+            {
+                "node": "agent_execute",
+                "type": "llm",
+                "trace_id": trace_id,
+                "input": {"model": agent.get("model"), "tool_count": len(active_tools)},
+                "output": {"content": _text_of(response)[:500]},
+                "token_usage": usage or None,
+                "duration_ms": duration_ms,
+                "status": "ok",
+            }
+        ],
+    }

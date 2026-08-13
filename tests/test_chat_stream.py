@@ -1,0 +1,127 @@
+"""T10 SSE 桥测试：精确信封序列（message_start→tool_call→tool_result→token→status→done）+ 消息持久化。
+
+需要 Docker db（localhost:5432）；DB 不可达时自动跳过（review gate 无 DB 也能跑其余测试）。
+"""
+from __future__ import annotations
+
+import json
+import socket
+import uuid
+
+import pytest
+from langchain_core.messages import AIMessage
+
+from app.core.security import hash_password
+from app.orchestration.chat_stream import chat_stream_events
+from app.orchestration.graph import build_graph
+from app.storage.db import init_db
+from app.storage.models import AgentConfig, Conversation, Org, User
+from app.storage.repositories.message import MessageRepository
+
+
+def _db_reachable() -> bool:
+    try:
+        with socket.create_connection(("localhost", 5432), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(not _db_reachable(), reason="Docker db 未运行")
+
+
+class FakeChatModel:
+    def __init__(self) -> None:
+        self._n = 0
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    async def ainvoke(self, messages):
+        if self._n == 0:
+            self._n = 1
+            return AIMessage(
+                content="", tool_calls=[{"name": "time_now", "args": {}, "id": "call_1", "type": "tool_call"}]
+            )
+        return AIMessage(content="现在是 2026 年 8 月 13 日 21:00。")
+
+
+@pytest.fixture
+async def chat_fixture():
+    engine, sessionmaker = init_db()
+    uid = uuid.uuid4().hex[:8]
+    async with sessionmaker() as session:
+        org = Org(name=f"测试组织-t10-{uid}")
+        session.add(org)
+        await session.flush()
+        user = User(username=f"t10_{uid}", password_hash=hash_password("x"), name="T10", role="admin", org_id=org.id)
+        session.add(user)
+        await session.flush()
+        agent = AgentConfig(
+            org_id=org.id,
+            name="T10时间助手",
+            model="fake",
+            system_prompt="你是时间助手。",
+            tools=["tl_time_now"],
+            max_steps=5,
+            status="published",
+        )
+        session.add(agent)
+        await session.flush()
+        conv = Conversation(user_id=user.id, agent_id=agent.id, title="t10会话")
+        session.add(conv)
+        await session.commit()
+    yield sessionmaker, org, user, agent, conv
+    await engine.dispose()
+
+
+async def test_chat_stream_event_sequence(chat_fixture):
+    from app.tools.builtin import register_builtin_tools
+
+    register_builtin_tools()
+    sessionmaker, org, user, agent, conv = chat_fixture
+    graph = build_graph()
+
+    async with sessionmaker() as session:
+        frames = []
+        async for frame in chat_stream_events(
+            db=session,
+            graph=graph,
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="现在几点？",
+            trace_id="trace-t10",
+            model_override=FakeChatModel(),
+        ):
+            frames.append(frame)
+
+        events = []
+        for frame in frames:
+            if frame.startswith(":"):  # keepalive 注释跳过
+                continue
+            data = frame.split("\n\n")[0].split("data: ", 1)[1]
+            events.append(json.loads(data))
+
+        types = [e["type"] for e in events]
+        assert types[0] == "message_start"
+        assert "tool_call" in types and "tool_result" in types and "token" in types
+        assert "status" in types
+        assert types[-1] == "done"
+        seqs = [e["seq"] for e in events]
+        assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
+
+        tool_call = next(e for e in events if e["type"] == "tool_call")
+        assert tool_call["payload"]["tool_name"] == "time_now"
+        tool_result = next(e for e in events if e["type"] == "tool_result")
+        assert tool_result["payload"]["ok"] is True
+        done = events[-1]
+        assert done["payload"]["message"]["role"] == "assistant"
+        assert done["payload"]["message"]["tool_calls"][0]["tool_name"] == "time_now"
+
+        msgs = await MessageRepository(session).list_by_conversation(conv.id)
+        roles = [m.role for m in msgs]
+        assert roles == ["user", "assistant"]
+        assert msgs[0].content == "现在几点？"
+        assert msgs[1].tool_calls and msgs[1].tool_calls[0]["tool_name"] == "time_now"
+        assert msgs[1].trace_id == "trace-t10"

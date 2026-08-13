@@ -16,8 +16,10 @@ from app.tools.registry import get, get_by_name
 
 async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] = None) -> dict[str, Any]:  # noqa: UP045  LangGraph 需 Optional 形式
     last = state["messages"][-1]
+    trace_id = (config or {}).get("configurable", {}).get("trace_id")
     tool_msgs: list[ToolMessage] = []
     results: list[dict[str, Any]] = []
+    run_logs: list[dict[str, Any]] = []
 
     for position, tc in enumerate(last.tool_calls or []):
         spec = get_by_name(tc["name"]) or get(tc["name"])
@@ -46,10 +48,22 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                 "input": tc.get("args", {}),
                 "output": result.output,
                 "ok": result.ok,
+                "summary": result.summary,
                 "duration_ms": result.duration_ms,
             }
         )
         content = result.summary if result.ok else f"错误: {result.error}"
         tool_msgs.append(ToolMessage(content=content, tool_call_id=tc["id"]))
+        run_logs.append(
+            {
+                "node": "tool_execute",
+                "type": "tool",
+                "trace_id": trace_id,
+                "input": tc.get("args", {}),
+                "output": {"summary": result.summary[:500], "ok": result.ok, "error": result.error},
+                "duration_ms": result.duration_ms,
+                "status": "ok" if result.ok else "error",
+            }
+        )
 
-    return {"messages": tool_msgs, "tool_results": results}
+    return {"messages": tool_msgs, "tool_results": results, "run_logs": run_logs}

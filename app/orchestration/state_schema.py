@@ -6,6 +6,7 @@ flags 承载跨节点运行标记（steps 计数、max_steps 到达、status 等
 """
 from __future__ import annotations
 
+import operator
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import BaseMessage
@@ -24,7 +25,7 @@ class AgentState(TypedDict, total=False):
     flags: dict[str, Any]
     # 统计：token_usage / cost
     totals: dict[str, Any]
-    # 本轮 run_log 收集（T11 由 chat_stream 统一落库）
-    run_logs: list[dict[str, Any]]
+    # 本轮 run_log 收集（T10 由 chat_stream 统一落库）；Annotated operator.add 跨节点追加
+    run_logs: Annotated[list[dict[str, Any]], operator.add]
     # finalize 产出的最终消息 dict（对齐 done 事件 / message 持久化）
     final_message: dict[str, Any]
