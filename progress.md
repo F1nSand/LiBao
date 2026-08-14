@@ -59,3 +59,11 @@ T1-T13 + review-test-simplify gate 全部完成；start.cmd/start.sh 一键启�
     - 跳过：values 模式（状态小+测试不耦合 checkpointer）、max_concurrency（计划设计延期）、
       DB 读时解析 registry（M2.5 重构）、终态处理器大重构（complete/fail 助手已缓解核心重复）
   - 最终：ruff clean + pytest 40/40 + 子类多轮验证 ✅ → M2 收尾完成
+- **Bug 修复轮（2026-08-14 用户报告）**：
+  1. 时间工具不可用：根因 = 启动同步全 org 遍历，32 个测试组织 enabled=false 行把 time_now 打成禁用
+     → 修复 `sync_registry_from_db` 仅同步默认组织 + 清理 96 行测试污染 + 重跑种子；实测 chat 恢复 tool_call(time_now)→tool_result ✅
+  2. 通知工具确认后执行结果不清：实为 time_now 禁用导致 invoke 只见 demo_notify（可调用与选中不符）；
+     修复后通知助手 chat interrupt→resume 全闭环 tool_result(带结果)→done ✅
+  3. 工具卡重试按钮无反应：前端 retry 事件无监听 → 接线 ToolCallCard→Bubble→List→ChatView，重试=重发最后一条用户消息；
+     前端 vue-tsc 通过（FrontEnd 非 git 仓库，改动存盘）
+  提交：947e0ec
