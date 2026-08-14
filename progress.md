@@ -48,6 +48,7 @@
   - Gate3 Simplify：4 agent 去重 6 项（create 复用已校验 agent 消除双查询 · agent_can_use 共享谓词 · compute_prefix_hash 抽 core/prefix.py · 版本快照赋值上提 · 轮次重置移 route_node · UUID 直比）；跳过 2 项（uvicorn LOOP_FACTORIES patch 为文档化运行命令所需；JWT validator 无漂移）
   - 最终回归：ruff clean + pytest 10/10 + E2E（conversations/chat/持久化/坏 agent 40404 无孤儿）✅
 - 追加：start.sh + start.cmd 一键启动（基础设施/迁移/种子/后端/前端），实测两端就绪 + 代理连通 ✅；README 已更新
+- 追加：start.cmd 改为纯 bat（用户要求不依赖 git-bash）——ASCII-only 防 GBK 误读；修复 `set VITE_USE_MOCK=false` 尾空格导致 vite 误启 mock 的坑（`set VAR=value&&` 无空格形式）；实测 proxy 走真实后端 {code:0} ✅
 
 ## 恢复指引
 重启后恢复：读本账本 → `git log` 确认提交 → 从 T4 剩余项继续。
