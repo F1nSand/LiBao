@@ -9,11 +9,12 @@ M0（地基）+ M1（最小闭环）实现。Python 3.12 + FastAPI + LangGraph +
 
 ### 一键启动（推荐）
 
-```bash
-bash start.sh            # git-bash；Windows 也可双击 start.cmd
-```
+| 方式 | 说明 |
+|---|---|
+| **双击 `start.cmd`** | 纯 Windows 批处理，无需 git-bash。自动打开「Agent Backend」「Agent Frontend」两个服务窗口，关闭即停 |
+| `bash start.sh` | git-bash 下运行，所有服务共用一个窗口，Ctrl+C 全部停止 |
 
-自动完成：db/redis 拉起（等待 healthy）→ `alembic upgrade head` + 幂等种子 → 后端 `:8000` → 前端 `:5173`（`VITE_USE_MOCK=false` 走真实后端）。Ctrl+C 全部停止。已运行的服务会跳过。
+两者逻辑相同：db/redis 拉起（等待 healthy）→ `alembic upgrade head` + 幂等种子 → 后端 `:8000` → 前端 `:5173`（`VITE_USE_MOCK=false` 走真实后端）。已在运行的服务自动跳过。
 
 ### 手动分步
 
