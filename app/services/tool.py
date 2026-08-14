@@ -17,7 +17,8 @@ from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
 from app.storage.repositories.tool_definition import ToolDefinitionRepository
 from app.tools import executor
-from app.tools.registry import get, get_by_name, patch_spec, set_enabled
+from app.tools.mcp_client import slugify
+from app.tools.registry import get, get_by_name, patch_spec, register, set_enabled
 
 
 def resolve_name(tool_id: str) -> str:
@@ -125,6 +126,8 @@ class ToolService:
 
         只同步指定 org（种子默认组织）的行——registry 是进程级全局（M2 简化），
         测试/其他 org 的 enabled=false 行会把内置工具打成禁用（Bug 修复）。
+        MCP 行（mcp_source 非空）：registry 无同名 spec → 从 mcp_servers 重建（惰性 handler，
+        T5）；源已软删/停用 → 工具 spec 强制禁用。
         """
         repo = ToolDefinitionRepository(db)
         rows = await repo.list_for_org(org_id, limit=10000) if org_id else await repo.list_for_org_all()
@@ -132,6 +135,29 @@ class ToolService:
             spec = get_by_name(row.name)
             if spec is not None:
                 set_enabled(spec.id, row.enabled)
+            elif row.mcp_source:
+                await self._sync_mcp_spec(db, row)
+
+    async def _sync_mcp_spec(self, db: AsyncSession, row: ToolDefinition) -> None:
+        """MCP 行重建：读 mcp_servers 配置 → build_mcp_spec 注册 → enabled 跟随 DB 与源状态。"""
+        from app.services.mcp import build_mcp_spec
+        from app.storage.models.mcp_server import McpServer
+        from app.storage.repositories.mcp_server import McpServerRepository
+
+        server_id = row.mcp_source.removeprefix("mcp:")
+        server = await McpServerRepository(db).get_by_id_including_deleted(uuid.UUID(server_id))
+        if server is None:
+            return  # 源行彻底缺失：无法重建（spec 缺席 = 不可见）
+        from app.tools.mcp_client import McpConnConfig
+
+        cfg = McpConnConfig(
+            transport=server.transport, command=server.command, url=server.url, headers=server.headers
+        )
+        register(build_mcp_spec(server, row, cfg))
+        # 源软删/停用 → 工具强制禁用（可看到但不可执行）
+        set_enabled(
+            f"mc_{slugify(server.name)}_{slugify(row.name)}", row.enabled and server.enabled and server.deleted_at is None
+        )
 
     async def search(self, db: AsyncSession, org_id: uuid.UUID, q: str) -> list[dict[str, Any]]:
         rows = await ToolDefinitionRepository(db).search(org_id, q)

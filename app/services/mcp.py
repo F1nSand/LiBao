@@ -49,6 +49,22 @@ def _make_mcp_handler(server_id: str, cfg: McpConnConfig, tool_name: str):
     return handler
 
 
+def build_mcp_spec(server: McpServer, row: ToolDefinition, cfg: McpConnConfig) -> ToolSpec:
+    """从 DB 行重建 MCP spec（启动同步 T5）：handler 惰性绑定，raw 名从 mcp_tool_name 取。"""
+    return ToolSpec(
+        id=f"mc_{slugify(server.name)}_{slugify(row.name)}",
+        name=row.name,
+        description=row.description,
+        params_schema=row.params_schema,
+        enabled=False,  # 同步后由调用方 set_enabled 跟随 DB
+        sandbox=SandboxLevel.NONE,
+        tool_type=ToolType.EXECUTION,
+        mcp_source=row.mcp_source,
+        timeout_ms=row.timeout_ms,
+        handler=_make_mcp_handler(str(server.id), cfg, row.mcp_tool_name or row.name),
+    )
+
+
 class McpService:
     async def register(self, db: AsyncSession, user: User, req: Any) -> dict[str, Any]:
         kind, payload = parse_transport(req.url_or_command)
@@ -98,6 +114,7 @@ class McpService:
                 tool_type="execution",
                 enabled=False,  # 默认关闭原则（约束优先）
                 mcp_source=f"mcp:{server.id}",
+                mcp_tool_name=t.name,  # 原始工具名（重启重建 spec 时透传 call_tool）
             )
             spec = ToolSpec(
                 id=f"mc_{slugify(name)}_{tool_name}",

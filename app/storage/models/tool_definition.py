@@ -32,4 +32,5 @@ class ToolDefinition(BaseModel, Base):
     timeout_ms: Mapped[int] = mapped_column(Integer, default=30000, nullable=False)
     max_concurrency: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     mcp_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mcp_tool_name: Mapped[str | None] = mapped_column(String(255), nullable=True)  # MCP 原始工具名（重建 spec 用）
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)

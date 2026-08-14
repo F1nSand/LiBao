@@ -91,6 +91,7 @@ class ToolDefinitionRepository:
         timeout_ms: int = 30000,
         max_concurrency: int = 1,
         mcp_source: str | None = None,
+        mcp_tool_name: str | None = None,
     ) -> ToolDefinition:
         tool = ToolDefinition(
             org_id=org_id,
@@ -106,6 +107,7 @@ class ToolDefinitionRepository:
             timeout_ms=timeout_ms,
             max_concurrency=max_concurrency,
             mcp_source=mcp_source,
+            mcp_tool_name=mcp_tool_name,
             version=1,
         )
         self.session.add(tool)
