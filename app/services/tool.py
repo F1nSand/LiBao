@@ -17,7 +17,7 @@ from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
 from app.storage.repositories.tool_definition import ToolDefinitionRepository
 from app.tools import executor
-from app.tools.registry import get_by_name, patch_spec, set_enabled
+from app.tools.registry import get, get_by_name, patch_spec, set_enabled
 
 
 def resolve_name(tool_id: str) -> str:
@@ -37,7 +37,10 @@ class ToolService:
         return paged([serialize_tool_definition(t) for t in items], total, page, page_size)
 
     async def get_in_org(self, db: AsyncSession, org_id: uuid.UUID, tool_id: str) -> ToolDefinition:
-        row = await ToolDefinitionRepository(db).get_by_org_name(org_id, resolve_name(tool_id))
+        # spec.id（内置 tl_* / MCP mc_*）优先解析为 spec.name；无 spec 的 DB 工具走 tl_ 前缀
+        spec = get(tool_id)
+        name = spec.name if spec is not None else resolve_name(tool_id)
+        row = await ToolDefinitionRepository(db).get_by_org_name(org_id, name)
         if row is None:
             raise AppError(ERR_TOOL_NOT_FOUND, "工具不存在或无权访问")
         return row

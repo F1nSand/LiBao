@@ -36,3 +36,12 @@ class ToolToggleRequest(BaseModel):
 
 class ToolTestRequest(BaseModel):
     params: dict[str, Any] = {}
+
+
+class McpRegisterRequest(BaseModel):
+    """MCP 源注册（docs 03 §5.5 / FrontEnd McpRegisterRequest）。name 可选，缺省派生。"""
+
+    name: str | None = None
+    url_or_command: str  # 命令（stdio）或 http(s) URL
+    headers: dict[str, str] | None = None
+    enable: bool | None = None  # server 连接启用；工具本身默认关闭

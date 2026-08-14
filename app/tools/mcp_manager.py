@@ -122,6 +122,17 @@ class MCPManager:
         finally:
             await conn.close()
 
+    async def close_connection(self, server_id: str) -> None:
+        """注销/清理单源：关闭连接并移除熔断状态（重注册后重新计数）。"""
+        conn = self._connections.pop(server_id, None)
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception:  # noqa: BLE001  关闭尽力而为
+                pass
+        self._locks.pop(server_id, None)
+        self._breakers.pop(server_id, None)
+
     async def close_all(self) -> None:
         """关停/测试清理：关闭全部连接并清空状态。"""
         for conn in self._connections.values():

@@ -1,4 +1,4 @@
-"""工具路由（docs 03 §5.5）。CRUD/启停/测试/搜索；MCP 注册为 M2.5 接缝。"""
+"""工具路由（docs 03 §5.5）。CRUD/启停/测试/搜索 + MCP 源注册/列表/注销（M2.5）。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
@@ -6,7 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
-from app.api.schemas.tools import CreateToolRequest, ToolTestRequest, ToolToggleRequest, UpdateToolRequest
+from app.api.schemas.tools import (
+    CreateToolRequest,
+    McpRegisterRequest,
+    ToolTestRequest,
+    ToolToggleRequest,
+    UpdateToolRequest,
+)
+from app.services.mcp import McpService
 from app.services.serializers import serialize_tool_definition
 from app.services.tool import ToolService
 from app.storage.models.user import User
@@ -23,6 +30,35 @@ async def search_tools(
 ):
     hits = await ToolService().search(db, user.org_id, q)
     return ok(hits)
+
+
+# ---- MCP 源（M2.5）：register/list/unregister 同样须在 /tools/{tool_id} 之前 ----
+
+@router.post("/tools/mcp/register")
+async def register_mcp(
+    req: McpRegisterRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return ok(await McpService().register(db, user, req))
+
+
+@router.get("/tools/mcp")
+async def list_mcp_servers(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return ok(await McpService().list_servers(db, user.org_id))
+
+
+@router.delete("/tools/mcp/{server_id}")
+async def unregister_mcp(
+    server_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await McpService().unregister(db, user, server_id)
+    return ok()
 
 
 @router.get("/tools")

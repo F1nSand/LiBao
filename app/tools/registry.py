@@ -67,6 +67,13 @@ def get(tool_id: str) -> ToolSpec | None:
     return _REGISTRY.get(tool_id)
 
 
+def unregister(tool_id: str) -> None:
+    """移除注册（测试清理 / MCP 源注销时使用）。"""
+    spec = _REGISTRY.pop(tool_id, None)
+    if spec is not None:
+        _NAME_INDEX.pop(spec.name, None)
+
+
 def set_enabled(tool_id: str, enabled: bool) -> None:
     """启停同步桥（M2）：frozen dataclass 用 replace 换新 spec 写回注册表。
 

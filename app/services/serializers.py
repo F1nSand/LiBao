@@ -5,6 +5,7 @@ from typing import Any
 
 from app.storage.models.agent import AgentConfig, AgentVersion
 from app.storage.models.conversation import Conversation
+from app.storage.models.mcp_server import McpServer
 from app.storage.models.message import Message
 from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
@@ -89,6 +90,20 @@ def serialize_tool_definition(t: ToolDefinition) -> dict[str, Any]:
         "mcp_source": t.mcp_source,
         "idempotent": t.idempotent,
         "created_at": _dt(t.created_at),
+    }
+
+
+def serialize_mcp_server(s: McpServer, tool_count: int = 0) -> dict[str, Any]:
+    """MCP 源序列化（docs 03 §5.5 补充）。url_or_command 原样回显（command 或 url）。"""
+    return {
+        "id": str(s.id),
+        "name": s.name,
+        "transport": s.transport,
+        "url_or_command": s.command or s.url,
+        "headers": s.headers,
+        "enabled": s.enabled,
+        "tool_count": tool_count,
+        "created_at": _dt(s.created_at),
     }
 
 
