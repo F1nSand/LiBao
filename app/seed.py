@@ -60,23 +60,37 @@ async def _get_or_create_user(
     return user
 
 
-async def _get_or_create_tool(session: AsyncSession, org: Org) -> ToolDefinition:
-    stmt = select(ToolDefinition).where(ToolDefinition.name == "time_now", ToolDefinition.deleted_at.is_(None))
+async def _get_or_create_tool(
+    session: AsyncSession,
+    org: Org,
+    *,
+    name: str,
+    description: str,
+    params_schema: dict,
+    tool_type: str,
+    require_confirm: bool,
+    idempotent: bool,
+    timeout_ms: int = 5000,
+    max_concurrency: int = 10,
+) -> ToolDefinition:
+    stmt = select(ToolDefinition).where(
+        ToolDefinition.org_id == org.id, ToolDefinition.name == name, ToolDefinition.deleted_at.is_(None)
+    )
     tool = (await session.execute(stmt)).scalar_one_or_none()
     if tool is None:
         tool = ToolDefinition(
             org_id=org.id,
-            name="time_now",  # registry id 为 tl_time_now，name 为 LLM 侧函数名
-            description="获取当前时间。需要知道\"现在几点\"时使用，其他情况不要用。",
-            params_schema={"type": "object", "properties": {}, "required": []},
-            tool_type="perception",
+            name=name,  # registry id 为 tl_<name>，name 为 LLM 侧函数名
+            description=description,
+            params_schema=params_schema,
+            tool_type=tool_type,
             enabled=True,
-            require_confirm=False,
-            idempotent=True,
+            require_confirm=require_confirm,
+            idempotent=idempotent,
             sandbox="none",
             allowlist=None,
-            timeout_ms=5000,
-            max_concurrency=10,
+            timeout_ms=timeout_ms,
+            max_concurrency=max_concurrency,
             mcp_source=None,
             version=1,
         )
@@ -89,7 +103,9 @@ async def _get_or_create_tool(session: AsyncSession, org: Org) -> ToolDefinition
 
 
 async def _get_or_create_agent(session: AsyncSession, org: Org, tool_id: str) -> AgentConfig:
-    stmt = select(AgentConfig).where(AgentConfig.name == AGENT_NAME, AgentConfig.deleted_at.is_(None))
+    stmt = select(AgentConfig).where(
+        AgentConfig.org_id == org.id, AgentConfig.name == AGENT_NAME, AgentConfig.deleted_at.is_(None)
+    )
     agent = (await session.execute(stmt)).scalar_one_or_none()
     settings = get_settings()
     if agent is None:
@@ -140,12 +156,38 @@ async def main() -> None:
         org = await _get_or_create_org(session)
         for username, password, name, role in USERS:
             await _get_or_create_user(session, org, username, password, name, role)
-        tool = await _get_or_create_tool(session, org)
+        await _get_or_create_tool(
+            session,
+            org,
+            name="time_now",
+            description="获取当前时间。需要知道\"现在几点\"时使用，其他情况不要用。",
+            params_schema={"type": "object", "properties": {}, "required": []},
+            tool_type="perception",
+            require_confirm=False,
+            idempotent=True,
+        )
+        await _get_or_create_tool(
+            session,
+            org,
+            name="demo_notify",
+            description="发送一条通知消息。演示人工确认流程：发送为不可逆/对外副作用操作，需用户确认后执行。",
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "通知内容"},
+                    "channel": {"type": "string", "description": "发送渠道，默认 default"},
+                },
+                "required": ["message"],
+            },
+            tool_type="user_comms",
+            require_confirm=True,
+            idempotent=True,
+        )
         agent = await _get_or_create_agent(session, org, "tl_time_now")
         await _get_or_create_version(session, agent, "tl_time_now")
         await session.commit()
         print(
-            f"seed ok: org={org.id} users={len(USERS)} tool={tool.name} "
+            f"seed ok: org={org.id} users={len(USERS)} "
             f"agent={agent.name}(v{agent.current_version}, status={agent.status})"
         )
     await engine.dispose()
