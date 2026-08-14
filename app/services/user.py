@@ -21,4 +21,6 @@ class UserService:
         user = await self.get_by_username(db, username)
         if user is None or not verify_password(password, user.password_hash):
             return None
+        if not user.enabled:
+            return None  # 禁用账号不得登录（与 get_current_user 校验一致）
         return user

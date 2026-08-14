@@ -24,13 +24,13 @@ async def chat_stream(
     db: AsyncSession = Depends(get_db),
 ):
     conv_service = ConversationService()
+    # 先校验 agent（published + 同 org），避免越权请求在后续失败前残留孤儿会话
+    agent = await AgentService().get_published(db, req.agent_id, user.org_id)
     if req.conversation_id is None:
-        # conversation_id 为空 → 新建会话
-        conversation = await conv_service.create(db, user, req.agent_id, "新会话")
+        conversation = await conv_service.create(db, user, agent, "新会话")
     else:
         conversation = await conv_service.get_owned(db, req.conversation_id, user.id)
 
-    agent = await AgentService().get_published(db, req.agent_id, user.org_id)
     graph = request.app.state.graph
     trace_id = get_trace_id()
 

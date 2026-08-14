@@ -7,10 +7,10 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ERR_CONVERSATION_NOT_FOUND, AppError
-from app.services.serializers import serialize_message
+from app.services.serializers import serialize_conversation, serialize_message
+from app.storage.models.agent import AgentConfig
 from app.storage.models.conversation import Conversation
 from app.storage.models.user import User
-from app.storage.repositories.agent import AgentRepository
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
 
@@ -22,14 +22,11 @@ class ConversationService:
         total = await repo.count_by_user(user_id)
         from app.api.schemas.common import paged
 
-        return paged([c for c in items], total, page, page_size)
+        return paged([serialize_conversation(c) for c in items], total, page, page_size)
 
-    async def create(self, db: AsyncSession, user: User, agent_id: uuid.UUID, title: str) -> Conversation:
-        # Agent 必须是已发布的（对话侧约束）
-        agent = await AgentRepository(db).get_published(agent_id)
-        if agent is None:
-            raise AppError(40404, "Agent 不存在或未发布")
-        conv = await ConversationRepository(db).create(user_id=user.id, agent_id=agent_id, title=title)
+    async def create(self, db: AsyncSession, user: User, agent: AgentConfig, title: str) -> Conversation:
+        # 调用方负责校验 agent（published + 同 org，AgentService.get_published），此处不再重复查询
+        conv = await ConversationRepository(db).create(user_id=user.id, agent_id=agent.id, title=title)
         await db.commit()
         await db.refresh(conv)
         return conv

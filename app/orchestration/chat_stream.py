@@ -100,7 +100,10 @@ async def chat_stream_events(
             "tools": agent.tools or [],
             "max_steps": agent.max_steps,
         },
+        # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs
         "flags": {"steps": 0},
+        "tool_results": [],
+        "run_logs": [],
     }
     graph_config: dict[str, Any] = {
         "configurable": {
@@ -194,6 +197,7 @@ async def chat_stream_events(
         keepalive_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await producer_task
+            await keepalive_task
 
     if final_state is None:
         return

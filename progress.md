@@ -42,7 +42,11 @@
 - T12 完成：端到端 1-8 项全过 ✅ —— 后端 1-7（compose healthy/alembic/seed/uvicorn+health/login+信封/conversations+SSE chat+重启持久化）+ **第 8 项前端闭环**（2026-08-14 Playwright 无头浏览器实测：登录 → 选时间助手 → 发"现在几点？"→ time_now 工具卡 + 真实 DeepSeek 流式回答 → 刷新 → 从会话列表点开消息回放 ✓）
 - T13 完成：README.md（快速启动/架构/M1 机制/M2+ 接缝表/环境备注）
 - 环境备注：Docker Hub 国内不可达；本次用 daocloud 镜像一次性 pull + retag 到本地（未改 daemon.json）
-- **M1 全部任务完成** → 下一环节：review-test-simplify 收尾 gate
+- **M1 全部任务完成** → review-test-simplify 收尾 gate：
+  - Gate1 Test：pytest 10 项全过 ✅
+  - Gate2 Review：两 agent 发现 9 项（多轮 tool_results/run_logs 残留 · 会话列表未序列化 · 401 非信封/坏 sub 500 · 登录未校验 enabled · 种子工具名 tl_time_now vs time_now · 工具越权执行 · JWT 默认密钥 · 孤儿会话 · keepalive 未 await）——全部修复并实测验证 ✅
+  - Gate3 Simplify：4 agent 去重 6 项（create 复用已校验 agent 消除双查询 · agent_can_use 共享谓词 · compute_prefix_hash 抽 core/prefix.py · 版本快照赋值上提 · 轮次重置移 route_node · UUID 直比）；跳过 2 项（uvicorn LOOP_FACTORIES patch 为文档化运行命令所需；JWT validator 无漂移）
+  - 最终回归：ruff clean + pytest 10/10 + E2E（conversations/chat/持久化/坏 agent 40404 无孤儿）✅
 
 ## 恢复指引
 重启后恢复：读本账本 → `git log` 确认提交 → 从 T4 剩余项继续。

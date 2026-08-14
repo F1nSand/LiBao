@@ -11,26 +11,7 @@ import sys
 import uuid
 from contextlib import asynccontextmanager
 
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-
-def selector_loop_factory(use_subprocess: bool = False) -> type[asyncio.AbstractEventLoop]:
-    """uvicorn loop 工厂：Windows 上强制 SelectorEventLoop（psycopg async 不兼容 Proactor）。"""
-    return asyncio.SelectorEventLoop
-
-
-if sys.platform == "win32":
-    try:
-        import uvicorn.config as _uvicorn_config
-
-        # uvicorn 用自身 loop 工厂（忽略事件循环策略）；覆盖 auto/asyncio 指向 selector，
-        # 使 `uvicorn app.api.main:app` 无需附加参数即可运行（psycopg async 硬性要求）。
-        _uvicorn_config.LOOP_FACTORIES["auto"] = "app.api.main:selector_loop_factory"
-        _uvicorn_config.LOOP_FACTORIES["asyncio"] = "app.api.main:selector_loop_factory"
-    except ImportError:
-        pass
-
+import uvicorn.config as _uvicorn_config
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,6 +26,21 @@ from app.orchestration.checkpointer import PostgresCheckpointer
 from app.orchestration.graph import build_graph
 from app.storage.db import init_db
 from app.tools.builtin import register_builtin_tools
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+def selector_loop_factory(use_subprocess: bool = False) -> type[asyncio.AbstractEventLoop]:
+    """uvicorn loop 工厂：Windows 上强制 SelectorEventLoop（psycopg async 不兼容 Proactor）。"""
+    return asyncio.SelectorEventLoop
+
+
+if sys.platform == "win32":
+    # uvicorn 用自身 loop 工厂（忽略事件循环策略）；覆盖 auto/asyncio 指向 selector，
+    # 使 `uvicorn app.api.main:app` 无需附加参数即可运行（psycopg async 硬性要求）。
+    _uvicorn_config.LOOP_FACTORIES["auto"] = "app.api.main:selector_loop_factory"
+    _uvicorn_config.LOOP_FACTORIES["asyncio"] = "app.api.main:selector_loop_factory"
 
 logger = logging.getLogger(__name__)
 

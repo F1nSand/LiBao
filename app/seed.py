@@ -6,37 +6,29 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.prefix import compute_prefix_hash
 from app.core.security import hash_password
 from app.storage.base import Base  # noqa: F401  确保 Base.metadata 已注册
 from app.storage.db import init_db
 from app.storage.models import AgentConfig, AgentVersion, Org, ToolDefinition, User
-
-
-def _prefix_hash(model: str, system_prompt: str, tools: list[str]) -> str:
-    """静态前缀缓存键（docs 01 §4.1）。字节稳定：字段排序 + sort_keys。
-
-    注：T9 的 context_builder.compute_prefix_hash 应与此保持同一算法（M1 未强校验，仅要求非空且稳定）。
-    """
-    canonical = json.dumps(
-        {"model": model, "system_prompt": system_prompt, "tools": sorted(tools)},
-        sort_keys=True,
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
 
 USERS = [
     ("admin", "admin123", "管理员", "admin"),
     ("dev", "dev123", "开发者", "developer"),
     ("viewer", "viewer123", "访客", "viewer"),
 ]
+
+# LLM 侧函数名为 time_now（registry id 是 tl_time_now）——提示词里写模型实际见到的名字
+AGENT_NAME = "时间助手"
+AGENT_SYSTEM_PROMPT = (
+    "你是时间助手，只回答与时间相关的问题。"
+    "需要知道当前时间时使用 time_now 工具，再基于工具结果回答。"
+)
 
 
 async def _get_or_create_org(session: AsyncSession) -> Org:
@@ -97,18 +89,15 @@ async def _get_or_create_tool(session: AsyncSession, org: Org) -> ToolDefinition
 
 
 async def _get_or_create_agent(session: AsyncSession, org: Org, tool_id: str) -> AgentConfig:
-    stmt = select(AgentConfig).where(AgentConfig.name == "时间助手", AgentConfig.deleted_at.is_(None))
+    stmt = select(AgentConfig).where(AgentConfig.name == AGENT_NAME, AgentConfig.deleted_at.is_(None))
     agent = (await session.execute(stmt)).scalar_one_or_none()
     settings = get_settings()
     if agent is None:
         agent = AgentConfig(
             org_id=org.id,
-            name="时间助手",
+            name=AGENT_NAME,
             model=settings.llm_model,
-            system_prompt=(
-                "你是时间助手，只回答与时间相关的问题。"
-                "需要知道当前时间时使用 tl_time_now 工具，再基于工具结果回答。"
-            ),
+            system_prompt=AGENT_SYSTEM_PROMPT,
             graph_template="single",
             skills=[],
             tools=[tool_id],
@@ -119,8 +108,9 @@ async def _get_or_create_agent(session: AsyncSession, org: Org, tool_id: str) ->
         session.add(agent)
         await session.flush()
     else:
-        # 幂等：确保已发布
+        # 幂等：确保目标态（重跑可修正旧版本种子）
         agent.status = "published"
+        agent.system_prompt = AGENT_SYSTEM_PROMPT
         if tool_id not in (agent.tools or []):
             agent.tools = [tool_id] + list(agent.tools or [])
     return agent
@@ -132,16 +122,13 @@ async def _get_or_create_version(session: AsyncSession, agent: AgentConfig, tool
     )
     ver = (await session.execute(stmt)).scalar_one_or_none()
     if ver is None:
-        ver = AgentVersion(
-            agent_id=agent.id,
-            version=1,
-            system_prompt=agent.system_prompt,
-            model=agent.model,
-            tools=[tool_id],
-            skills=[],
-            prefix_hash=_prefix_hash(agent.model, agent.system_prompt, [tool_id]),
-        )
+        ver = AgentVersion(agent_id=agent.id, version=1, skills=[])
         session.add(ver)
+    # 幂等：种子引导数据非真实发布版本，每次重跑刷新快照保持一致（赋值只写一次）
+    ver.system_prompt = agent.system_prompt
+    ver.model = agent.model
+    ver.tools = [tool_id]
+    ver.prefix_hash = compute_prefix_hash(agent.model, agent.system_prompt, [tool_id])
     if agent.current_version < 1:
         agent.current_version = 1
     return ver

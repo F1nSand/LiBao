@@ -9,7 +9,7 @@ import uuid
 from collections.abc import AsyncIterator
 
 import jwt
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,21 +35,26 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: AsyncSession = Depends(get_db),
 ):
-    """校验 JWT 并加载当前用户；失败抛 HTTP 401（detail=错误码数字）。"""
+    """校验 JWT 并加载当前用户；失败抛 AppError(40101)，全局处理器返回信封 {code,message,data,trace_id}。"""
     from app.core.security import decode_token
     from app.services.user import UserService
 
     if credentials is None:
-        raise HTTPException(status_code=401, detail=str(ERR_UNAUTHORIZED))
+        raise AppError(ERR_UNAUTHORIZED, "未提供认证凭证")
     try:
         payload = decode_token(credentials.credentials)
     except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail=str(ERR_UNAUTHORIZED)) from None
+        raise AppError(ERR_UNAUTHORIZED, "认证凭证无效或已过期") from None
+
+    try:
+        user_id = uuid.UUID(payload["sub"])
+    except (KeyError, TypeError, ValueError):
+        raise AppError(ERR_UNAUTHORIZED, "认证凭证无效") from None
 
     service = UserService()
-    user = await service.get_by_id(db, uuid.UUID(payload["sub"]))
-    if user is None or not getattr(user, "enabled", True) or getattr(user, "deleted_at", None) is not None:
-        raise HTTPException(status_code=401, detail=str(ERR_UNAUTHORIZED))
+    user = await service.get_by_id(db, user_id)
+    if user is None or not user.enabled or user.deleted_at is not None:
+        raise AppError(ERR_UNAUTHORIZED, "认证凭证无效或账号已禁用")
     return user
 
 

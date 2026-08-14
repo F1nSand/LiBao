@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
 from app.api.schemas.conversations import CreateConversationRequest
+from app.services.agent import AgentService
 from app.services.conversation import ConversationService
 from app.services.serializers import serialize_conversation
 from app.storage.models.user import User
@@ -33,7 +34,8 @@ async def create_conversation(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    conv = await ConversationService().create(db, user, req.agent_id, req.title)
+    agent = await AgentService().get_published(db, req.agent_id, user.org_id)
+    conv = await ConversationService().create(db, user, agent, req.title)
     return ok(serialize_conversation(conv))
 
 

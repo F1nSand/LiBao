@@ -12,4 +12,5 @@ async def route_node(state: AgentState, config: Optional[RunnableConfig] = None)
     flags = dict(state.get("flags", {}))
     flags.setdefault("steps", 0)
     flags.setdefault("status", "running")
-    return {"flags": flags}
+    # 轮次边界：重置 LastValue 轮次通道（跨轮 checkpoint 不残留上轮 tool_results/run_logs）
+    return {"flags": flags, "tool_results": [], "run_logs": []}

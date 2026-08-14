@@ -11,7 +11,7 @@ from langchain_core.runnables import RunnableConfig
 
 from app.orchestration.state_schema import AgentState
 from app.tools import executor
-from app.tools.registry import get, get_by_name
+from app.tools.registry import agent_can_use, get, get_by_name
 
 
 async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] = None) -> dict[str, Any]:  # noqa: UP045  LangGraph 需 Optional 形式
@@ -21,10 +21,13 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
     results: list[dict[str, Any]] = []
     run_logs: list[dict[str, Any]] = []
 
+    # 授权谓词与 acis_for_tools 共用 agent_can_use（单一不变量）
+    agent_tool_ids = set(state.get("agent_config", {}).get("tools", []) or [])
     for position, tc in enumerate(last.tool_calls or []):
         spec = get_by_name(tc["name"]) or get(tc["name"])
-        if spec is None:
-            content = f"未知工具: {tc['name']}"
+        # 授权校验：只执行 agent 启用集内且 enabled 的工具（防模型幻觉/上下文投毒调用越权工具）
+        if not agent_can_use(spec, agent_tool_ids):
+            content = f"未知或未启用工具: {tc['name']}"
             tool_msgs.append(ToolMessage(content=content, tool_call_id=tc["id"]))
             results.append(
                 {

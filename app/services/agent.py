@@ -23,13 +23,13 @@ class AgentService:
 
     async def get_in_org(self, db: AsyncSession, agent_id: uuid.UUID, org_id: uuid.UUID) -> AgentConfig:
         agent = await AgentRepository(db).get_by_id(agent_id)
-        if agent is None or str(agent.org_id) != str(org_id) or agent.deleted_at is not None:
+        if agent is None or agent.org_id != org_id or agent.deleted_at is not None:
             raise AppError(ERR_AGENT_NOT_FOUND, "Agent 不存在或无权访问")
         return agent
 
     async def get_published(self, db: AsyncSession, agent_id: uuid.UUID, org_id: uuid.UUID) -> AgentConfig:
         agent = await AgentRepository(db).get_published(agent_id)
-        if agent is None or str(agent.org_id) != str(org_id):
+        if agent is None or agent.org_id != org_id:
             raise AppError(ERR_AGENT_NOT_FOUND, "Agent 不存在或未发布")
         return agent
 

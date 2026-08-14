@@ -7,7 +7,7 @@ acis() 按 id 排序输出，保证静态前缀字节稳定。
 from __future__ import annotations
 
 import enum
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -70,6 +70,14 @@ def get_by_name(name: str) -> ToolSpec | None:
         if spec.name == name:
             return spec
     return None
+
+
+def agent_can_use(spec: ToolSpec | None, tool_ids: Iterable[str]) -> bool:
+    """授权谓词：agent 只能执行其启用集内且 enabled 的工具。
+
+    ACI 绑定（acis_for_tools）与执行守卫（tool_execute）共用此单一不变量，防两处漂移。
+    """
+    return spec is not None and spec.id in tool_ids and spec.enabled
 
 
 def all_tools() -> list[ToolSpec]:
