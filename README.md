@@ -5,7 +5,17 @@ M0（地基）+ M1（最小闭环）实现。Python 3.12 + FastAPI + LangGraph +
 
 ## 快速启动
 
-前置：Docker Desktop（提供 db/redis）、Python 3.12（uv 管理）、LLM 可用（DeepSeek key 或 Ollama）。
+前置：Docker Desktop（提供 db/redis）、Python 3.12（uv 管理）、LLM 可用（DeepSeek key 或 Ollama，见 `.env`）。
+
+### 一键启动（推荐）
+
+```bash
+bash start.sh            # git-bash；Windows 也可双击 start.cmd
+```
+
+自动完成：db/redis 拉起（等待 healthy）→ `alembic upgrade head` + 幂等种子 → 后端 `:8000` → 前端 `:5173`（`VITE_USE_MOCK=false` 走真实后端）。Ctrl+C 全部停止。已运行的服务会跳过。
+
+### 手动分步
 
 ```bash
 # 1. 基础设施（首次会拉镜像；国内网络用镜像一次性 pull+retag，见文末「环境备注」）
@@ -27,6 +37,8 @@ curl localhost:8000/api/v1/system/health                     # {code:0,...}
 cd ../FrontEnd && VITE_USE_MOCK=false npm run dev            # http://localhost:5173
 # admin/admin123 登录 → 选「时间助手」→ 发「现在几点？」→ 流式输出 + time_now 工具卡 → 刷新页面消息回放
 ```
+
+**前后端连接**：前端 vite dev（`VITE_USE_MOCK=false`）把 `/api` 代理到 `http://localhost:8000`；后端 CORS 已放行 `http://localhost:5173`。浏览器只开 `http://localhost:5173`。
 
 测试：`uv run pytest tests/`（工具/编排/SSE 序列单测 + 需 DB 的集成测试，DB 不可达自动跳过）。
 

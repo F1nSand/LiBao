@@ -47,6 +47,7 @@
   - Gate2 Review：两 agent 发现 9 项（多轮 tool_results/run_logs 残留 · 会话列表未序列化 · 401 非信封/坏 sub 500 · 登录未校验 enabled · 种子工具名 tl_time_now vs time_now · 工具越权执行 · JWT 默认密钥 · 孤儿会话 · keepalive 未 await）——全部修复并实测验证 ✅
   - Gate3 Simplify：4 agent 去重 6 项（create 复用已校验 agent 消除双查询 · agent_can_use 共享谓词 · compute_prefix_hash 抽 core/prefix.py · 版本快照赋值上提 · 轮次重置移 route_node · UUID 直比）；跳过 2 项（uvicorn LOOP_FACTORIES patch 为文档化运行命令所需；JWT validator 无漂移）
   - 最终回归：ruff clean + pytest 10/10 + E2E（conversations/chat/持久化/坏 agent 40404 无孤儿）✅
+- 追加：start.sh + start.cmd 一键启动（基础设施/迁移/种子/后端/前端），实测两端就绪 + 代理连通 ✅；README 已更新
 
 ## 恢复指引
 重启后恢复：读本账本 → `git log` 确认提交 → 从 T4 剩余项继续。
