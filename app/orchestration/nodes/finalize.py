@@ -23,7 +23,8 @@ def _assemble_tool_calls(state: AgentState) -> list[dict[str, Any]]:
                 "input": r.get("input"),
                 "output": r.get("output"),
                 "ok": r.get("ok", False),
-                "status": "done" if r.get("ok", False) else "error",  # FrontEnd ToolCallRecord 读 status
+                # FrontEnd ToolCallRecord 读 status；透传 cancelled（用户拒绝分支）
+                "status": r.get("status") or ("done" if r.get("ok", False) else "error"),
                 "duration_ms": r.get("duration_ms", 0),
             }
         )

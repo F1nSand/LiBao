@@ -1,6 +1,9 @@
 """tool_execute 节点（docs 01 §3.1/§7.3）。执行模型发起的工具调用 → ToolMessage + tool_results。
 
-结果 shape 对齐 docs 04 §3.2 message.tool_calls：{tool_call_id, tool_name, position, input, output, ok, duration_ms}。
+M2：require_confirm 工具 → interrupt() 等待人工确认（docs 01 §3.4）——恢复后节点从头重执行，
+interrupt() 返回 {approved: bool}；拒绝分支不执行，写 cancelled ToolMessage，LLM 接续。
+每节点每轮只确认第一个 require_confirm 工具（规避 LangGraph 多 interrupt 按 id 映射的复杂度，文档化限制）。
+结果 shape 对齐 docs 04 §3.2 message.tool_calls（含 status：done/error/cancelled，前端读此字段）。
 """
 from __future__ import annotations
 
@@ -8,6 +11,7 @@ from typing import Any, Optional
 
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.types import interrupt
 
 from app.orchestration.state_schema import AgentState
 from app.tools import executor
@@ -20,6 +24,7 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
     tool_msgs: list[ToolMessage] = []
     results: list[dict[str, Any]] = []
     run_logs: list[dict[str, Any]] = []
+    confirmed_once = False
 
     # 授权谓词与 acis_for_tools 共用 agent_can_use（单一不变量）
     agent_tool_ids = set(state.get("agent_config", {}).get("tools", []) or [])
@@ -37,10 +42,54 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                     "input": tc.get("args", {}),
                     "output": None,
                     "ok": False,
+                    "status": "error",
                     "duration_ms": 0,
                 }
             )
             continue
+
+        # M2：预检-确认两段式（docs 01 §7.3 层③）——不可逆操作需人工确认
+        if spec.require_confirm and not confirmed_once:
+            confirmed_once = True
+            decision = interrupt(
+                {
+                    "node_id": "tool_execute",
+                    "tool_call_id": tc["id"],
+                    "tool_name": spec.name,
+                    "input": tc.get("args", {}),
+                    "reason": f"工具 {spec.name} 为危险/不可逆操作，需人工确认后执行",
+                    "confirm_required": True,
+                }
+            )
+            approved = bool((decision or {}).get("approved"))
+            if not approved:
+                content = f"用户已取消对工具 {spec.name} 的调用。"
+                tool_msgs.append(ToolMessage(content=content, tool_call_id=tc["id"]))
+                results.append(
+                    {
+                        "tool_call_id": tc["id"],
+                        "tool_name": spec.name,
+                        "position": position,
+                        "input": tc.get("args", {}),
+                        "output": None,
+                        "ok": False,
+                        "status": "cancelled",
+                        "summary": "",
+                        "duration_ms": 0,
+                    }
+                )
+                run_logs.append(
+                    {
+                        "node": "tool_execute",
+                        "type": "tool",
+                        "trace_id": trace_id,
+                        "input": tc.get("args", {}),
+                        "output": {"summary": "用户取消", "ok": False},
+                        "duration_ms": 0,
+                        "status": "cancelled",
+                    }
+                )
+                continue
 
         result = await executor.execute(spec, tc.get("args") or {})
         results.append(
@@ -52,6 +101,7 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                 "output": result.output,
                 "ok": result.ok,
                 "summary": result.summary,
+                "status": "done" if result.ok else "error",
                 "duration_ms": result.duration_ms,
             }
         )
@@ -65,7 +115,8 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                 "input": tc.get("args", {}),
                 "output": {"summary": result.summary[:500], "ok": result.ok, "error": result.error},
                 "duration_ms": result.duration_ms,
-                "status": "ok" if result.ok else "error",
+                # docs 04 run_log.status：retried（重试后成功）/ ok / error
+                "status": "retried" if result.retries > 0 and result.ok else ("ok" if result.ok else "error"),
             }
         )
 

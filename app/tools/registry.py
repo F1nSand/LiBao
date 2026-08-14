@@ -36,6 +36,7 @@ class ToolSpec:
     mcp_source: str | None = None
     timeout_ms: int = 30000
     max_concurrency: int = 1
+    max_retries: int = 0  # 失败静默重试次数（docs 01 §5.4；0=不重试）
     allowlist: list[str] | None = None
     handler: Callable[..., Any] | None = None
 
