@@ -108,13 +108,13 @@ def serialize_task(t: Task) -> dict[str, Any]:
     }
 
 
-def serialize_agent_version(ver: AgentVersion) -> dict[str, Any]:
+def serialize_agent_version(ver: AgentVersion, name: str = "") -> dict[str, Any]:
     return {
         "id": str(ver.id),
         "agent_id": str(ver.agent_id),
         "version": ver.version,
         "config": {
-            "name": "",
+            "name": name,
             "model": ver.model,
             "system_prompt": ver.system_prompt,
             "skills": ver.skills or [],

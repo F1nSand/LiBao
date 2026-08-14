@@ -276,3 +276,79 @@ async def resume_stream_events(
         on_final=on_final,
     ):
         yield frame
+
+
+async def agent_invoke_events(
+    *,
+    db: AsyncSession,
+    graph: Any,
+    agent: AgentConfig,
+    user: User,
+    content: str,
+    trace_id: str,
+    model_override: Any = None,
+) -> AsyncIterator[str]:
+    """Agent 试跑（docs 03 §5.4 invoke）：轻量路径——不建会话、不落消息，thread_id=uuid4()。
+
+    中断同样建 Task 承接（conversation_id=None），resume 走任务端点续流。
+    """
+    seq = 0
+
+    def emit(event_type: str, payload: dict[str, Any]) -> str:
+        nonlocal seq
+        seq += 1
+        return format_sse(make_event(event_type, payload, seq))
+
+    thread_id = str(uuid.uuid4())
+    assistant_msg_id = uuid.uuid4()
+    yield emit(
+        "message_start",
+        {
+            "message_id": str(assistant_msg_id),
+            "agent_id": str(agent.id),
+            "conversation_id": thread_id,  # 仅展示用（无持久化会话）
+        },
+    )
+
+    graph_config = _graph_config(
+        thread_id=thread_id,
+        trace_id=trace_id,
+        assistant_msg_id=assistant_msg_id,
+        model_override=model_override,
+    )
+
+    async def on_interrupt(value: dict[str, Any]) -> str:
+        task = await TaskService().create_waiting_confirm(
+            db,
+            user=user,
+            agent_id=agent.id,
+            input={"message": content},
+            value=value,
+            conversation_id=None,
+            thread_id=thread_id,
+        )
+        return emit(
+            "interrupt",
+            {
+                "node_id": value.get("node_id"),
+                "payload": value,
+                "confirm_required": True,
+                "task_id": str(task.id),
+            },
+        )
+
+    async def on_final(final_state: dict[str, Any]) -> dict[str, Any]:
+        # 不落库：message = final_message 快照（AgentTestRunner 无持久化场景）
+        fm = final_state.get("final_message", {}) or {}
+        totals = final_state.get("totals") or {}
+        return _done_payload(assistant_msg_id, fm.get("token_usage") or totals, fm)
+
+    async for frame in stream_graph_events(
+        graph=graph,
+        initial=_agent_state(agent, content),
+        graph_config=graph_config,
+        emit=emit,
+        on_interrupt=on_interrupt,
+        on_final=on_final,
+    ):
+        yield frame

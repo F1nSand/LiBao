@@ -16,8 +16,8 @@ T1-T13 + review-test-simplify gate 全部完成；start.cmd/start.sh 一键启�
 - [x] T4 执行器重试/幂等/沙盒守卫
 - [x] T5 tool_execute 节点 require_confirm 分支 + finalize 透传 cancelled
 - [x] T6 流式核心抽取（stream_core）+ chat 中断落任务 + resume_stream_events ★
-- [ ] T7 任务服务 + 后台运行器（task_run）+ 任务路由（双轨 resume + events 回放/live-tail）
-- [ ] T8 Agent 写接口 + 版本化 + invoke
+- [x] T7 任务服务 + 后台运行器（task_run）+ 任务路由（双轨 resume + events 回放/live-tail）
+- [x] T8 Agent 写接口 + 版本化 + invoke
 - [ ] T9 内置确认演示工具（tl_demo_notify）+ seed
 - [ ] T10 收尾 gate（ruff + 全量测试 ≥20 + README 接缝表 + 端到端验证）
 
@@ -28,4 +28,6 @@ T1-T13 + review-test-simplify gate 全部完成；start.cmd/start.sh 一键启�
 - T4 完成：executor 重试循环（指数退避+抖动，仅 handler 异常可重试）+ 幂等缓存（fingerprint/TTL/上限）+ 沙盒守卫 + ToolSpec.max_retries；pytest 8 项 ✅
 - T5 完成：tool_execute require_confirm → interrupt(payload) → approved/denied 分支 + finalize 透传 status；图级测试 3 项（触发/续跑 done/拒绝 cancelled）✅；总测试 27 项
 - T6 完成：stream_core.py 共享循环（tool_call.require_confirm 取自 spec / 跳过 cancelled tool_result / __interrupt__ 分支）+ chat_stream 重构 + resume_stream_events（UUID 转换/无会话守卫）；流层测试 3 项（中断落 Task/续流 done/拒绝 cancelled）+ chat_stream 帧序回归不变；总测试 30 项 ✅
-- T7 进行中：任务服务补全 + 后台运行器 + 任务路由
+- T7 完成：TaskService（状态机/live-tail/resume_precheck I8）+ TaskRepository + task_run.py 后台运行器 + /tasks 路由（双轨 resume + events 回放/live-tail，终态回放即关流）；pytest 5 项 ✅
+- T8 完成：AgentService create/update/publish/unpublish/soft_delete/_snapshot（compute_prefix_hash）+ /agents 写路由 + invoke（agent_invoke_events 轻量路径）+ serialize_agent_version name；pytest 5 项 ✅；总测试 40 项
+- T9 进行中：tl_demo_notify 演示工具 + seed
