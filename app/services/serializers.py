@@ -6,6 +6,7 @@ from typing import Any
 from app.storage.models.agent import AgentConfig, AgentVersion
 from app.storage.models.conversation import Conversation
 from app.storage.models.message import Message
+from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
 from app.tools.registry import get_by_name
@@ -88,6 +89,22 @@ def serialize_tool_definition(t: ToolDefinition) -> dict[str, Any]:
         "mcp_source": t.mcp_source,
         "idempotent": t.idempotent,
         "created_at": _dt(t.created_at),
+    }
+
+
+def serialize_task(t: Task) -> dict[str, Any]:
+    """任务序列化（docs 03 §5.3）。error 序列化为 message 字符串（前端 Task.error?: string）。"""
+    return {
+        "id": str(t.id),
+        "agent_id": str(t.agent_id),
+        "status": t.status,
+        "progress": t.progress,
+        "input": t.input,
+        "output": t.output,
+        "pending_confirm": t.pending_confirm,
+        "error": (t.error or {}).get("message") if t.error else None,
+        "created_at": _dt(t.created_at),
+        "updated_at": _dt(t.updated_at),
     }
 
 

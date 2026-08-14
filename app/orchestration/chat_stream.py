@@ -1,44 +1,33 @@
-"""Graph→SSE 桥（docs 03 §3.3，T10 M1 核心）。
+"""Graph→SSE 桥（docs 03 §3.3，M1 核心 + M2 interrupt/resume）。
 
-职责（docs 01 §5.2）：graph.astream(stream_mode=["messages","updates","values"]) → SSE 事件信封；
+职责（docs 01 §5.2）：graph.astream → SSE 事件信封（共享循环在 stream_core.py）；
 消息持久化在此（节点保持无 DB）：开头落用户消息，流结束落 assistant 最终消息 + run_logs + last_message_at。
-keepalive 注释 15s；seq 单调从 1 起；done/error 后关闭流；客户端断开 → 取消 producer（中止 graph）。
+M2：require_confirm 工具 → interrupt 事件（自动建 Task 承接）→ POST /tasks/{id}/resume → resume_stream_events 续流。
 """
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ERR_LLM_FAILURE
 from app.core.events import format_sse, make_event
+from app.orchestration.stream_core import stream_graph_events
+from app.services.task import TaskService
 from app.storage.models.agent import AgentConfig
 from app.storage.models.conversation import Conversation
 from app.storage.models.message import Message
+from app.storage.models.task import Task
 from app.storage.models.user import User
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.run_log import RunLogRepository
 
 logger = logging.getLogger(__name__)
-
-KEEPALIVE_INTERVAL = 15
-
-
-def _chunk_text(chunk: Any) -> str:
-    """从 AIMessageChunk 提取 text（兼容 content 为 str 或 content blocks 列表；跳过 thinking 块）。"""
-    content = getattr(chunk, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
-    return ""
 
 
 def _message_dict(msg: Message) -> dict[str, Any]:
@@ -51,6 +40,46 @@ def _message_dict(msg: Message) -> dict[str, Any]:
         "attachments": msg.attachments or [],
         "trace_id": msg.trace_id,
         "created_at": msg.created_at.isoformat() if msg.created_at else None,
+    }
+
+
+def _agent_state(agent: AgentConfig, content: str) -> dict[str, Any]:
+    return {
+        "messages": [HumanMessage(content=content)],
+        "agent_config": {
+            "model": agent.model,
+            "system_prompt": agent.system_prompt,
+            "tools": agent.tools or [],
+            "max_steps": agent.max_steps,
+        },
+        # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs
+        "flags": {"steps": 0},
+        "tool_results": [],
+        "run_logs": [],
+    }
+
+
+def _graph_config(
+    *, thread_id: str, trace_id: str, assistant_msg_id: uuid.UUID, model_override: Any = None
+) -> dict[str, Any]:
+    cfg: dict[str, Any] = {
+        "configurable": {
+            "thread_id": thread_id,
+            "trace_id": trace_id,
+            "assistant_msg_id": str(assistant_msg_id),
+        }
+    }
+    if model_override is not None:
+        cfg["configurable"]["model"] = model_override
+    return cfg
+
+
+def _done_payload(assistant_msg_id: uuid.UUID, totals: dict[str, Any], message: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "message_id": str(assistant_msg_id),
+        "token_usage": totals,
+        "cost": totals.get("cost"),
+        "message": message,
     }
 
 
@@ -92,140 +121,158 @@ async def chat_stream_events(
         },
     )
 
-    initial: dict[str, Any] = {
-        "messages": [HumanMessage(content=content)],
-        "agent_config": {
-            "model": agent.model,
-            "system_prompt": agent.system_prompt,
-            "tools": agent.tools or [],
-            "max_steps": agent.max_steps,
-        },
-        # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs
-        "flags": {"steps": 0},
-        "tool_results": [],
-        "run_logs": [],
-    }
-    graph_config: dict[str, Any] = {
-        "configurable": {
-            "thread_id": str(conversation.id),
-            "trace_id": trace_id,
-            "assistant_msg_id": str(assistant_msg_id),
-        }
-    }
-    if model_override is not None:
-        graph_config["configurable"]["model"] = model_override
-
-    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
-
-    async def producer() -> None:
-        try:
-            async for item in graph.astream(initial, graph_config, stream_mode=["messages", "updates", "values"]):
-                await queue.put(("item", item))
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("chat stream graph failed")
-            await queue.put(("graph_error", exc))
-        finally:
-            await queue.put(("eof", None))
-
-    async def keepalive() -> None:
-        try:
-            while True:
-                await asyncio.sleep(KEEPALIVE_INTERVAL)
-                await queue.put(("keepalive", None))
-        except asyncio.CancelledError:
-            pass
-
-    producer_task = asyncio.create_task(producer())
-    keepalive_task = asyncio.create_task(keepalive())
-    final_state: dict[str, Any] | None = None
-    try:
-        while True:
-            kind, payload = await queue.get()
-            if kind == "keepalive":
-                yield ": keepalive\n\n"
-                continue
-            if kind == "eof":
-                break
-            if kind == "graph_error":
-                yield emit("error", {"code": ERR_LLM_FAILURE, "message": str(payload), "retryable": False})
-                return
-
-            mode, item = payload
-            if mode == "messages":
-                chunk, meta = item
-                if meta.get("langgraph_node") == "agent_execute":
-                    text = _chunk_text(chunk)
-                    if text:
-                        yield emit("token", {"text": text})
-            elif mode == "updates":
-                for node, update in item.items():
-                    if node == "agent_execute":
-                        for m in update.get("messages", []):
-                            for tc in getattr(m, "tool_calls", []) or []:
-                                yield emit(
-                                    "tool_call",
-                                    {
-                                        "tool_call_id": tc["id"],
-                                        "tool_name": tc["name"],
-                                        "input": tc.get("args", {}),
-                                        "require_confirm": False,
-                                    },
-                                )
-                    elif node == "tool_execute":
-                        for r in update.get("tool_results", []):
-                            yield emit(
-                                "tool_result",
-                                {
-                                    "tool_call_id": r.get("tool_call_id"),
-                                    "tool_name": r.get("tool_name"),
-                                    "ok": r.get("ok"),
-                                    "summary": r.get("summary", ""),
-                                    "structured": r.get("output"),
-                                    "placeholder": False,
-                                    "job_ref": None,
-                                    "duration_ms": r.get("duration_ms", 0),
-                                },
-                            )
-                    elif node == "context_update":
-                        yield emit("status", {"status": "finalizing", "context_metrics": None})
-            elif mode == "values":
-                final_state = item
-    finally:
-        producer_task.cancel()
-        keepalive_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await producer_task
-            await keepalive_task
-
-    if final_state is None:
-        return
-
-    # ---- ② 流结束：持久化 assistant 最终消息 + run_logs + last_message_at ----
-    fm = final_state.get("final_message", {}) or {}
-    totals = final_state.get("totals") or {}
-    assistant_msg = await msg_repo.create(
-        conversation_id=conversation.id,
-        role="assistant",
-        content=fm.get("content", ""),
-        tool_calls=fm.get("tool_calls", []),
-        token_usage=fm.get("token_usage") or totals,
-        parent_id=user_msg.id,
+    graph_config = _graph_config(
+        thread_id=str(conversation.id),
         trace_id=trace_id,
+        assistant_msg_id=assistant_msg_id,
+        model_override=model_override,
     )
-    assistant_msg.id = assistant_msg_id
-    for log in final_state.get("run_logs", []):
-        await RunLogRepository(db).create(session_id=conversation.id, **log)
-    await ConversationRepository(db).touch_last_message(conversation.id)
-    await db.commit()
 
-    yield emit(
-        "done",
-        {
-            "message_id": str(assistant_msg_id),
-            "token_usage": fm.get("token_usage") or totals,
-            "cost": totals.get("cost"),
-            "message": _message_dict(assistant_msg),
-        },
+    async def on_interrupt(value: dict[str, Any]) -> str:
+        task = await TaskService().create_waiting_confirm(
+            db,
+            user=user,
+            agent_id=agent.id,
+            input={"message": content},
+            value=value,
+            conversation_id=conversation.id,
+            thread_id=str(conversation.id),
+        )
+        return emit(
+            "interrupt",
+            {
+                "node_id": value.get("node_id"),
+                "payload": value,
+                "confirm_required": True,
+                "task_id": str(task.id),
+            },
+        )
+
+    async def on_final(final_state: dict[str, Any]) -> dict[str, Any]:
+        # ---- ② 流结束：持久化 assistant 最终消息 + run_logs + last_message_at ----
+        fm = final_state.get("final_message", {}) or {}
+        totals = final_state.get("totals") or {}
+        assistant_msg = await msg_repo.create(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=fm.get("content", ""),
+            tool_calls=fm.get("tool_calls", []),
+            token_usage=fm.get("token_usage") or totals,
+            parent_id=user_msg.id,
+            trace_id=trace_id,
+        )
+        assistant_msg.id = assistant_msg_id
+        for log in final_state.get("run_logs", []):
+            await RunLogRepository(db).create(session_id=conversation.id, **log)
+        await ConversationRepository(db).touch_last_message(conversation.id)
+        await db.commit()
+        return _done_payload(assistant_msg_id, fm.get("token_usage") or totals, _message_dict(assistant_msg))
+
+    async for frame in stream_graph_events(
+        graph=graph,
+        initial=_agent_state(agent, content),
+        graph_config=graph_config,
+        emit=emit,
+        on_interrupt=on_interrupt,
+        on_final=on_final,
+    ):
+        yield frame
+
+
+async def resume_stream_events(
+    *,
+    db: AsyncSession,
+    graph: Any,
+    task: Task,
+    user: User,
+    approved: bool,
+    trace_id: str,
+    model_override: Any = None,
+) -> AsyncIterator[str]:
+    """中断恢复（docs 03 §5.3 resume）：读 pending_confirm → 恢复 thread → SSE 续流。
+
+    前置状态迁移：approved → running；denied → cancelled（流仍输出 LLM 致歉文本）。
+    前端硬约束：续流不得发 message_start（会重置 segments 清掉工具卡）。
+    """
+    seq = 0
+
+    def emit(event_type: str, payload: dict[str, Any]) -> str:
+        nonlocal seq
+        seq += 1
+        return format_sse(make_event(event_type, payload, seq))
+
+    pending = task.pending_confirm or {}
+    thread_id = pending.get("thread_id") or pending.get("conversation_id") or str(task.id)
+    conversation_id = uuid.UUID(pending["conversation_id"]) if pending.get("conversation_id") else None
+    task_service = TaskService()
+
+    if approved:
+        await task_service.set_running(db, task)
+    else:
+        await task_service.set_cancelled(db, task)
+
+    assistant_msg_id = uuid.uuid4()
+    graph_config = _graph_config(
+        thread_id=str(thread_id),
+        trace_id=trace_id,
+        assistant_msg_id=assistant_msg_id,
+        model_override=model_override,
     )
+
+    async def on_interrupt(value: dict[str, Any]) -> str:
+        # 二次中断：再建新 Task 承接（同一 thread 继续）
+        new_task = await task_service.create_waiting_confirm(
+            db,
+            user=user,
+            agent_id=task.agent_id,
+            input=task.input or {},
+            value=value,
+            conversation_id=conversation_id,
+            thread_id=str(thread_id),
+        )
+        return emit(
+            "interrupt",
+            {
+                "node_id": value.get("node_id"),
+                "payload": value,
+                "confirm_required": True,
+                "task_id": str(new_task.id),
+            },
+        )
+
+    async def on_final(final_state: dict[str, Any]) -> dict[str, Any]:
+        fm = final_state.get("final_message", {}) or {}
+        totals = final_state.get("totals") or {}
+        assistant_msg: Message | None = None
+        if conversation_id:
+            # 会话流：持久化 assistant 消息 + run_logs + touch（任务流无会话，只更新任务状态）
+            msg_repo = MessageRepository(db)
+            assistant_msg = await msg_repo.create(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=fm.get("content", ""),
+                tool_calls=fm.get("tool_calls", []),
+                token_usage=fm.get("token_usage") or totals,
+                trace_id=trace_id,
+            )
+            assistant_msg.id = assistant_msg_id
+            for log in final_state.get("run_logs", []):
+                await RunLogRepository(db).create(session_id=conversation_id, **log)
+            await ConversationRepository(db).touch_last_message(conversation_id)
+        # 拒绝分支任务保持 cancelled，不覆盖为 done
+        if task.status != "cancelled":
+            await task_service.set_done(db, task, final_message=fm)
+        await db.commit()
+        return _done_payload(
+            assistant_msg_id, fm.get("token_usage") or totals, _message_dict(assistant_msg) if assistant_msg else None
+        )
+
+    async for frame in stream_graph_events(
+        graph=graph,
+        initial=Command(resume={"approved": approved}),
+        graph_config=graph_config,
+        emit=emit,
+        on_interrupt=on_interrupt,
+        on_final=on_final,
+    ):
+        yield frame

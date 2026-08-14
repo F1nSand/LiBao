@@ -1,0 +1,187 @@
+"""任务路由（docs 03 §5.3）。提交/列表/详情/取消/resume（双轨）/events（回放+live-tail）。"""
+from __future__ import annotations
+
+import asyncio
+import uuid
+from collections.abc import AsyncIterator
+
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_user, get_db
+from app.api.envelope import ok
+from app.api.schemas.tasks import SubmitTaskRequest, TaskResumeRequest
+from app.core.errors import ERR_STATE_NOT_CANCELLABLE, AppError
+from app.core.events import format_sse, make_event
+from app.core.logging import get_trace_id
+from app.orchestration.chat_stream import resume_stream_events
+from app.orchestration.task_run import resume_task_graph, run_task_graph
+from app.services.agent import AgentService
+from app.services.serializers import serialize_task
+from app.services.task import TaskService, subscribe, unsubscribe
+from app.storage.models.task import Task
+from app.storage.models.user import User
+
+router = APIRouter()
+
+
+async def _task_event_stream(db: AsyncSession, task: Task) -> AsyncIterator[str]:
+    """任务事件流：按当前状态回放 → live-tail 订阅至终态哨兵。"""
+    seq = 0
+
+    def emit(event_type: str, payload: dict) -> str:
+        nonlocal seq
+        seq += 1
+        return format_sse(make_event(event_type, payload, seq))
+
+    # ---- 回放 ----
+    if task.status == "waiting_confirm" and task.pending_confirm:
+        pc = task.pending_confirm
+        yield emit(
+            "interrupt",
+            {"node_id": pc.get("node_id"), "payload": pc, "confirm_required": True, "task_id": str(task.id)},
+        )
+    elif task.status == "done":
+        yield emit(
+            "done",
+            {
+                "message_id": None,
+                "token_usage": (task.output or {}).get("token_usage"),
+                "cost": None,
+                "message": task.output,
+            },
+        )
+    elif task.status == "failed":
+        yield emit(
+            "error",
+            {"code": 50001, "message": (task.error or {}).get("message", "任务执行失败"), "retryable": False},
+        )
+    elif task.status == "cancelled":
+        yield emit("status", {"status": "cancelled", "context_metrics": None})
+    else:  # pending / running
+        yield emit("status", {"status": task.status, "context_metrics": {"progress": task.progress}})
+
+    # 终态（done/failed/cancelled）回放完即关闭流；非终态才进 live-tail 订阅
+    if task.status in ("done", "failed", "cancelled"):
+        return
+
+    # ---- live-tail ----
+    q = subscribe(str(task.id))
+    try:
+        while True:
+            item = await q.get()
+            if item is None:
+                break
+            event_type, payload = item
+            yield emit(event_type, payload)
+    finally:
+        unsubscribe(str(task.id), q)
+
+
+@router.post("/tasks")
+async def submit_task(
+    req: SubmitTaskRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await AgentService().get_published(db, req.agent_id, user.org_id)  # 校验 published + 同 org
+    task = await TaskService().submit(db, user, req.agent_id, req.input)
+    # 后台执行（M2 最小实现；完整任务队列为 M4）
+    asyncio.create_task(
+        run_task_graph(
+            graph=request.app.state.graph,
+            sessionmaker=request.app.state.sessionmaker,
+            task_id=task.id,
+            trace_id=get_trace_id(),
+        )
+    )
+    return ok({"task_id": str(task.id)})
+
+
+@router.get("/tasks")
+async def list_tasks(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    data = await TaskService().list_owned(db, user.id, page, page_size, status=status)
+    return ok(data)
+
+
+@router.get("/tasks/{task_id}")
+async def get_task(
+    task_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await TaskService().get_owned(db, task_id, user.id)
+    return ok(serialize_task(task))
+
+
+@router.get("/tasks/{task_id}/events")
+async def task_events(
+    task_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await TaskService().get_owned(db, task_id, user.id)
+    return StreamingResponse(
+        _task_event_stream(db, task),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_task(
+    task_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await TaskService().get_owned(db, task_id, user.id)
+    await TaskService().cancel(db, task)
+    return ok()
+
+
+@router.post("/tasks/{task_id}/resume")
+async def resume_task(
+    task_id: uuid.UUID,
+    req: TaskResumeRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await TaskService().get_owned(db, task_id, user.id)
+    await TaskService().resume_precheck(db, task)
+    approved = bool((req.confirm or {}).get("approved"))
+
+    # I8：thread 有效性校验（无 checkpoint → 40902）
+    graph = request.app.state.graph
+    thread_id = (task.pending_confirm or {}).get("thread_id") or str(task.id)
+    snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+    if not snapshot.values and not snapshot.next:
+        raise AppError(ERR_STATE_NOT_CANCELLABLE, "任务线程已失效，无法恢复")
+
+    trace_id = get_trace_id()
+    if "text/event-stream" in request.headers.get("accept", ""):
+        # SSE 轨：续流（chat 弹窗 / 任务详情流式）
+        return StreamingResponse(
+            resume_stream_events(db=db, graph=graph, task=task, user=user, approved=approved, trace_id=trace_id),
+            media_type="text/event-stream",
+            headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+        )
+    # JSON 轨：后台续跑（TaskDetail 非流式）
+    asyncio.create_task(
+        resume_task_graph(
+            graph=graph,
+            sessionmaker=request.app.state.sessionmaker,
+            task_id=task.id,
+            approved=approved,
+            trace_id=trace_id,
+        )
+    )
+    return ok()
