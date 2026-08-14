@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from app.tools.sandbox import SandboxLevel
@@ -62,6 +62,18 @@ def register(spec: ToolSpec) -> None:
 
 def get(tool_id: str) -> ToolSpec | None:
     return _REGISTRY.get(tool_id)
+
+
+def set_enabled(tool_id: str, enabled: bool) -> None:
+    """启停同步桥（M2）：frozen dataclass 用 replace 换新 spec 写回注册表。
+
+    与 DB tool_definition.enabled 联动（ToolService.set_enabled 调用），
+    使「默认关闭」原则对内置工具实时生效（acis_for_tools / agent_can_use 立即过滤）。
+    """
+    spec = _REGISTRY.get(tool_id)
+    if spec is None or spec.enabled == enabled:
+        return
+    _REGISTRY[tool_id] = replace(spec, enabled=enabled)
 
 
 def get_by_name(name: str) -> ToolSpec | None:

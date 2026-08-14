@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.envelope import fail
-from app.api.routers import agents, auth, chat, conversations, system
+from app.api.routers import agents, auth, chat, conversations, system, tools
 from app.core.config import get_settings
 from app.core.errors import ERR_INTERNAL, AppError, http_status_for
 from app.core.logging import set_trace_id, setup_logging
@@ -96,7 +96,7 @@ def create_app() -> FastAPI:
         logger.exception("unhandled error: %s", exc, exc_info=True)
         return JSONResponse(status_code=500, content=fail(ERR_INTERNAL, "服务器内部错误"))
 
-    for router in (auth.router, conversations.router, agents.router, chat.router, system.router):
+    for router in (auth.router, conversations.router, agents.router, chat.router, tools.router, system.router):
         app.include_router(router, prefix=settings.base_url)
 
     return app

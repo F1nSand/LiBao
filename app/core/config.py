@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     jwt_secret: str = DEFAULT_JWT_SECRET
     jwt_expire_minutes: int = 720
 
+    # ---- 任务（M2 interrupt/resume）----
+    # pending_confirm 载荷 TTL：过期后拒绝 resume（docs 01 §3.4 I8）
+    task_confirm_ttl_hours: int = 24
+
     # ---- 数据存储 ----
     # SQLAlchemy（asyncpg 驱动）
     database_url: str = "postgresql+asyncpg://agent:agent@localhost:5432/agent"

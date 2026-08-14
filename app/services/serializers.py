@@ -6,7 +6,9 @@ from typing import Any
 from app.storage.models.agent import AgentConfig, AgentVersion
 from app.storage.models.conversation import Conversation
 from app.storage.models.message import Message
+from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
+from app.tools.registry import get_by_name
 
 
 def _dt(value: Any) -> str | None:
@@ -66,6 +68,26 @@ def serialize_agent(agent: AgentConfig) -> dict[str, Any]:
         "current_version": agent.current_version,
         "created_at": _dt(agent.created_at),
         "updated_at": _dt(agent.updated_at),
+    }
+
+
+def serialize_tool_definition(t: ToolDefinition) -> dict[str, Any]:
+    """工具序列化（docs 03 §5.5）。API id = registry spec.id（内置），无 spec 的 DB 工具 = "tl_" + name。"""
+    spec = get_by_name(t.name)
+    return {
+        "id": spec.id if spec else f"tl_{t.name}",
+        "name": t.name,
+        "description": t.description,
+        "params_schema": t.params_schema,
+        "tool_type": t.tool_type,
+        "enabled": t.enabled,
+        "require_confirm": t.require_confirm,
+        "sandbox": t.sandbox,
+        "timeout_ms": t.timeout_ms,
+        "max_concurrency": t.max_concurrency,
+        "mcp_source": t.mcp_source,
+        "idempotent": t.idempotent,
+        "created_at": _dt(t.created_at),
     }
 
 
