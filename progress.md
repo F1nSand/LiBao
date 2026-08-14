@@ -1,3 +1,26 @@
+# 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-14-m25-core-loop.md
+
+目标：M2.5 核心闭环 —— MCP client（stdio+HTTP 双传输，注册/列表/注销）+ tool_search 元工具 + 两段式 ACI 注入（渐进式披露）。前端 ToolsView 注册弹窗直接对接真实后端。**本轮不做**：Docker 沙盒、M4 队列、MCP 资源/提示原语（M3 接缝）。
+
+全局约束：五层单向依赖 API→编排→服务→工具→存储；DB 为元数据事实源、registry 为可执行宿主；连接会话/熔断为唯一新增进程级内存态（文档化接缝）；信封契约；静态前缀字节稳定；同名遮蔽拒绝（I7）；默认关闭原则（MCP 工具注册即 enabled=false）；ruff（120 列，E/F/I/UP/B，ignore B008）；pytest-asyncio auto + `_db_reachable()` skipif。
+
+## 任务清单
+- [ ] T1 依赖 + Settings + 错误码 + mcp_servers 表（迁移 0002）
+- [ ] T2 MCP 连接层（mcp_client.py：stdio/http 传输 + 命名派生 + 文本提取）
+- [ ] T3 熔断器 + MCPManager（惰性连接/并发锁/熔断 60003）
+- [ ] T4 MCP 服务层 + 路由（register/list/unregister + 遮蔽拒绝 40903）
+- [ ] T5 启动重建（sync_registry_from_db 扩展）
+- [ ] T6 tool_search 元工具 + 两段式 ACI 门控
+- [ ] T7 端到端验证（真实 FastMCP + 熔断实测 + 真实 DeepSeek 两段式）
+- [ ] T8 收尾 gate（ruff + 全量测试 + 前端验证 + review-test-simplify）
+
+## 执行记录（M2.5）
+（T1 起记录）
+
+---
+
+# 以下为 M1/M2 历史（已完成，勿重做）
+
 # 进度账本 — plan: C:\Users\Admin1\.claude\plans\immutable-inventing-breeze.md
 
 目标：M2 核心闭环 —— 工具管理（CRUD/test/search）+ require_confirm→interrupt→resume（task 实体+状态机+tasks 最小 API）+ 执行器重试/幂等 + Agent 版本化管理（POST/PUT/DELETE/publish/unpublish/invoke）。对接已完整实现的 FrontEnd 工具/任务/Agent 页。
@@ -9,7 +32,7 @@
 ## M1 历史（已完成，勿重做）
 T1-T13 + review-test-simplify gate 全部完成；start.cmd/start.sh 一键启动；git 到 aaa26a6 工作区干净。
 
-## 任务清单
+## 任务清单（M2）
 - [x] T1 错误码与配置（40405/40903 + task_confirm_ttl_hours=24）
 - [x] T2 工具服务层（tool_definition repo + ToolService + tl_ id 派生 + registry set_enabled 同步桥）
 - [x] T3 工具路由（/tools CRUD/test/search）
@@ -21,7 +44,7 @@ T1-T13 + review-test-simplify gate 全部完成；start.cmd/start.sh 一键启�
 - [x] T9 内置确认演示工具（tl_demo_notify）+ seed
 - [x] T10 收尾 gate（ruff + 全量测试 ≥20 + README 接缝表 + 端到端验证）
 
-## 执行记录
+## 执行记录（M2）
 - T1 完成：40405/40903 + task_confirm_ttl_hours=24 ✅
 - T2 完成：ToolDefinitionRepository + ToolService（tl_ id 派生/默认关闭/启停同步桥/echo test）+ serialize_tool_definition + registry.set_enabled；pytest 6 项新测试 ✅
 - T3 完成：/tools CRUD/test/search 路由（search 在 {tool_id} 前）+ main.py 注册；httpx 实测 CRUD/echo/真执行/搜索/ACI/40405 全过 ✅

@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # pending_confirm 载荷 TTL：过期后拒绝 resume（docs 01 §3.4 I8）
     task_confirm_ttl_hours: int = 24
 
+    # ---- MCP（M2.5）----
+    # 熔断（I7）：单源连续失败达阈值 → OPEN；冷却后 HALF_OPEN 放行一次
+    mcp_breaker_threshold: int = 3
+    mcp_breaker_cooldown_s: int = 60
+    # 两段式 ACI 门控（docs 01 §7.1.1 A2）：启用工具数 ≤ 阈值 → 全量 ACI；超过 → tool_search + 选中注入
+    aci_full_limit: int = 30
+
     # ---- 数据存储 ----
     # SQLAlchemy（asyncpg 驱动）
     database_url: str = "postgresql+asyncpg://agent:agent@localhost:5432/agent"

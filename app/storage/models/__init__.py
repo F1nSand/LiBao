@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.storage.models.agent import AgentConfig, AgentVersion
 from app.storage.models.conversation import Conversation
+from app.storage.models.mcp_server import McpServer
 from app.storage.models.message import Message
 from app.storage.models.org import Org
 from app.storage.models.run_log import RunLog
@@ -14,6 +15,7 @@ __all__ = [
     "AgentConfig",
     "AgentVersion",
     "Conversation",
+    "McpServer",
     "Message",
     "Org",
     "RunLog",
