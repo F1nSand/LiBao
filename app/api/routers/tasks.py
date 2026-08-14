@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
 from app.api.schemas.tasks import SubmitTaskRequest, TaskResumeRequest
-from app.core.errors import ERR_STATE_NOT_CANCELLABLE, AppError
+from app.core.errors import ERR_TASK_NOT_FOUND, AppError
 from app.core.events import format_sse, make_event
 from app.core.logging import get_trace_id
 from app.orchestration.chat_stream import resume_stream_events
@@ -62,13 +62,13 @@ async def _task_event_stream(db: AsyncSession, task: Task) -> AsyncIterator[str]
     else:  # pending / running
         yield emit("status", {"status": task.status, "context_metrics": {"progress": task.progress}})
 
-    # 终态（done/failed/cancelled）回放完即关闭流；非终态才进 live-tail 订阅
-    if task.status in ("done", "failed", "cancelled"):
-        return
-
     # ---- live-tail ----
+    # F3：先订阅再查终态——避免 push_event 在「终态检查」与「订阅」之间已推送并弹出队列，
+    # 导致新队列永远收不到终态哨兵而挂死；终态订阅后立即退订。
     q = subscribe(str(task.id))
     try:
+        if task.status in ("done", "failed", "cancelled"):
+            return
         while True:
             item = await q.get()
             if item is None:
@@ -159,12 +159,12 @@ async def resume_task(
     await TaskService().resume_precheck(db, task)
     approved = bool((req.confirm or {}).get("approved"))
 
-    # I8：thread 有效性校验（无 checkpoint → 40902）
+    # I8：thread 有效性校验（无效 → 40402，docs 01 §3.4）
     graph = request.app.state.graph
     thread_id = (task.pending_confirm or {}).get("thread_id") or str(task.id)
     snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
     if not snapshot.values and not snapshot.next:
-        raise AppError(ERR_STATE_NOT_CANCELLABLE, "任务线程已失效，无法恢复")
+        raise AppError(ERR_TASK_NOT_FOUND, "任务线程已失效，无法恢复")
 
     trace_id = get_trace_id()
     if "text/event-stream" in request.headers.get("accept", ""):

@@ -55,6 +55,11 @@ class ToolDefinitionRepository:
             stmt = stmt.where(ToolDefinition.enabled.is_(enabled))
         return int((await self.session.execute(stmt)).scalar_one())
 
+    async def list_for_org_all(self) -> list[ToolDefinition]:
+        """全 org 非软删工具（启动同步 DB→registry 用）。"""
+        stmt = select(ToolDefinition).where(ToolDefinition.deleted_at.is_(None))
+        return list((await self.session.execute(stmt)).scalars())
+
     async def search(self, org_id: uuid.UUID, q: str, *, limit: int = 20) -> list[ToolDefinition]:
         """工具发现（REST 版 G3）：name/description ILIKE，org 隔离。"""
         pattern = f"%{q}%"

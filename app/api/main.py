@@ -52,6 +52,11 @@ async def lifespan(app: FastAPI):
     engine, sessionmaker = init_db(settings)
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker
+    # DB tool_definition.enabled 为事实源 → 启动时同步 registry（停用状态重启不丢，F7）
+    from app.services.tool import ToolService
+
+    async with sessionmaker() as session:
+        await ToolService().sync_registry_from_db(session)
     # checkpoint 表由 setup() 创建（须在 alembic upgrade head 之后，langgraph#2570 规避）
     async with PostgresCheckpointer(settings.sync_checkpoint_dsn) as saver:
         app.state.checkpointer = saver

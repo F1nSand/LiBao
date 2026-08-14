@@ -17,7 +17,7 @@ from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
 from app.storage.repositories.tool_definition import ToolDefinitionRepository
 from app.tools import executor
-from app.tools.registry import get_by_name, set_enabled
+from app.tools.registry import get_by_name, patch_spec, set_enabled
 
 
 def resolve_name(tool_id: str) -> str:
@@ -84,6 +84,17 @@ class ToolService:
                 setattr(row, field, value)
         await db.commit()
         await db.refresh(row)
+        # 同步桥：运行时字段同步到 registry spec（require_confirm 等执行即刻生效）
+        spec = get_by_name(row.name)
+        if spec is not None:
+            patch_spec(
+                spec.id,
+                require_confirm=row.require_confirm,
+                idempotent=row.idempotent,
+                sandbox=row.sandbox,
+                timeout_ms=row.timeout_ms,
+                max_concurrency=row.max_concurrency,
+            )
         return row
 
     async def set_enabled(self, db: AsyncSession, user: User, tool_id: str, enabled: bool) -> ToolDefinition:
@@ -105,6 +116,17 @@ class ToolService:
         spec = get_by_name(row.name)
         if spec is not None:
             set_enabled(spec.id, False)
+
+    async def sync_registry_from_db(self, db: AsyncSession) -> None:
+        """启动同步（F7）：DB tool_definition.enabled 为事实源 → registry spec 跟随。
+
+        使「停用的内置工具重启后不复活」（约束优先原则）。同名多 org 行时最后一行生效（M2 单 org 场景）。
+        """
+        rows = await ToolDefinitionRepository(db).list_for_org_all()
+        for row in rows:
+            spec = get_by_name(row.name)
+            if spec is not None:
+                set_enabled(spec.id, row.enabled)
 
     async def search(self, db: AsyncSession, org_id: uuid.UUID, q: str) -> list[dict[str, Any]]:
         rows = await ToolDefinitionRepository(db).search(org_id, q)

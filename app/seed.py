@@ -164,7 +164,7 @@ async def main() -> None:
             params_schema={"type": "object", "properties": {}, "required": []},
             tool_type="perception",
             require_confirm=False,
-            idempotent=True,
+            idempotent=False,  # 时间查询不可去重（缓存会返回陈旧时间）
         )
         await _get_or_create_tool(
             session,

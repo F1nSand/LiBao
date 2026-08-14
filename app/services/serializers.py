@@ -108,7 +108,11 @@ def serialize_task(t: Task) -> dict[str, Any]:
     }
 
 
-def serialize_agent_version(ver: AgentVersion, name: str = "") -> dict[str, Any]:
+def serialize_agent_version(
+    ver: AgentVersion, name: str = "", graph_template: str = "single", max_steps: int = 50
+) -> dict[str, Any]:
+    """版本序列化（docs 03 §5.4）。版本快照不含 graph_template/max_steps（04 §3.4），
+    用当前 agent 的真实值填充（F9：避免硬编码误导）。"""
     return {
         "id": str(ver.id),
         "agent_id": str(ver.agent_id),
@@ -119,8 +123,8 @@ def serialize_agent_version(ver: AgentVersion, name: str = "") -> dict[str, Any]
             "system_prompt": ver.system_prompt,
             "skills": ver.skills or [],
             "tools": ver.tools or [],
-            "graph_template": "single",
-            "max_steps": 50,
+            "graph_template": graph_template,
+            "max_steps": max_steps,
         },
         "prefix_hash": ver.prefix_hash,
         "created_at": _dt(ver.created_at),

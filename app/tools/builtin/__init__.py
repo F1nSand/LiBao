@@ -21,7 +21,7 @@ def register_builtin_tools() -> None:
             tool_type=ToolType.PERCEPTION,
             enabled=True,
             require_confirm=False,
-            idempotent=True,
+            idempotent=False,  # 时间查询不可去重（缓存会返回陈旧时间）
             sandbox=SandboxLevel.NONE,
             timeout_ms=5000,
             handler=time_now.handler,

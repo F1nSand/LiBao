@@ -38,4 +38,17 @@ T1-T13 + review-test-simplify gate 全部完成；start.cmd/start.sh 一键启�
   langchain-litellm 0.7.0 `_convert_message_to_dict` 丢 thinking 且不输出 reasoning_content，且 content 变字符串数组。
   → core/llm.py `_patch_reasoning_content_passthrough`（透传 reasoning_content + content 规范化为纯文本）；顺带 finalize 提取纯文本 content
 - ⚠ 已修：task_run 图级异常（LLM 失败）→ stream_core 加 on_error 回调 → 任务置 failed（此前会永远卡 running）
-- **M2 核心闭环全部完成**：T1-T10 ✅，40 项测试全绿 → 下一环节 review-test-simplify 收尾 gate
+- **M2 核心闭环全部完成**：T1-T10 ✅，40 项测试全绿 → review-test-simplify 收尾 gate：
+  - Gate1 Test：40 项全过 ✅
+  - Gate2 Review：两 agent 发现 11 项（4 Important + 3 Medium + 4 Low）——全部修复并验证 ✅
+    - F1 JSON 轨 resume 读 pending_confirm.thread_id（此前 EmptyInputError→failed）✅
+    - F2 time_now 去 idempotent（陈旧时间 bug）✅
+    - F3 live-tail 订阅先于终态检查 + resume 推终态哨兵（events 流不挂死）✅
+    - F4 runner 启动前重检 status==pending（取消竞态）✅
+    - F5 resume_stream_events 加 on_error→failed ✅
+    - F6 ToolService.update 同步运行时字段到 registry（patch_spec）✅
+    - F7 lifespan DB→registry enabled 启动同步（停用不复活）✅
+    - F8 thread 失效→40402 ✅ F9 版本序列化真实 graph_template/max_steps ✅
+    - F10 resume on_final 重读任务防覆盖取消 ✅ F11 任务 input 提取 message 文本 ✅
+  - 跳过（文档化接缝）：cancel 打断运行中图、同消息双确认、test 端点绕过确认、二次中断滞留原任务
+  - 实测：JSON 轨 resume done + events 流即开即关 ✅；40 项测试全绿

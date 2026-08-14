@@ -77,6 +77,17 @@ def set_enabled(tool_id: str, enabled: bool) -> None:
     _REGISTRY[tool_id] = replace(spec, enabled=enabled)
 
 
+def patch_spec(tool_id: str, **fields: Any) -> None:
+    """运行时字段同步桥（M2）：PUT /tools 的运行时配置（require_confirm/idempotent/
+    sandbox/timeout_ms/max_concurrency）写入 DB 后同步到 registry spec，执行即刻生效。"""
+    spec = _REGISTRY.get(tool_id)
+    if spec is None:
+        return
+    updates = {k: v for k, v in fields.items() if getattr(spec, k, None) != v}
+    if updates:
+        _REGISTRY[tool_id] = replace(spec, **updates)
+
+
 def get_by_name(name: str) -> ToolSpec | None:
     """按 ACI 函数名查找（模型 tool_call 里带的是 spec.name）。M1 要求函数名唯一（防遮蔽）。"""
     for spec in _REGISTRY.values():

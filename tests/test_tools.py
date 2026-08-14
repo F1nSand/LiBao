@@ -21,7 +21,7 @@ def test_registry_get_returns_spec():
     assert spec.id == "tl_time_now"
     assert spec.name == "time_now"
     assert spec.enabled is True
-    assert spec.idempotent is True
+    assert spec.idempotent is False  # 时间查询不可去重（F2：缓存会返回陈旧时间）
 
 
 def test_aci_shape_and_sorted():

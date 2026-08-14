@@ -22,6 +22,16 @@ from app.storage.repositories.task import TaskRepository
 logger = logging.getLogger(__name__)
 
 
+def _task_input_text(input: Any) -> str:
+    """任务输入 → LLM 可见文本（F11）：dict 优先取 message 字段，避免传 Python repr。"""
+    if isinstance(input, dict):
+        msg = input.get("message")
+        if isinstance(msg, str):
+            return msg
+        return str(input)
+    return str(input or {})
+
+
 def _task_agent_state(agent: Any, input_text: str) -> dict[str, Any]:
     return {
         "messages": [HumanMessage(content=input_text)],
@@ -51,7 +61,10 @@ async def _run_graph_common(
         if task is None:
             return
         svc = TaskService()
-        graph_config: dict[str, Any] = {"configurable": {"thread_id": str(task.id), "trace_id": trace_id}}
+        # F1：中断任务（chat/invoke 来源）的 thread 在 pending_confirm 里（conversation.id / uuid4），
+        # 不能硬编码 task.id——否则 JSON 轨 resume 打到无 checkpoint 的线程报 EmptyInputError
+        thread_id = (task.pending_confirm or {}).get("thread_id") or str(task.id)
+        graph_config: dict[str, Any] = {"configurable": {"thread_id": thread_id, "trace_id": trace_id}}
         if model_override is not None:
             graph_config["configurable"]["model"] = model_override
 
@@ -132,6 +145,9 @@ async def run_task_graph(
             task = await TaskRepository(db).get_by_id(task_id)
             if task is None:
                 return
+            # F4：提交与 runner 启动之间可能被取消 → 非 pending 直接放弃（不翻回 running）
+            if task.status != "pending":
+                return
             agent = await AgentRepository(db).get_published(task.agent_id)
             if agent is None:
                 await TaskService().set_failed(db, task, "Agent 不存在或未发布")
@@ -146,7 +162,7 @@ async def run_task_graph(
             graph=graph,
             sessionmaker=sessionmaker,
             task_id=task_id,
-            initial=_task_agent_state(agent, str(task.input or {})),
+            initial=_task_agent_state(agent, _task_input_text(task.input)),
             trace_id=trace_id,
             model_override=model_override,
         )

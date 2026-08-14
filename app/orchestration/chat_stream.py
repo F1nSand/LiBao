@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import format_sse, make_event
 from app.orchestration.stream_core import stream_graph_events
-from app.services.task import TaskService
+from app.services.task import TaskService, push_event
 from app.storage.models.agent import AgentConfig
 from app.storage.models.conversation import Conversation
 from app.storage.models.message import Message
@@ -26,6 +26,7 @@ from app.storage.models.user import User
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.run_log import RunLogRepository
+from app.storage.repositories.task import TaskRepository
 
 logger = logging.getLogger(__name__)
 
@@ -259,13 +260,28 @@ async def resume_stream_events(
             for log in final_state.get("run_logs", []):
                 await RunLogRepository(db).create(session_id=conversation_id, **log)
             await ConversationRepository(db).touch_last_message(conversation_id)
-        # 拒绝分支任务保持 cancelled，不覆盖为 done
-        if task.status != "cancelled":
-            await task_service.set_done(db, task, final_message=fm)
+        # F10：重读任务行，避免覆盖并发取消（与 task_run 一致）
+        updated = await TaskRepository(db).get_by_id(task.id)
+        if updated is not None and updated.status != "cancelled":
+            await task_service.set_done(db, updated, final_message=fm)
+            push_event(
+                str(task.id),
+                "done",
+                {"message_id": str(assistant_msg_id), "token_usage": fm.get("token_usage") or totals, "message": fm},
+            )
+        elif updated is not None:
+            push_event(str(task.id), "cancelled", {"status": "cancelled"})
         await db.commit()
         return _done_payload(
             assistant_msg_id, fm.get("token_usage") or totals, _message_dict(assistant_msg) if assistant_msg else None
         )
+
+    async def on_error(exc: Exception) -> None:
+        # F5：SSE 轨 resume 图级异常 → 任务置 failed（与 task_run 一致）
+        updated = await TaskRepository(db).get_by_id(task.id)
+        if updated is not None and updated.status == "running":
+            await task_service.set_failed(db, updated, str(exc))
+            push_event(str(task.id), "error", {"code": 60001, "message": str(exc), "retryable": True})
 
     async for frame in stream_graph_events(
         graph=graph,
@@ -274,6 +290,7 @@ async def resume_stream_events(
         emit=emit,
         on_interrupt=on_interrupt,
         on_final=on_final,
+        on_error=on_error,
     ):
         yield frame
 

@@ -37,7 +37,10 @@ class AgentService:
 
     async def versions(self, db: AsyncSession, agent: AgentConfig) -> list[dict[str, Any]]:
         vers = await AgentRepository(db).list_versions(agent.id)
-        return [serialize_agent_version(v, name=agent.name) for v in vers]
+        return [
+            serialize_agent_version(v, name=agent.name, graph_template=agent.graph_template, max_steps=agent.max_steps)
+            for v in vers
+        ]
 
     # ---- M2 写操作（版本化）----
 
