@@ -14,6 +14,7 @@ from langchain_core.runnables import RunnableConfig
 from app.core.llm import LLMService
 from app.orchestration.context_builder import acis_for_tools, build_context
 from app.orchestration.state_schema import AgentState
+from app.orchestration.stream_core import message_text
 
 
 def _resolve_model(state: AgentState, config: Optional[RunnableConfig]) -> Any:  # noqa: UP045  LangGraph 需 Optional 形式
@@ -26,14 +27,7 @@ def _resolve_model(state: AgentState, config: Optional[RunnableConfig]) -> Any: 
 
 def _text_of(response: Any) -> str:
     """提取最终回答文本（兼容 content 为 str 或 content blocks 列表）。"""
-    content = getattr(response, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(
-            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
-        )
-    return str(content)
+    return message_text(getattr(response, "content", ""))
 
 
 async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig] = None) -> dict[str, Any]:  # noqa: UP045  LangGraph 需 Optional 形式

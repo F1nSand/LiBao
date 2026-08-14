@@ -12,43 +12,33 @@ from langchain_litellm import ChatLiteLLM
 from app.core.config import Settings, get_settings
 
 
-def _patch_reasoning_content_passthrough() -> None:
-    """langchain-litellm 0.7.0 上游 bug 补丁。
+class ReasoningChatLiteLLM(ChatLiteLLM):
+    """DeepSeek 推理模型兼容（langchain-litellm 0.7.0 上游 bug，类级补丁而非全局 monkeypatch）。
 
-    `_convert_message_to_dict` 丢弃 thinking 块且不输出 reasoning_content →
-    DeepSeek 推理模型（如 deepseek-v4-flash）多轮/工具调用报 400
-    "reasoning_content must be passed back"。补丁：AIMessage 的
-    additional_kwargs["reasoning_content"]（响应解析时已存）在转换时透传。
+    上游 `_convert_message_to_dict` 丢弃 thinking 块且不输出 reasoning_content →
+    DeepSeek 推理模型（deepseek-v4-flash）多轮/工具调用报 400
+    "reasoning_content must be passed back"。子类在转换后补：
+    additional_kwargs["reasoning_content"]（响应解析时已存）透传 + content 规范化为纯文本字符串
+    （字符串数组 content 也会被 DeepSeek 400）。
     """
-    import langchain_litellm.chat_models.litellm as _ll
 
-    if getattr(_ll, "_REASONING_PATCHED", False):
-        return
-    _orig = _ll._convert_message_to_dict
-
-    def _patched(message: Any) -> dict[str, Any]:
-        d = _orig(message)
-        if d.get("role") != "assistant":
-            return d
-        rc = getattr(message, "additional_kwargs", {}).get("reasoning_content")
-        if rc:
-            d["reasoning_content"] = rc
-        # 推理模型 content 是块列表（thinking + 文本字符串混排）→ 规范化为纯文本字符串，
-        # 否则 DeepSeek 收到字符串数组 content 直接 400（litellm 映射该错误还有 bug）
-        if isinstance(d.get("content"), list):
-            text = "".join(
-                (item.get("text", "") if isinstance(item, dict) else str(item))
-                for item in d["content"]
-                if not (isinstance(item, dict) and item.get("type") in ("thinking", "redacted_thinking"))
-            )
-            d["content"] = text
-        return d
-
-    _ll._convert_message_to_dict = _patched
-    _ll._REASONING_PATCHED = True
-
-
-_patch_reasoning_content_passthrough()
+    def _create_message_dicts(
+        self, messages: list[Any], stop: list[str] | None
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        message_dicts, params = super()._create_message_dicts(messages, stop)
+        for d, m in zip(message_dicts, messages, strict=True):
+            if d.get("role") != "assistant":
+                continue
+            rc = getattr(m, "additional_kwargs", {}).get("reasoning_content")
+            if rc:
+                d["reasoning_content"] = rc
+            if isinstance(d.get("content"), list):
+                d["content"] = "".join(
+                    (item.get("text", "") if isinstance(item, dict) else str(item))
+                    for item in d["content"]
+                    if not (isinstance(item, dict) and item.get("type") in ("thinking", "redacted_thinking"))
+                )
+        return message_dicts, params
 
 
 class LLMService:
@@ -60,4 +50,4 @@ class LLMService:
             kwargs["api_key"] = settings.llm_api_key
         if settings.llm_base_url:
             kwargs["api_base"] = settings.llm_base_url
-        return ChatLiteLLM(**kwargs)
+        return ReasoningChatLiteLLM(**kwargs)

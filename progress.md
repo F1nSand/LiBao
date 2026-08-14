@@ -52,3 +52,10 @@ T1-T13 + review-test-simplify gate 全部完成；start.cmd/start.sh 一键启�
     - F10 resume on_final 重读任务防覆盖取消 ✅ F11 任务 input 提取 message 文本 ✅
   - 跳过（文档化接缝）：cancel 打断运行中图、同消息双确认、test 端点绕过确认、二次中断滞留原任务
   - 实测：JSON 轨 resume done + events 流即开即关 ✅；40 项测试全绿
+  - Gate3 Simplify：4 agent 去重 11 项应用 / 4 项跳过（记录理由）✅
+    - 应用：executor 缓存直返、共享 sse_emitter(core/events)、共享 build_initial_state + message_text(stream_core)、
+      TaskService.resolve_resume_thread 单点解析、get_by_name O(1) 反向索引、agent flush 清理、resume 尾提交收敛、
+      search 复用序列化、**ChatLiteLLM 子类替代全局 monkeypatch**（A2，实测多轮 DeepSeek 通过）
+    - 跳过：values 模式（状态小+测试不耦合 checkpointer）、max_concurrency（计划设计延期）、
+      DB 读时解析 registry（M2.5 重构）、终态处理器大重构（complete/fail 助手已缓解核心重复）
+  - 最终：ruff clean + pytest 40/40 + 子类多轮验证 ✅ → M2 收尾完成

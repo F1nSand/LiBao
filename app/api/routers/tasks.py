@@ -13,7 +13,7 @@ from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
 from app.api.schemas.tasks import SubmitTaskRequest, TaskResumeRequest
 from app.core.errors import ERR_TASK_NOT_FOUND, AppError
-from app.core.events import format_sse, make_event
+from app.core.events import sse_emitter
 from app.core.logging import get_trace_id
 from app.orchestration.chat_stream import resume_stream_events
 from app.orchestration.task_run import resume_task_graph, run_task_graph
@@ -28,12 +28,7 @@ router = APIRouter()
 
 async def _task_event_stream(db: AsyncSession, task: Task) -> AsyncIterator[str]:
     """任务事件流：按当前状态回放 → live-tail 订阅至终态哨兵。"""
-    seq = 0
-
-    def emit(event_type: str, payload: dict) -> str:
-        nonlocal seq
-        seq += 1
-        return format_sse(make_event(event_type, payload, seq))
+    emit = sse_emitter()
 
     # ---- 回放 ----
     if task.status == "waiting_confirm" and task.pending_confirm:
@@ -161,7 +156,7 @@ async def resume_task(
 
     # I8：thread 有效性校验（无效 → 40402，docs 01 §3.4）
     graph = request.app.state.graph
-    thread_id = (task.pending_confirm or {}).get("thread_id") or str(task.id)
+    thread_id = TaskService.resolve_resume_thread(task)
     snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
     if not snapshot.values and not snapshot.next:
         raise AppError(ERR_TASK_NOT_FOUND, "任务线程已失效，无法恢复")

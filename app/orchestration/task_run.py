@@ -11,10 +11,9 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
-from app.orchestration.stream_core import stream_graph_events
+from app.orchestration.stream_core import build_initial_state, stream_graph_events
 from app.services.task import TaskService, push_event
 from app.storage.repositories.agent import AgentRepository
 from app.storage.repositories.task import TaskRepository
@@ -30,21 +29,6 @@ def _task_input_text(input: Any) -> str:
             return msg
         return str(input)
     return str(input or {})
-
-
-def _task_agent_state(agent: Any, input_text: str) -> dict[str, Any]:
-    return {
-        "messages": [HumanMessage(content=input_text)],
-        "agent_config": {
-            "model": agent.model,
-            "system_prompt": agent.system_prompt,
-            "tools": agent.tools or [],
-            "max_steps": agent.max_steps,
-        },
-        "flags": {"steps": 0},
-        "tool_results": [],
-        "run_logs": [],
-    }
 
 
 def _noop_emit(event_type: str, payload: dict[str, Any]) -> str:
@@ -63,7 +47,7 @@ async def _run_graph_common(
         svc = TaskService()
         # F1：中断任务（chat/invoke 来源）的 thread 在 pending_confirm 里（conversation.id / uuid4），
         # 不能硬编码 task.id——否则 JSON 轨 resume 打到无 checkpoint 的线程报 EmptyInputError
-        thread_id = (task.pending_confirm or {}).get("thread_id") or str(task.id)
+        thread_id = TaskService.resolve_resume_thread(task)
         graph_config: dict[str, Any] = {"configurable": {"thread_id": thread_id, "trace_id": trace_id}}
         if model_override is not None:
             graph_config["configurable"]["model"] = model_override
@@ -162,7 +146,7 @@ async def run_task_graph(
             graph=graph,
             sessionmaker=sessionmaker,
             task_id=task_id,
-            initial=_task_agent_state(agent, _task_input_text(task.input)),
+            initial=build_initial_state(agent, _task_input_text(task.input)),
             trace_id=trace_id,
             model_override=model_override,
         )

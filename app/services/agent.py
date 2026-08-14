@@ -57,8 +57,7 @@ class AgentService:
         )
         db.add(ver)
         agent.current_version += 1
-        await db.flush()
-        return ver
+        return ver  # 不 flush：随调用方 commit 一次性落库（E4）
 
     async def create(self, db: AsyncSession, org_id: uuid.UUID, req: Any) -> AgentConfig:
         if not req.name or not req.model:
@@ -76,7 +75,7 @@ class AgentService:
             current_version=0,
         )
         db.add(agent)
-        await db.flush()
+        await db.flush()  # 物化 agent.id（版本行 FK 需要）
         await self._snapshot(db, agent)
         await db.commit()
         await db.refresh(agent)
@@ -87,7 +86,6 @@ class AgentService:
             value = getattr(req, field, None)
             if value is not None:
                 setattr(agent, field, value)
-        await db.flush()
         await self._snapshot(db, agent)  # PUT = 创建新版本（支持 A/B 与回滚）
         await db.commit()
         await db.refresh(agent)
@@ -95,7 +93,6 @@ class AgentService:
 
     async def publish(self, db: AsyncSession, agent: AgentConfig) -> AgentConfig:
         agent.status = "published"
-        await db.flush()
         await self._snapshot(db, agent)  # 发布快照
         await db.commit()
         await db.refresh(agent)

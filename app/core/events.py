@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from typing import Any
 
 SSE_EVENT_TYPES = (
@@ -31,3 +32,15 @@ def make_event(event_type: str, payload: dict[str, Any], seq: int) -> dict[str, 
 def format_sse(env: dict[str, Any]) -> str:
     """单条 SSE 帧：event: <type>\\ndata: <envelope json>\\n\\n"""
     return f"event: {env['type']}\ndata: {json.dumps(env, ensure_ascii=False)}\n\n"
+
+
+def sse_emitter() -> Callable[[str, dict[str, Any]], str]:
+    """SSE 帧发射器（seq 单调从 1 起，docs 03 §3.2）。各流式入口共用，避免重复闭包。"""
+    seq = 0
+
+    def emit(event_type: str, payload: dict[str, Any]) -> str:
+        nonlocal seq
+        seq += 1
+        return format_sse(make_event(event_type, payload, seq))
+
+    return emit

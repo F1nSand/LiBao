@@ -9,15 +9,7 @@ from typing import Any, Optional
 from langchain_core.runnables import RunnableConfig
 
 from app.orchestration.state_schema import AgentState
-
-
-def _text_of(content: Any) -> str:
-    """提取纯文本（兼容 str 或 content blocks 列表；跳过 thinking 块，推理内容不入持久化消息）。"""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
-    return str(content)
+from app.orchestration.stream_core import message_text
 
 
 def _assemble_tool_calls(state: AgentState) -> list[dict[str, Any]]:
@@ -55,7 +47,7 @@ async def finalize_node(state: AgentState, config: Optional[RunnableConfig] = No
 
     final_message: dict[str, Any] = {
         "role": "assistant",
-        "content": _text_of(last.content),
+        "content": message_text(last.content),  # 跳过 thinking 块，推理内容不入持久化消息
         "tool_calls": _assemble_tool_calls(state),
         "token_usage": totals,
     }

@@ -130,15 +130,8 @@ class ToolService:
 
     async def search(self, db: AsyncSession, org_id: uuid.UUID, q: str) -> list[dict[str, Any]]:
         rows = await ToolDefinitionRepository(db).search(org_id, q)
-        return [
-            {
-                "id": (spec.id if (spec := get_by_name(t.name)) else f"tl_{t.name}"),
-                "name": t.name,
-                "description": t.description,
-                "enabled": t.enabled,
-            }
-            for t in rows
-        ]
+        # id 派生规则与 serialize_tool_definition 一致（单一来源）
+        return [{k: serialize_tool_definition(t)[k] for k in ("id", "name", "description", "enabled")} for t in rows]
 
     async def test(self, db: AsyncSession, org_id: uuid.UUID, tool_id: str, params: dict[str, Any]) -> dict[str, Any]:
         row = await self.get_in_org(db, org_id, tool_id)

@@ -13,6 +13,8 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
+from langchain_core.messages import HumanMessage
+
 from app.core.errors import ERR_LLM_FAILURE
 from app.tools.registry import get, get_by_name
 
@@ -21,14 +23,35 @@ logger = logging.getLogger(__name__)
 KEEPALIVE_INTERVAL = 15
 
 
-def _chunk_text(chunk: Any) -> str:
-    """从 AIMessageChunk 提取 text（兼容 content 为 str 或 content blocks 列表；跳过 thinking 块）。"""
-    content = getattr(chunk, "content", "")
+def message_text(content: Any) -> str:
+    """消息文本提取（兼容 str 或 content blocks 列表；跳过 thinking 块）。"""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
         return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
-    return ""
+    return str(content)
+
+
+def _chunk_text(chunk: Any) -> str:
+    """从 AIMessageChunk 提取 text（流式增量块；兼容 str 或 content blocks）。"""
+    return message_text(getattr(chunk, "content", ""))
+
+
+def build_initial_state(agent: Any, content: str) -> dict[str, Any]:
+    """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。"""
+    return {
+        "messages": [HumanMessage(content=content)],
+        "agent_config": {
+            "model": agent.model,
+            "system_prompt": agent.system_prompt,
+            "tools": agent.tools or [],
+            "max_steps": agent.max_steps,
+        },
+        # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs
+        "flags": {"steps": 0},
+        "tool_results": [],
+        "run_logs": [],
+    }
 
 
 async def stream_graph_events(

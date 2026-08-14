@@ -130,6 +130,16 @@ class TaskService:
         await self.set_cancelled(db, task)
         push_event(str(task.id), "cancelled", {"status": "cancelled"})
 
+    @staticmethod
+    def resolve_resume_thread(task: Task) -> str:
+        """恢复目标线程（单一解析点）：pending_confirm.thread_id → conversation_id → task.id。
+
+        chat/invoke 来源的中断任务 thread 是 conversation.id/uuid4（写在 pending_confirm）；
+        后台任务（POST /tasks）无 pending_confirm 时 thread 即 task.id。
+        """
+        pending = task.pending_confirm or {}
+        return str(pending.get("thread_id") or pending.get("conversation_id") or task.id)
+
     async def resume_precheck(self, db: AsyncSession, task: Task) -> None:
         """I8 前置校验（docs 01 §3.4）：状态必须 waiting_confirm 且载荷未超 TTL。"""
         if task.status != "waiting_confirm":

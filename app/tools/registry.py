@@ -53,12 +53,14 @@ class ToolSpec:
 
 
 _REGISTRY: dict[str, ToolSpec] = {}
+_NAME_INDEX: dict[str, str] = {}  # name → id 反向索引（name 唯一性不变量保证单值）
 
 
 def register(spec: ToolSpec) -> None:
     if spec.id in _REGISTRY:
         raise ValueError(f"工具 id 冲突：{spec.id}")
     _REGISTRY[spec.id] = spec
+    _NAME_INDEX[spec.name] = spec.id
 
 
 def get(tool_id: str) -> ToolSpec | None:
@@ -89,11 +91,9 @@ def patch_spec(tool_id: str, **fields: Any) -> None:
 
 
 def get_by_name(name: str) -> ToolSpec | None:
-    """按 ACI 函数名查找（模型 tool_call 里带的是 spec.name）。M1 要求函数名唯一（防遮蔽）。"""
-    for spec in _REGISTRY.values():
-        if spec.name == name:
-            return spec
-    return None
+    """按 ACI 函数名查找（模型 tool_call 里带的是 spec.name）。O(1) 反向索引。"""
+    tool_id = _NAME_INDEX.get(name)
+    return _REGISTRY.get(tool_id) if tool_id else None
 
 
 def agent_can_use(spec: ToolSpec | None, tool_ids: Iterable[str]) -> bool:

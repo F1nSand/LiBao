@@ -11,12 +11,11 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.events import format_sse, make_event
-from app.orchestration.stream_core import stream_graph_events
+from app.core.events import sse_emitter
+from app.orchestration.stream_core import build_initial_state, stream_graph_events
 from app.services.task import TaskService, push_event
 from app.storage.models.agent import AgentConfig
 from app.storage.models.conversation import Conversation
@@ -41,22 +40,6 @@ def _message_dict(msg: Message) -> dict[str, Any]:
         "attachments": msg.attachments or [],
         "trace_id": msg.trace_id,
         "created_at": msg.created_at.isoformat() if msg.created_at else None,
-    }
-
-
-def _agent_state(agent: AgentConfig, content: str) -> dict[str, Any]:
-    return {
-        "messages": [HumanMessage(content=content)],
-        "agent_config": {
-            "model": agent.model,
-            "system_prompt": agent.system_prompt,
-            "tools": agent.tools or [],
-            "max_steps": agent.max_steps,
-        },
-        # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs
-        "flags": {"steps": 0},
-        "tool_results": [],
-        "run_logs": [],
     }
 
 
@@ -95,13 +78,7 @@ async def chat_stream_events(
     trace_id: str,
     model_override: Any = None,
 ) -> AsyncIterator[str]:
-    seq = 0
-
-    def emit(event_type: str, payload: dict[str, Any]) -> str:
-        nonlocal seq
-        seq += 1
-        return format_sse(make_event(event_type, payload, seq))
-
+    emit = sse_emitter()
     msg_repo = MessageRepository(db)
 
     # ---- ① 开头持久化用户消息（message-as-log，刷新可回放）----
@@ -171,7 +148,7 @@ async def chat_stream_events(
 
     async for frame in stream_graph_events(
         graph=graph,
-        initial=_agent_state(agent, content),
+        initial=build_initial_state(agent, content),
         graph_config=graph_config,
         emit=emit,
         on_interrupt=on_interrupt,
@@ -195,15 +172,9 @@ async def resume_stream_events(
     前置状态迁移：approved → running；denied → cancelled（流仍输出 LLM 致歉文本）。
     前端硬约束：续流不得发 message_start（会重置 segments 清掉工具卡）。
     """
-    seq = 0
-
-    def emit(event_type: str, payload: dict[str, Any]) -> str:
-        nonlocal seq
-        seq += 1
-        return format_sse(make_event(event_type, payload, seq))
-
+    emit = sse_emitter()
     pending = task.pending_confirm or {}
-    thread_id = pending.get("thread_id") or pending.get("conversation_id") or str(task.id)
+    thread_id = TaskService.resolve_resume_thread(task)
     conversation_id = uuid.UUID(pending["conversation_id"]) if pending.get("conversation_id") else None
     task_service = TaskService()
 
@@ -263,7 +234,7 @@ async def resume_stream_events(
         # F10：重读任务行，避免覆盖并发取消（与 task_run 一致）
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status != "cancelled":
-            await task_service.set_done(db, updated, final_message=fm)
+            await task_service.set_done(db, updated, final_message=fm)  # set_done 内部 commit（含消息持久化）
             push_event(
                 str(task.id),
                 "done",
@@ -271,7 +242,7 @@ async def resume_stream_events(
             )
         elif updated is not None:
             push_event(str(task.id), "cancelled", {"status": "cancelled"})
-        await db.commit()
+            await db.commit()  # 拒绝分支无 set_done：此处落消息持久化（E5）
         return _done_payload(
             assistant_msg_id, fm.get("token_usage") or totals, _message_dict(assistant_msg) if assistant_msg else None
         )
@@ -309,13 +280,7 @@ async def agent_invoke_events(
 
     中断同样建 Task 承接（conversation_id=None），resume 走任务端点续流。
     """
-    seq = 0
-
-    def emit(event_type: str, payload: dict[str, Any]) -> str:
-        nonlocal seq
-        seq += 1
-        return format_sse(make_event(event_type, payload, seq))
-
+    emit = sse_emitter()
     thread_id = str(uuid.uuid4())
     assistant_msg_id = uuid.uuid4()
     yield emit(
@@ -362,7 +327,7 @@ async def agent_invoke_events(
 
     async for frame in stream_graph_events(
         graph=graph,
-        initial=_agent_state(agent, content),
+        initial=build_initial_state(agent, content),
         graph_config=graph_config,
         emit=emit,
         on_interrupt=on_interrupt,

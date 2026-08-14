@@ -88,14 +88,7 @@ async def execute(spec: ToolSpec, input: dict[str, Any]) -> ToolResult:
     # ③ 幂等去重（执行前查，成功才写）
     idem_key = _fingerprint(spec, input) if spec.idempotent else None
     if idem_key is not None and (cached := _cache_get(idem_key)) is not None:
-        return ToolResult(
-            ok=cached.ok,
-            output=cached.output,
-            summary=cached.summary,
-            duration_ms=cached.duration_ms,
-            error=cached.error,
-            retries=cached.retries,
-        )
+        return cached  # ToolResult 只读，直接返回缓存实例
 
     # ④ 重试循环（仅 handler 普通异常可重试；超时直接返回）
     timeout_sec = spec.timeout_ms / 1000
