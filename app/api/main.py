@@ -52,11 +52,19 @@ async def lifespan(app: FastAPI):
     engine, sessionmaker = init_db(settings)
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker
-    # DB tool_definition.enabled 为事实源 → 启动时同步 registry（停用状态重启不丢，F7）
+    # DB tool_definition.enabled 为事实源 → 启动时同步 registry（仅默认组织；停用状态重启不丢，F7）
     from app.services.tool import ToolService
 
     async with sessionmaker() as session:
-        await ToolService().sync_registry_from_db(session)
+        from sqlalchemy import select
+
+        from app.storage.models.org import Org
+
+        org = (
+            await session.execute(select(Org).where(Org.name == "默认组织", Org.deleted_at.is_(None)))
+        ).scalar_one_or_none()
+        if org is not None:
+            await ToolService().sync_registry_from_db(session, org.id)
     # checkpoint 表由 setup() 创建（须在 alembic upgrade head 之后，langgraph#2570 规避）
     async with PostgresCheckpointer(settings.sync_checkpoint_dsn) as saver:
         app.state.checkpointer = saver

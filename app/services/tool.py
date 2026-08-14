@@ -117,12 +117,14 @@ class ToolService:
         if spec is not None:
             set_enabled(spec.id, False)
 
-    async def sync_registry_from_db(self, db: AsyncSession) -> None:
+    async def sync_registry_from_db(self, db: AsyncSession, org_id: uuid.UUID | None = None) -> None:
         """启动同步（F7）：DB tool_definition.enabled 为事实源 → registry spec 跟随。
 
-        使「停用的内置工具重启后不复活」（约束优先原则）。同名多 org 行时最后一行生效（M2 单 org 场景）。
+        只同步指定 org（种子默认组织）的行——registry 是进程级全局（M2 简化），
+        测试/其他 org 的 enabled=false 行会把内置工具打成禁用（Bug 修复）。
         """
-        rows = await ToolDefinitionRepository(db).list_for_org_all()
+        repo = ToolDefinitionRepository(db)
+        rows = await repo.list_for_org(org_id, limit=10000) if org_id else await repo.list_for_org_all()
         for row in rows:
             spec = get_by_name(row.name)
             if spec is not None:
