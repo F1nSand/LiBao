@@ -65,16 +65,29 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 - **静态前缀稳定**：system_prompt + 工具 ACI 字节稳定 → KV Cache 友好；`agent_version.prefix_hash` 作缓存键。
 - **trace_id 全链路**：ASGI 中间件注入 → REST 信封/SSE 事件 → run_log 落库。
 
-## M2+ 接缝（本轮未实现，架构已预留）
+## M2 已落地 + M2.5+ 接缝
 
-| 里程碑 | 已预留接缝 | 落地位置 |
+### M2 核心闭环（本轮完成）
+- 工具管理：`GET/POST /tools`、`GET/PUT/PATCH/DELETE /tools/{id}`、`POST /tools/{id}/test`、`GET /tools/search`；DB 元数据 + registry 执行实现按 name 绑定，启停同步桥（默认关闭原则实时生效）
+- 中断/恢复：`require_confirm` 工具 → `interrupt()` → Task 行（waiting_confirm + pending_confirm）→ SSE `interrupt` 事件（带 task_id）→ `POST /tasks/{id}/resume`（`Accept: text/event-stream` 续流 / JSON 后台续跑）→ done/cancelled；拒绝分支卡片状态 `cancelled`
+- 任务：`POST/GET /tasks`、`GET /tasks/{id}`、`POST cancel`（40902）、`GET /tasks/{id}/events`（回放+live-tail）；后台运行（asyncio.create_task，完整队列为 M4）
+- 执行策略：失败静默重试（指数退避+抖动，`ToolSpec.max_retries`）+ 幂等去重（进程内缓存）+ 沙盒守卫
+- Agent 版本化：`POST/PUT/DELETE /agents`、`publish/unpublish`、`POST /agents/{id}/invoke`（试跑）；PUT=新版本，publish=发布快照（prefix_hash）
+
+### M2.5+ 接缝（下轮）
+| 接缝 | 现状 | 落地位置 |
 |---|---|---|
-| **M2 工具系统** | 工具 CRUD/沙箱/重试/interrupt-resume | `ToolSpec` 已含 sandbox/require_confirm/allowlist/idempotent；`tools/sandbox.py` none 之外抛 NotImplementedError；`tool_execute` 预留 require_confirm → interrupt |
-| **M2 Agent 版本化** | `PUT /agents` 建新版本 + A/B/回滚 | `agent_versions` 表 + `prefix_hash` 已建 |
-| **M3 记忆/RAG/附件** | 三层记忆、混合检索、附件管线、MinIO | `memory`/`kb_*`/`attachment` 实体在 docs 04 定义；本轮未建表 |
-| **M4 任务/多 Agent** | 异步任务、SSE 订阅、多 Agent 模板 | `task`/`tool_definition`/`run_log` 表已建；`graph.py` route 节点预留多 Agent 挂载 |
-| **M5 评估/日志** | 评估运行、span 树、成本统计 | `run_log` 扁平表已建；`/system/evals` 接口在 docs 03 §5.8 |
-| **M6 RBAC/持续进化** | 完整权限、在线评估迭代 | `user.role` 已存字段；RBAC 约束在 `api/deps.py` |
+| **Docker 沙盒** | executor 对 `sandbox != none` 返回"暂未实现" | `tools/sandbox.py`（SandboxLevel 已备） |
+| **MCP client** | `POST /tools/mcp/register` 未实现 | `tools/mcp_client.py`（新建） |
+| **tool_search 元工具** | REST 版 `GET /tools/search` 已实现；模型侧元工具未做 | `tools/registry.py` |
+| **幂等持久化** | 进程内缓存（TTL 1h/1024 条），重启丢失 | `tools/executor.py` `_idem_cache` → M4 换 Redis |
+| **live-tail 多实例** | 单进程订阅表 | `services/task.py` `_tails` → M4 Redis 广播 |
+| **max_concurrency** | 字段已流动，未强制 | `tools/executor.py` 信号量插入点已注释 |
+| **多确认** | 每节点每轮只确认第一个 require_confirm 工具 | `nodes/tool_execute.py` `confirmed_once` |
+| **任务取消 in-flight** | 取消置状态，后台运行结束时不覆盖 | `orchestration/task_run.py` |
+| **M3 记忆/RAG/附件** | 未建表 | docs 04 定义 |
+| **M5 评估/日志** | `run_log` 扁平表已建 | `/system/evals` 在 docs 03 §5.8 |
+| **M6 RBAC/进化** | `user.role` 已存 | `api/deps.py` |
 
 其他：Redis 服务已起未用（M4 多实例 SSE 广播 / 任务队列）；CORS 已配 `localhost:5173`。
 

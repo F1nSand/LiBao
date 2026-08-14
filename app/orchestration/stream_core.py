@@ -39,12 +39,14 @@ async def stream_graph_events(
     emit: Callable[[str, dict[str, Any]], str],
     on_interrupt: Callable[[dict[str, Any]], Any] | None = None,
     on_final: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
+    on_error: Callable[[Exception], Any] | None = None,
     keepalive_interval: int = KEEPALIVE_INTERVAL,
 ) -> AsyncIterator[str]:
     """驱动 graph.astream → SSE 帧。
 
     - on_interrupt(value)：中断时回调（返回 SSE 帧或 None），随后流结束；
-    - on_final(final_state)：正常结束回调（返回 done payload dict 或 None）。
+    - on_final(final_state)：正常结束回调（返回 done payload dict 或 None）；
+    - on_error(exc)：图级异常回调（后台运行器用它把任务置 failed）。
     """
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 
@@ -80,6 +82,8 @@ async def stream_graph_events(
             if kind == "eof":
                 break
             if kind == "graph_error":
+                if on_error is not None:
+                    await on_error(payload)
                 yield emit("error", {"code": ERR_LLM_FAILURE, "message": str(payload), "retryable": False})
                 return
 

@@ -19,7 +19,7 @@ T1-T13 + review-test-simplify gate 全部完成；start.cmd/start.sh 一键启�
 - [x] T7 任务服务 + 后台运行器（task_run）+ 任务路由（双轨 resume + events 回放/live-tail）
 - [x] T8 Agent 写接口 + 版本化 + invoke
 - [x] T9 内置确认演示工具（tl_demo_notify）+ seed
-- [ ] T10 收尾 gate（ruff + 全量测试 ≥20 + README 接缝表 + 端到端验证）
+- [x] T10 收尾 gate（ruff + 全量测试 ≥20 + README 接缝表 + 端到端验证）
 
 ## 执行记录
 - T1 完成：40405/40903 + task_confirm_ttl_hours=24 ✅
@@ -31,4 +31,11 @@ T1-T13 + review-test-simplify gate 全部完成；start.cmd/start.sh 一键启�
 - T7 完成：TaskService（状态机/live-tail/resume_precheck I8）+ TaskRepository + task_run.py 后台运行器 + /tasks 路由（双轨 resume + events 回放/live-tail，终态回放即关流）；pytest 5 项 ✅
 - T8 完成：AgentService create/update/publish/unpublish/soft_delete/_snapshot（compute_prefix_hash）+ /agents 写路由 + invoke（agent_invoke_events 轻量路径）+ serialize_agent_version name；pytest 5 项 ✅；总测试 40 项
 - T9 完成：tl_demo_notify（require_confirm=True, USER_COMMS）+ seed 泛化工具创建 + **修复 seed 缺 org 过滤**（测试数据污染导致 MultipleResultsFound）；种子双跑幂等 ✅；总测试 40 项
-- T10 进行中：README 接缝表 + 端到端验证
+- T10 完成：README M2 接缝表 + 端到端验证（真实 DeepSeek）✅
+  - 工具 CRUD/test/搜索、Agent 版本化 v1→v2→v3、任务提交→done、cancel 40902 全过
+  - interrupt→resume 闭环：chat 流 message_start→tool_call→interrupt（带 task_id）→ resume 确认 → tool_result+token+done（任务 done）/ 拒绝 → 无 tool_result + 卡片 cancelled（任务 cancelled）✅
+- ⚠ 深度坑（已修）：DeepSeek 推理模型（deepseek-v4-flash）多轮工具调用报 400 "reasoning_content must be passed back"——
+  langchain-litellm 0.7.0 `_convert_message_to_dict` 丢 thinking 且不输出 reasoning_content，且 content 变字符串数组。
+  → core/llm.py `_patch_reasoning_content_passthrough`（透传 reasoning_content + content 规范化为纯文本）；顺带 finalize 提取纯文本 content
+- ⚠ 已修：task_run 图级异常（LLM 失败）→ stream_core 加 on_error 回调 → 任务置 failed（此前会永远卡 running）
+- **M2 核心闭环全部完成**：T1-T10 ✅，40 项测试全绿 → 下一环节 review-test-simplify 收尾 gate

@@ -101,6 +101,16 @@ async def _run_graph_common(
                 )
             return None
 
+        async def on_error(exc: Exception) -> None:
+            # 图级异常（LLM 失败等）：任务置 failed（stream_core 已发 error 帧）
+            updated = await repo.get_by_id(task_id)
+            if updated is None:
+                return None
+            if updated.status == "running":
+                await svc.set_failed(db, updated, str(exc))
+                push_event(str(task_id), "error", {"code": 60001, "message": str(exc), "retryable": True})
+            return None
+
         async for _ in stream_graph_events(
             graph=graph,
             initial=initial,
@@ -108,6 +118,7 @@ async def _run_graph_common(
             emit=_noop_emit,
             on_interrupt=on_interrupt,
             on_final=on_final,
+            on_error=on_error,
         ):
             pass
 
