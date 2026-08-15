@@ -140,8 +140,9 @@ async def test_memory_version_unique_constraint(m3_fixture):
         await session.commit()
         v1_dup = LongTermMemoryVersion(memory_id=card.id, version=1, content={"text": "b"}, importance=0.6)
         session.add(v1_dup)
-        with pytest.raises(Exception):
+        with pytest.raises(Exception) as exc:  # noqa: B017  UNIQUE 违反的具体类型由驱动决定
             await session.commit()
+        assert "unique" in str(exc.value).lower() or "duplicate" in str(exc.value).lower()
         await session.rollback()
 
 
