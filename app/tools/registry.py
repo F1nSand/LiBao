@@ -39,6 +39,8 @@ class ToolSpec:
     max_retries: int = 0  # 失败静默重试次数（docs 01 §5.4；0=不重试）
     allowlist: list[str] | None = None
     handler: Callable[..., Any] | None = None
+    meta: bool = False  # 平台元工具（tool_search）：超限模式常驻注入 ACI + 执行守卫放行（M2.5）
+    builtin: bool = False  # 内置工具（平台拥有）：DB 行可绑定（I4 查重豁免 tl_ 前缀的显式表达）
 
     def aci(self) -> dict[str, Any]:
         """OpenAI function schema（ACI）。函数名 = spec.name。"""

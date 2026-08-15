@@ -15,7 +15,25 @@ from langgraph.types import interrupt
 
 from app.orchestration.state_schema import AgentState
 from app.tools import executor
+from app.tools.builtin.tool_search import selected_names
 from app.tools.registry import agent_can_use, get, get_by_name
+
+
+def _result(
+    tc: dict, position: int, *, status: str, ok: bool, output: Any, summary: str = "", duration_ms: int = 0
+) -> dict:
+    """工具结果条目（docs 04 §3.2 message.tool_calls shape，三个分支共用）。"""
+    return {
+        "tool_call_id": tc["id"],
+        "tool_name": tc["name"],
+        "position": position,
+        "input": tc.get("args", {}),
+        "output": output,
+        "ok": ok,
+        "status": status,
+        **({"summary": summary} if summary else {}),
+        "duration_ms": duration_ms,
+    }
 
 
 async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] = None) -> dict[str, Any]:  # noqa: UP045  LangGraph 需 Optional 形式
@@ -28,28 +46,17 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
     state_selected: list[str] | None = None  # M2.5：本轮 tool_search 选中（None = 未触发，保留旧值）
 
     # 授权谓词与 acis_for_tools 共用 agent_can_use（单一不变量）。
-    # I7：tl_tool_search 是平台元工具（无害只读发现），超限模式强制注入其 ACI，
+    # I7：spec.meta 平台元工具（tool_search，无害只读发现），超限模式强制注入其 ACI，
     # 守卫同步放行（仅要求 enabled），与 build_agent_tools 的注入谓词一致。
     agent_tool_ids = set(state.get("agent_config", {}).get("tools", []) or [])
     for position, tc in enumerate(last.tool_calls or []):
         spec = get_by_name(tc["name"]) or get(tc["name"])
-        meta_tool = spec is not None and spec.id == "tl_tool_search"
+        meta_tool = spec is not None and spec.meta
         # 授权校验：只执行 agent 启用集内且 enabled 的工具（防模型幻觉/上下文投毒调用越权工具）
         if not (meta_tool and spec.enabled) and not agent_can_use(spec, agent_tool_ids):
             content = f"未知或未启用工具: {tc['name']}"
             tool_msgs.append(ToolMessage(content=content, tool_call_id=tc["id"]))
-            results.append(
-                {
-                    "tool_call_id": tc["id"],
-                    "tool_name": tc["name"],
-                    "position": position,
-                    "input": tc.get("args", {}),
-                    "output": None,
-                    "ok": False,
-                    "status": "error",
-                    "duration_ms": 0,
-                }
-            )
+            results.append(_result(tc, position, status="error", ok=False, output=None))
             continue
 
         # M2：预检-确认两段式（docs 01 §7.3 层③）——不可逆操作需人工确认
@@ -69,19 +76,7 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
             if not approved:
                 content = f"用户已取消对工具 {spec.name} 的调用。"
                 tool_msgs.append(ToolMessage(content=content, tool_call_id=tc["id"]))
-                results.append(
-                    {
-                        "tool_call_id": tc["id"],
-                        "tool_name": spec.name,
-                        "position": position,
-                        "input": tc.get("args", {}),
-                        "output": None,
-                        "ok": False,
-                        "status": "cancelled",
-                        "summary": "",
-                        "duration_ms": 0,
-                    }
-                )
+                results.append(_result(tc, position, status="cancelled", ok=False, output=None))
                 run_logs.append(
                     {
                         "node": "tool_execute",
@@ -97,25 +92,21 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
 
         result = await executor.execute(spec, tc.get("args") or {})
 
-        # M2.5：LLM 调用 tool_search 后 → 把匹配结果写入 selected_tool_names（两段式 ACI 注入）。
-        # M1：matches 键存在即处理（空结果 → [] 清空旧选中，防残留陈旧注入）；
-        # 一轮内多次 tool_search 合并（去重保序）。
-        if spec.id == "tl_tool_search" and isinstance(result.output, dict) and "matches" in result.output:
-            selected = [m["name"] for m in result.output["matches"] if m.get("enabled")][:5]
-            state_selected = list(dict.fromkeys((state_selected or []) + selected))
+        # M2.5：LLM 调用元工具（tool_search）后 → 选中写入 selected_tool_names（两段式 ACI 注入）。
+        # M1：空结果 → [] 清空旧选中；一轮内多次调用合并（去重保序）。契约见 tool_search.selected_names。
+        if spec.meta and isinstance(result.output, dict) and "matches" in result.output:
+            state_selected = list(dict.fromkeys((state_selected or []) + selected_names(result.output)))
 
         results.append(
-            {
-                "tool_call_id": tc["id"],
-                "tool_name": spec.name,
-                "position": position,
-                "input": tc.get("args", {}),
-                "output": result.output,
-                "ok": result.ok,
-                "summary": result.summary,
-                "status": "done" if result.ok else "error",
-                "duration_ms": result.duration_ms,
-            }
+            _result(
+                tc,
+                position,
+                status="done" if result.ok else "error",
+                ok=result.ok,
+                output=result.output,
+                summary=result.summary,
+                duration_ms=result.duration_ms,
+            )
         )
         content = result.summary if result.ok else f"错误: {result.error}"
         tool_msgs.append(ToolMessage(content=content, tool_call_id=tc["id"]))

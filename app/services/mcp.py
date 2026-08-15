@@ -38,6 +38,18 @@ from app.tools.registry import ToolSpec, ToolType, get_by_name, register, unregi
 from app.tools.sandbox import SandboxLevel
 
 
+def conn_config_from_server(server: McpServer) -> McpConnConfig:
+    """DB 行 → 运行时连接配置（启动重建/执行路径唯一映射点）。"""
+    return McpConnConfig(
+        transport=server.transport, command=server.command, url=server.url, headers=server.headers
+    )
+
+
+def mcp_spec_id(server_name: str, tool_name: str) -> str:
+    """MCP spec id 派生（registry 键 + API 序列化 id 单一来源）。"""
+    return f"mc_{slugify(server_name)}_{slugify(tool_name)}"
+
+
 def _make_mcp_handler(server_id: str, cfg: McpConnConfig, tool_name: str):
     """MCP 工具 handler：经 manager 惰性连接执行；失败（含熔断）抛异常 → executor 错误路径。"""
 
@@ -51,9 +63,9 @@ def _make_mcp_handler(server_id: str, cfg: McpConnConfig, tool_name: str):
 
 
 def build_mcp_spec(server: McpServer, row: ToolDefinition, cfg: McpConnConfig) -> ToolSpec:
-    """从 DB 行重建 MCP spec（启动同步 T5）：handler 惰性绑定，raw 名从 mcp_tool_name 取。"""
+    """从 DB 行重建 MCP spec（register 与启动同步 T5 共用）：handler 惰性绑定，raw 名从 mcp_tool_name 取。"""
     return ToolSpec(
-        id=f"mc_{slugify(server.name)}_{slugify(row.name)}",
+        id=mcp_spec_id(server.name, row.name),
         name=row.name,
         description=row.description,
         params_schema=row.params_schema,
@@ -84,7 +96,7 @@ class McpService:
 
         # 第一遍：全量校验工具名（无副作用，冲突整体拒绝不产生半注册）。
         # I1：源内 slug 撞名（"HTTP GET" vs "http-get"）也在此拒绝，防第二遍 register 抛 ValueError。
-        # I4：查全 org（registry 全局化后任何 org 同名行都会绑定到 spec）。
+        # I4：查全 org（registry 全局化后任何 org 同名行都会绑定到 spec）；批量查重（一条 IN 查询）。
         tool_repo = ToolDefinitionRepository(db)
         planned: list[tuple[Any, str]] = []
         seen_slugs: set[str] = set()
@@ -95,9 +107,15 @@ class McpService:
             if tool_name in seen_slugs:
                 raise AppError(ERR_TOOL_NAME_CONFLICT, f"工具名 {tool_name} 在源内重复（slug 冲突）")
             seen_slugs.add(tool_name)
-            if get_by_name(tool_name) is not None or await tool_repo.name_exists_any_org(tool_name):
+            if get_by_name(tool_name) is not None:
                 raise AppError(ERR_TOOL_NAME_CONFLICT, f"工具名 {tool_name} 已被占用（I7 遮蔽拒绝）")
             planned.append((t, tool_name))
+        if seen_slugs:
+            existing = await tool_repo.names_exist_any_org(list(seen_slugs))
+            if existing:
+                raise AppError(
+                    ERR_TOOL_NAME_CONFLICT, f"工具名 {'、'.join(sorted(existing))} 已被占用（I7 遮蔽拒绝）"
+                )
 
         server = server_repo.create(
             org_id=user.org_id,
@@ -110,7 +128,7 @@ class McpService:
         )
         await db.flush()
 
-        # 第二遍：建行 + 注册 spec（此时不再抛业务错，无部分写入）
+        # 第二遍：建行 + 注册 spec（此时不再抛业务错，无部分写入）；spec 构造复用 build_mcp_spec
         tool_rows: list[ToolDefinition] = []
         for t, tool_name in planned:
             row = await tool_repo.create(
@@ -123,19 +141,7 @@ class McpService:
                 mcp_source=f"mcp:{server.id}",
                 mcp_tool_name=t.name,  # 原始工具名（重启重建 spec 时透传 call_tool）
             )
-            spec = ToolSpec(
-                id=f"mc_{slugify(name)}_{tool_name}",
-                name=tool_name,
-                description=row.description,
-                params_schema=row.params_schema,
-                enabled=False,
-                sandbox=SandboxLevel.NONE,
-                tool_type=ToolType.EXECUTION,
-                mcp_source=row.mcp_source,
-                timeout_ms=30000,
-                handler=_make_mcp_handler(str(server.id), cfg, t.name),
-            )
-            register(spec)
+            register(build_mcp_spec(server, row, cfg))
             tool_rows.append(row)
         await db.commit()
         await db.refresh(server)
@@ -163,13 +169,14 @@ class McpService:
             ToolDefinition.deleted_at.is_(None),
         )
         tool_rows = list((await db.execute(stmt)).scalars())
-        await McpServerRepository(db).soft_delete(server)
+        server_repo = McpServerRepository(db)
+        tool_repo = ToolDefinitionRepository(db)
+        await server_repo.soft_delete(server)
+        # 软删行 + 摘除 registry spec（I3：不残留 → 同进程重注册不被假 40903 挡）
         for row in tool_rows:
-            await ToolDefinitionRepository(db).soft_delete(row)
-        await db.commit()
-        # I3：摘除 registry spec（不残留 → 同进程重注册不再被假 40903 挡住）+ 熔断状态清理
-        for row in tool_rows:
+            await tool_repo.soft_delete(row)
             spec = get_by_name(row.name)
             if spec is not None:
                 unregister(spec.id)
+        await db.commit()
         await manager.close_connection(str(server.id))

@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import socket
 import uuid
 
 import pytest
@@ -19,17 +18,9 @@ from app.core.errors import (
 from app.storage.db import init_db
 from app.storage.models import McpServer, Org
 from app.storage.models.mcp_server import McpServer as McpServerDirect
+from tests.conftest import requires_db
 
-
-def _db_reachable() -> bool:
-    try:
-        with socket.create_connection(("localhost", 5432), timeout=2):
-            return True
-    except OSError:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason="Docker db 未运行")
+pytestmark = requires_db
 
 
 @pytest.fixture

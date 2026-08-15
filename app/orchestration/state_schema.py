@@ -16,8 +16,6 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
     # 当前启用的 Agent 配置（快照 dict，源自 agent_version）
     agent_config: dict[str, Any]
-    # 启用的工具 ACI（dict 列表，静态前缀之一，已按 id 排序）
-    active_tools: list[dict[str, Any]]
     # M2.5 两段式：tool_search 选中注入的工具名（LastValue，上限 5，由 tool_execute 写入）
     selected_tool_names: list[str]
     # 工具执行结果（本轮，供 finalize 校验）

@@ -10,7 +10,7 @@ from langchain_core.messages import BaseMessage, SystemMessage
 from app.core.config import get_settings
 from app.core.prefix import compute_prefix_hash  # noqa: F401  重导出供 seed/测试复用
 from app.orchestration.state_schema import AgentState
-from app.tools.registry import acis, agent_can_use, get, get_by_name
+from app.tools.registry import ToolSpec, acis, agent_can_use, get, get_by_name
 
 
 def static_prefix_aci() -> list[dict]:
@@ -18,12 +18,14 @@ def static_prefix_aci() -> list[dict]:
     return acis()
 
 
-def acis_for_tools(tool_ids: list[str]) -> list[dict]:
-    """agent_config.tools（工具 id 列表）→ 启用的 ACI，按 id 排序（前缀稳定）。
+def _authorized_specs(tool_ids: list[str], id_set: set[str]) -> list[ToolSpec]:
+    """agent 启用集 → 授权 spec（与 tool_execute 执行守卫共用 agent_can_use 单一不变量）。"""
+    return [s for tid in tool_ids if (s := get(tid)) is not None and agent_can_use(s, id_set)]
 
-    授权谓词与 tool_execute 执行守卫共用 agent_can_use（同一不变量）。
-    """
-    specs = [s for tid in tool_ids if (s := get(tid)) is not None and agent_can_use(s, tool_ids)]
+
+def acis_for_tools(tool_ids: list[str]) -> list[dict]:
+    """agent_config.tools（工具 id 列表）→ 启用的 ACI，按 id 排序（前缀稳定）。"""
+    specs = _authorized_specs(tool_ids, set(tool_ids))
     return [s.aci() for s in sorted(specs, key=lambda s: s.id)]
 
 
@@ -33,7 +35,8 @@ def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = No
     启用工具数 ≤ aci_full_limit → 维持现状全量 ACI（现有场景零行为变化）；
     超过 → tool_search 常驻 + 上次搜索选中的工具 ACI（渐进式披露），选中按授权过滤。
     """
-    specs = [s for tid in tool_ids if (s := get(tid)) is not None and agent_can_use(s, tool_ids)]
+    id_set = set(tool_ids)
+    specs = _authorized_specs(tool_ids, id_set)
     if len(specs) <= get_settings().aci_full_limit:
         return [s.aci() for s in sorted(specs, key=lambda s: s.id)]
     tool_search = get("tl_tool_search")
@@ -41,8 +44,8 @@ def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = No
         s
         for n in (selected_names or [])
         if (s := get_by_name(n)) is not None
-        and agent_can_use(s, tool_ids)
-        and s.id != "tl_tool_search"
+        and agent_can_use(s, id_set)
+        and not s.meta
     ]
     aci = [tool_search.aci()] if tool_search is not None and tool_search.enabled else []
     return aci + [s.aci() for s in sorted(chosen, key=lambda s: s.id)]

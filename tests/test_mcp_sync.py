@@ -6,7 +6,6 @@ server 停用 → 工具禁用、同步幂等、全量 sync 覆盖所有 org（I
 """
 from __future__ import annotations
 
-import socket
 import uuid
 
 import pytest
@@ -18,28 +17,15 @@ from app.storage.models import Org, User
 from app.storage.repositories.mcp_server import McpServerRepository
 from app.storage.repositories.tool_definition import ToolDefinitionRepository
 from app.tools import executor
-from app.tools.builtin import register_builtin_tools
 from app.tools.mcp_manager import manager as mcp_manager
-from app.tools.registry import all_tools, get, get_by_name, unregister
+from app.tools.registry import get, get_by_name
+from tests.conftest import requires_db
 
-
-def _db_reachable() -> bool:
-    try:
-        with socket.create_connection(("localhost", 5432), timeout=2):
-            return True
-    except OSError:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason="Docker db 未运行")
+pytestmark = requires_db
 
 
 @pytest.fixture
-async def sync_fixture(monkeypatch):
-    register_builtin_tools()
-    # 进程级 registry：setup 幂等清理历史 MCP spec（async teardown 延迟执行，不可靠）
-    for spec in [s for s in all_tools() if s.id.startswith("mc_")]:
-        unregister(spec.id)
+async def sync_fixture(clean_mcp_specs, monkeypatch):
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
     tool_a, tool_b = f"echo_{uid}", f"add_{uid}"

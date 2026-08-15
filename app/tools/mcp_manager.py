@@ -26,17 +26,16 @@ class CircuitBreaker:
 
     def is_open(self) -> bool:
         """OPEN 且仍在冷却期内 → True（拒绝）。"""
-        return (
-            self._consecutive >= self.threshold
-            and self._opened_at is not None
-            and time.monotonic() - self._opened_at < self.cooldown_s
-        )
+        return self._consecutive >= self.threshold and time.monotonic() - self._opened_at < self.cooldown_s
 
     def allow(self) -> bool:
-        """CLOSED 恒放行；冷却结束后的首次调用 HALF_OPEN 放行一次，之后拒绝等待复位。"""
+        """CLOSED 恒放行；冷却结束后的首次调用 HALF_OPEN 放行一次，之后拒绝等待复位。
+
+        不变量：_consecutive >= threshold ⟹ _opened_at 非 None（record_failure 达阈值必设）。
+        """
         if self._consecutive < self.threshold:
             return True
-        if self._opened_at is not None and time.monotonic() - self._opened_at >= self.cooldown_s:
+        if time.monotonic() - self._opened_at >= self.cooldown_s:
             if not self._half_open_used:
                 self._half_open_used = True
                 return True
@@ -87,7 +86,7 @@ class MCPManager:
         故每次调用独立建连、用完即关（stdio 每次起子进程，~1s；会话复用列为 M4 接缝）。
         """
         breaker = self._breaker(server_id)
-        if breaker.is_open() or not breaker.allow():
+        if not breaker.allow():  # CLOSED 恒放行；OPEN 冷却内拒绝；HALF_OPEN 探针放行一次
             return False, f"MCP 源熔断中（{server_id}）"
         conn = self._create_connection(server_id, cfg)
         try:

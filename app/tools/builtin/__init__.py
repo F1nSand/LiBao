@@ -25,6 +25,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=5000,
             handler=time_now.handler,
+            builtin=True,
         )
     )
     register(
@@ -50,6 +51,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=5000,
             handler=demo_notify.handler,
+            builtin=True,
         )
     )
     register(
@@ -73,5 +75,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=5000,
             handler=tool_search.tool_search_handler,
+            meta=True,  # 平台元工具：超限模式常驻注入 + 执行守卫放行（与编排两处谓词单一来源）
+            builtin=True,
         )
     )

@@ -10,20 +10,39 @@ from typing import Any
 
 from app.tools.registry import all_tools
 
+_SELECT_LIMIT = 5  # 两段式选中注入上限（docs 01 §7.1.1：选中 1-2 个，防上下文爆炸）
 
-def _search_catalog(catalog: list, q: str) -> list[dict]:
-    """匹配逻辑（独立函数：I4 降级只兜匹配失败，不兜目录获取）。"""
+
+def _catalog_projection(catalog: list, include_mcp_source: bool) -> list[dict]:
+    """spec → 目录条目（仅名称+路由描述，不含 params_schema；降级路径也复用此投影）。"""
     return [
         {
             "id": spec.id,
             "name": spec.name,
             "description": spec.description,
             "enabled": spec.enabled,
-            "mcp_source": spec.mcp_source,
+            **({"mcp_source": spec.mcp_source} if include_mcp_source else {}),
         }
         for spec in catalog
-        if q in spec.name.lower() or q in (spec.description or "").lower()
     ]
+
+
+def _search_catalog(catalog: list, q: str, include_mcp_source: bool = True) -> list[dict]:
+    """匹配逻辑（独立函数：I4 降级只兜匹配失败，不兜目录获取）。"""
+    q = q.lower()
+    return [
+        m for m in _catalog_projection(catalog, include_mcp_source)
+        if q in m["name"].lower() or q in (m["description"] or "").lower()
+    ]
+
+
+def selected_names(result: dict[str, Any]) -> list[str]:
+    """tool_search 结果 → 选中工具名（两段式注入的消费契约，tool_execute 唯一调用点）。
+
+    matches 键存在即处理：空结果 → []（清空旧选中，防残留陈旧注入）。
+    """
+    matches = result.get("matches") or []
+    return [m["name"] for m in matches if m.get("enabled")][:_SELECT_LIMIT]
 
 
 async def tool_search_handler(query: str) -> dict[str, Any]:
@@ -37,8 +56,6 @@ async def tool_search_handler(query: str) -> dict[str, Any]:
         matches.sort(key=lambda m: m["id"])
         return {"matches": matches}
     except Exception:  # noqa: BLE001  I4：检索逻辑挂 → 降级全量目录（仅名称+路由描述），不阻塞模型
-        fallback = [
-            {"id": s.id, "name": s.name, "description": s.description, "enabled": s.enabled} for s in catalog
-        ]
+        fallback = _catalog_projection(catalog, include_mcp_source=False)  # 不经过检索逻辑
         fallback.sort(key=lambda m: m["id"])
         return {"matches": fallback, "hint": None}

@@ -5,7 +5,6 @@ validate 用 monkeypatch 固定返回（不真连 server）。
 """
 from __future__ import annotations
 
-import socket
 import uuid
 
 import pytest
@@ -18,20 +17,11 @@ from app.services.tool import ToolService
 from app.storage.db import init_db
 from app.storage.models import McpServer, Org, User
 from app.storage.repositories.mcp_server import McpServerRepository
-from app.tools.builtin import register_builtin_tools
 from app.tools.mcp_client import McpConnectError, McpToolInfo
-from app.tools.registry import all_tools, get, get_by_name, unregister
+from app.tools.registry import get, get_by_name
+from tests.conftest import requires_db
 
-
-def _db_reachable() -> bool:
-    try:
-        with socket.create_connection(("localhost", 5432), timeout=2):
-            return True
-    except OSError:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason="Docker db 未运行")
+pytestmark = requires_db
 
 
 def _fake_tools(uid: str, second_server: bool = False) -> list[McpToolInfo]:
@@ -45,12 +35,7 @@ def _fake_tools(uid: str, second_server: bool = False) -> list[McpToolInfo]:
 
 
 @pytest.fixture
-async def mcp_api_fixture(monkeypatch):
-    register_builtin_tools()
-    # 进程级 registry：async fixture 的 teardown 延迟执行（loop 关闭时），跨测试残留不可靠，
-    # 改在 setup 幂等清理历史 MCP spec（顺序无关）
-    for spec in [s for s in all_tools() if s.id.startswith("mc_")]:
-        unregister(spec.id)
+async def mcp_api_fixture(clean_mcp_specs, monkeypatch):
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
     async with sessionmaker() as session:

@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import socket
 import uuid
 
 import pytest
@@ -19,17 +18,9 @@ from app.storage.db import init_db
 from app.storage.models import Org, User
 from app.tools.builtin import register_builtin_tools
 from app.tools.registry import get, set_enabled
+from tests.conftest import requires_db
 
-
-def _db_reachable() -> bool:
-    try:
-        with socket.create_connection(("localhost", 5432), timeout=2):
-            return True
-    except OSError:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason="Docker db 未运行")
+pytestmark = requires_db
 
 
 @pytest.fixture

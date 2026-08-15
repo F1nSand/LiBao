@@ -41,6 +41,15 @@ class ToolDefinitionRepository:
         )
         return (await self.session.execute(stmt)).first() is not None
 
+    async def names_exist_any_org(self, names: list[str]) -> list[str]:
+        """批量全 org 查重（register 第一遍一条 IN 查询，避免每工具一次往返）。"""
+        stmt = (
+            select(ToolDefinition.name)
+            .where(ToolDefinition.name.in_(names), ToolDefinition.deleted_at.is_(None))
+            .distinct()
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
     async def list_for_org(
         self,
         org_id: uuid.UUID,

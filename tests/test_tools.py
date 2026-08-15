@@ -7,15 +7,13 @@ import pytest
 
 from app.tools import executor
 from app.tools.builtin import register_builtin_tools
-from app.tools.registry import ToolSpec, acis, all_tools, get, register, unregister
+from app.tools.registry import ToolSpec, acis, get, register, unregister
 
 
 @pytest.fixture(autouse=True)
-def _register():
+def _register(clean_mcp_specs):
+    # 共享 conftest：register_builtin_tools + 幂等清理历史 MCP spec（acis 排序断言依赖纯净 registry）
     register_builtin_tools()
-    # 幂等清理历史 MCP spec（其他测试进程内残留，acis 前缀排序断言依赖纯净 registry）
-    for spec in [s for s in all_tools() if s.id.startswith("mc_")]:
-        unregister(spec.id)
 
 
 def test_registry_get_returns_spec():

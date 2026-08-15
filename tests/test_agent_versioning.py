@@ -6,7 +6,6 @@ unpublish、软删保留版本、invoke 试跑帧序且不落消息。
 from __future__ import annotations
 
 import json
-import socket
 import uuid
 
 import pytest
@@ -23,17 +22,9 @@ from app.storage.models import Org, User
 from app.storage.repositories.agent import AgentRepository
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
+from tests.conftest import requires_db
 
-
-def _db_reachable() -> bool:
-    try:
-        with socket.create_connection(("localhost", 5432), timeout=2):
-            return True
-    except OSError:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason="Docker db 未运行")
+pytestmark = requires_db
 
 
 class FakeChatModel:
