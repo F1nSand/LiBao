@@ -156,7 +156,8 @@ async def test_memory_trace_is_append_only(m3_fixture):
 async def test_kb_chunks_hnsw_and_gin_indexes(m3_fixture):
     sessionmaker, user = m3_fixture
     async with sessionmaker() as session:
-        indexes = (await session.execute(text("SELECT indexname FROM pg_indexes WHERE tablename='kb_chunks'"))).scalars().all()
+        rows = await session.execute(text("SELECT indexname FROM pg_indexes WHERE tablename='kb_chunks'"))
+        indexes = rows.scalars().all()
         assert any("hnsw" in i for i in indexes), f"缺少 HNSW 索引: {indexes}"
         assert any("gin" in i for i in indexes), f"缺少 GIN 索引: {indexes}"
         # UNIQUE(document_id, chunk_index)
