@@ -132,9 +132,25 @@ class MemoryService:
         return [serialize_longterm_version(v, card.title) for v in await MemoryRepository(db).list_versions(card.id)]
 
 
-def _extract_json(text: str) -> dict:
+def _content_to_text(content: Any) -> str:
+    """LLM content 规范化：str 直用；blocks 列表跳过 thinking 块（推理链），
+    保留 text 块与裸字符串块（DeepSeek v4-flash 会把最终输出放在末位裸 str 块）。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for b in content:
+            if isinstance(b, str):
+                parts.append(b)
+            elif isinstance(b, dict) and b.get("type") != "thinking":
+                parts.append(b.get("text", ""))
+        return "".join(parts)
+    return str(content)
+
+
+def _extract_json(text: Any) -> dict:
     """LLM 输出 → dict。剥 ```json 围栏，取首个 { 到末个 }（DeepSeek 推理模型会包 markdown）。"""
-    stripped = text.strip()
+    stripped = _content_to_text(text).strip()
     if stripped.startswith("```"):
         stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
         stripped = re.sub(r"\s*```$", "", stripped)

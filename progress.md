@@ -19,7 +19,25 @@
 - [ ] T10 消息 attachments 链路 + memory_trace + 收尾
 
 ## 执行记录（M3）
-（T1 起记录）
+- T1 完成：迁移 0004（pgvector 扩展 + 七表 + HNSW/GIN/GENERATED tsvector CJK unigram raw string）+ Settings/errors（40407/40408/40409/40905）+ sessionmaker 桥 + 8 项测试 ✅
+- T2 完成：chunker（字符滑窗 512/64）+ EmbeddingService（httpx SiliconFlow OpenAI 兼容，批量/重试/维度校验 1024）+ 13 项测试 ✅
+- T3 完成：记忆域（memory_trace append-only + longterm CRUD/版本只增/软删 + /memory/* 路由，tags 列补迁移）+ 6 项测试 ✅
+- T4 完成：/memory/maintenance（LLM 整理 + _extract_json 围栏 + 单事务 apply + 60001 retryable）+ 6 项测试 ✅
+- T5 完成：memory_inject 节点（每轮 top-N importance 注入，历史后/状态栏前渲染，静默降级不击穿）+ graph 拓扑改造 + 6 项测试 + 全量回归 ✅
+- T6 完成：KB 集合/文档 CRUD + 后台索引流水线（uploaded→indexed/failed，re-read 防并发，reindex 幂等，级联硬删）+ /kb/* 路由 + 8 项测试 ✅
+- T7 完成：/kb/search 混合检索（语义 HNSW cosine + BM25 tsvector/ts_rank + RRF k=60，语义故障降级 bm25-only）+ 7 项测试 ✅
+- T8 完成：kb_search 内置工具（ContextVar org 上下文 + sessionmaker 桥 + hybrid_search 下沉 repo 单一来源 + EmbeddingService 移 core 层）+ seed + 5 项测试 ✅
+- T9 完成：附件（/uploads 落盘 + 二进制流 + 分析状态机：图片 I2 降级/txt 提取/pdf metadata + 错误码 40011/40012/40403/50002/60004）+ 9 项测试 ✅
+- T10 完成：消息 attachments 链路（校验 40403→落库→回填 conversation_id/message_id）+ memory_trace 轨迹（user+assistant 每轮各一条）+ README M3 接缝表 + 2 项测试 ✅
+- **M3 全部完成**：T1-T10 ✅，176/176 测试全绿，ruff clean → review-test-simplify gate（待执行）
+- **端到端验证（真实 SiliconFlow embedding + 真实 DeepSeek）**：
+  - RAG 全链：建集合 → 传 txt → 后台链真实向量化 → indexed → 混合检索（语义+BM25 双命中 RRF 0.0164）→ 纯 bm25 中文命中 ✓
+  - kb_search 工具：DeepSeek 并行调用 kb_search（"产品支持哪些能力"）+ time_now → 基于检索结果作答 ✓
+  - 附件链：图片上传 → ready + I2 降级文本"无法分析: 当前部署无视觉模型" ✓
+  - 记忆链：卡片创建 → 真实 maintenance（DeepSeek 整理：更新 1 + 新建 1）✓
+  - ⚠ 实测坑（已修）：DeepSeek v4-flash 的 content 是 blocks 列表——thinking 块（推理链）+ **末位裸 str 块（最终输出）**；
+    `_content_to_text`/`message_text` 只拼 dict text 块导致 JSON/回答丢失 → 修复：跳过 thinking 块、保留裸 str 块
+  - SiliconFlow Qwen3-Embedding-0.6B 实测返回 1024 维 ✓（.env 已配 key，不入库）
 
 ---
 
