@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.schemas.tools import McpRegisterRequest
 from app.core.errors import (
     ERR_MCP_CONNECT,
     ERR_MCP_NAME_CONFLICT,
@@ -19,7 +20,6 @@ from app.core.errors import (
     ERR_TOOL_NAME_CONFLICT,
     AppError,
 )
-from app.api.schemas.tools import McpRegisterRequest
 from app.services.serializers import serialize_mcp_server, serialize_tool_definition
 from app.storage.models.mcp_server import McpServer
 from app.storage.models.tool_definition import ToolDefinition
