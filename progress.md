@@ -39,6 +39,34 @@
     `_content_to_text`/`message_text` 只拼 dict text 块导致 JSON/回答丢失 → 修复：跳过 thinking 块、保留裸 str 块
   - SiliconFlow Qwen3-Embedding-0.6B 实测返回 1024 维 ✓（.env 已配 key，不入库）
 
+## Gate2 Review 发现（两路合并去重后 14 项，**恢复点：修全部并进 Simplify gate**）
+
+### 🔴 HIGH
+1. **S1 契约断裂：`POST /uploads` 响应缺 `attachment_id`** —— serialize_attachment 返回 `id`，前端 AttachmentUploader 消费 `res.attachment_id` → 附件→消息链路断裂。修：serializers.py 加 attachment_id 字段（保留 id 兼容）
+2. **C1 kb_pipeline 插库阶段无异常捕获** —— `delete_chunks`/`insert_chunks`/commit 抛异常逃出 process_document → 文档永久卡 "indexing"（reindex/archive 都 40901 无出口）。修：try 包住插库段 → `_fail`
+
+### 🟡 MEDIUM
+3. **C2/S4 maintenance apply 阶段零校验** —— LLM 输出合法 JSON 但形状错（缺 id/UUID 非法/importance 非数字）→ KeyError/ValueError 裸 500 而非 60001 retryable。修：apply 循环包进 try + 形状校验
+4. **C3 on_final 无异常保护** —— 落库/commit 失败穿出 → assistant 消息+done 丢失、resume 任务卡 running。修：stream_core on_final 调用包 try + on_error 兜底
+5. **C4 add_version 并发** —— 双 maintenance 读-改-写 current_version → UNIQUE 冲突 500。修：SELECT FOR UPDATE 或捕获 IntegrityError → 60001 retryable
+6. **C5 create_task 引用丢弃** —— 进程退出丢后台链 + task 异常静默。修：task 内加异常日志；MVP 接受重启丢任务（M4 队列接缝，README 已注）
+7. **S2 progress 字段类型矛盾** —— status 端点返回布尔、序列化返回字符串，前端 KbDocument.progress 是 number。修：统一 number（0-100 或 null）
+8. **S3 KB 上传非法 UTF-8 → 50001** —— 应 400xx（客户端输入错）。修：捕获 UnicodeDecodeError → AppError(40012)
+9. **S5 迁移 0004 有 7 处 ruff 错误**（I001/UP035/UP007/F541）—— 手写迁移应过 ruff
+
+### 🟢 LOW
+10. **C6 _fail re-read 非原子** —— 竞态窗口极小；可接受或 UPDATE WHERE status IN 原子化
+11. **C7 LongTermMemoryVersion ORM 缺 UNIQUE(memory_id, version) 声明** —— 迁移有、模型缺（create_all 环境丢约束）
+12. **C8/S6 resume 路径不落 memory trace + 用户消息双 commit** —— 计划 D10 同事务偏差；resume 续答轮不落轨迹（maintenance 原料缺失）
+13. **S7 语义通道异常整体吞掉** —— 静默降级 bm25-only 合理，建议响应带降级标记
+14. **S8/S9/S10/S11/S12 杂项** —— 空内容错用 40014（改 40001）、chat.py uuid.UUID 裸抛 500（捕获→422）、hybrid 注释"权重"vs 实现"开关"、document_count 恒 0（改 COUNT 或接受）、services import api（既有模式不动）
+
+### 已核实合规（勿重审）
+hybrid_search RRF 叠加/降级语义、_indexed_filter join、ContextVar 无泄漏、graph after_tool steps 守卫、memory_inject 静默降级、迁移与模型列一致（除 C7）、附件删除-分析竞态、embedding 分批、五层依赖主体、错误码场景、seed 幂等、前端契约主体（memory/kb/analysis/message.attachments 形状）
+
+## Gate3 Simplify（恢复后执行）
+四路并行（Reuse/Simplification/Efficiency/Altitude）审 `git diff 7ac4647..HEAD` → 合并去重 → 应用/跳过记录
+
 ---
 
 # M2.5 历史（已完成，勿重做）
