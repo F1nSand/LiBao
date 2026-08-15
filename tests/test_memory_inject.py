@@ -7,7 +7,6 @@ import uuid
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langgraph.checkpoint.memory import MemorySaver
 
 from app.core.config import get_settings
 from app.core.security import hash_password
