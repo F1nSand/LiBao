@@ -52,20 +52,6 @@ def _split_command(cmd: str) -> list[str]:
     return shlex.split(cmd)
 
 
-class McpCallError(Exception):
-    """MCP 调用期传输/协议异常（stdio 流死亡、SDK 超时等）——熔断计数依据。
-
-    is_error=True 的业务失败不走此异常（那是工具的失败，不是源的故障）。
-    """
-
-
-def _split_command(cmd: str) -> list[str]:
-    """命令分词：Windows 路径（盘符/反斜杠）按空白切分，避免 shlex 吞反斜杠；否则 shlex。"""
-    if sys.platform == "win32" and (":" in cmd or "\\" in cmd):
-        return cmd.split()
-    return shlex.split(cmd)
-
-
 _PREFIX_TOKENS = {"npx", "uvx", "uv", "python", "python3"}
 _SUFFIXES = (".py", ".js", ".ts", ".sh")
 

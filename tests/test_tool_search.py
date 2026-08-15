@@ -149,7 +149,7 @@ async def test_two_stage_node_flow(monkeypatch):
         "messages": state2["messages"] + out2["messages"],
         "selected_tool_names": out2["selected_tool_names"],
     }
-    out3 = await agent_execute_node(state3, {"configurable": {"model": model}})
+    await agent_execute_node(state3, {"configurable": {"model": model}})
     assert [a["function"]["name"] for a in model.last_tools] == ["tool_search", "time_now"]
 
 
