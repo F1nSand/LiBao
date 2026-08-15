@@ -6,6 +6,7 @@ from typing import Any
 from app.storage.models.agent import AgentConfig, AgentVersion
 from app.storage.models.conversation import Conversation
 from app.storage.models.mcp_server import McpServer
+from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion, MemoryTrace
 from app.storage.models.message import Message
 from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
@@ -104,6 +105,43 @@ def serialize_mcp_server(s: McpServer, tool_count: int = 0) -> dict[str, Any]:
         "enabled": s.enabled,
         "tool_count": tool_count,
         "created_at": _dt(s.created_at),
+    }
+
+
+def serialize_memory_trace(t: MemoryTrace) -> dict[str, Any]:
+    """轨迹序列化（docs 03 §5.7 / FrontEnd MemoryTrace）。summary 字段对齐前端（取 content）。"""
+    return {
+        "id": str(t.id),
+        "conversation_id": str(t.conversation_id) if t.conversation_id else None,
+        "summary": t.content,
+        "role": t.role,
+        "created_at": _dt(t.created_at),
+    }
+
+
+def serialize_longterm(card: LongTermMemory) -> dict[str, Any]:
+    """长期记忆卡片（docs 03 §5.7 / FrontEnd LongTermMemory，body 对齐 content）。"""
+    return {
+        "id": str(card.id),
+        "card_type": card.card_type,
+        "title": card.title,
+        "body": card.content,
+        "tags": card.tags or [],
+        "importance": card.importance,
+        "created_at": _dt(card.created_at),
+        "updated_at": _dt(card.updated_at),
+    }
+
+
+def serialize_longterm_version(v: LongTermMemoryVersion, title: str | None = None) -> dict[str, Any]:
+    """版本序列化（docs 03 §5.7 / FrontEnd LongTermMemoryVersion）。"""
+    return {
+        "id": str(v.id),
+        "memory_id": str(v.memory_id),
+        "version": v.version,
+        "title": title,
+        "body": v.content,
+        "created_at": _dt(v.created_at),
     }
 
 

@@ -44,6 +44,7 @@ class LongTermMemory(BaseModel, Base):
     card_type: Mapped[str] = mapped_column(String(16), nullable=False)  # json_card | note
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    tags: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     importance: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)  # 0-1
     source: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)  # manual | maintenance
     current_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)

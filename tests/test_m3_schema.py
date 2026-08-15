@@ -80,11 +80,13 @@ async def test_vector_column_insert_and_cosine_search(m3_fixture):
             document_id=doc.id, collection_id=coll.id, org_id=org, chunk_index=0,
             content="hello", embedding=[1.0] * 1024,
         )
-        c2 = KbChunk(
-            document_id=doc.id, collection_id=coll.id, org_id=org, chunk_index=1,
-            content="world", embedding=[0.0] * 1024,
+        session.add(
+            KbChunk(
+                document_id=doc.id, collection_id=coll.id, org_id=org, chunk_index=1,
+                content="world", embedding=[0.0] * 1024,
+            )
         )
-        session.add_all([c1, c2])
+        session.add(c1)
         await session.commit()
         # cosine_distance 排序：query [1.0]*1024 应命中 c1
 

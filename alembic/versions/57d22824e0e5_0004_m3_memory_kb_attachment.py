@@ -61,6 +61,7 @@ def upgrade() -> None:
         sa.Column("card_type", sa.String(length=16), nullable=False),
         sa.Column("title", sa.String(length=255), nullable=True),
         sa.Column("content", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("tags", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("importance", sa.Float(), nullable=False),
         sa.Column("source", sa.String(length=16), nullable=False),
         sa.Column("current_version", sa.Integer(), nullable=False),
