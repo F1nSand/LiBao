@@ -97,8 +97,6 @@ async def test_render_position_after_human_before_status_bar(inject_fixture):
     model = FakeModel()
     initial = build_initial_state(agent, "你好", user_id=str(user.id))
     await graph.ainvoke(initial, {"configurable": {"model": model}})
-    # build_context 渲染：注入块在 HumanMessage 之后、状态栏之前
-    state = {**initial, "memory_refs": initial.get("memory_refs", [])}
     # 用图返回的 state 重建渲染（memory_inject 写回的 refs）
     result_state = await graph.ainvoke(initial, {"configurable": {"model": FakeModel()}})
     msgs = build_context({**result_state, "flags": {"status_bar": "[状态]"}})

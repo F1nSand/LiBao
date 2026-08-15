@@ -37,7 +37,9 @@ def _chunk_text(chunk: Any) -> str:
     return message_text(getattr(chunk, "content", ""))
 
 
-def build_initial_state(agent: Any, content: str, user_id: str | None = None, org_id: str | None = None) -> dict[str, Any]:
+def build_initial_state(
+    agent: Any, content: str, user_id: str | None = None, org_id: str | None = None
+) -> dict[str, Any]:
     """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。
 
     user_id/org_id 供 M3 memory_inject（注入）与 kb_search 工具（org 上下文）使用；
