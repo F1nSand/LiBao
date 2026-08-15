@@ -16,8 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import sse_emitter
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
+from app.services.memory import MemoryService
 from app.services.task import TaskService, push_event
 from app.storage.models.agent import AgentConfig
+from app.storage.models.attachment import Attachment
 from app.storage.models.conversation import Conversation
 from app.storage.models.message import Message
 from app.storage.models.task import Task
@@ -26,6 +28,19 @@ from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.run_log import RunLogRepository
 from app.storage.repositories.task import TaskRepository
+
+
+async def _backfill_attachments(
+    db: AsyncSession, attachment_ids: list[str], conversation_id: uuid.UUID, message_id: uuid.UUID
+) -> None:
+    """附件回填 conversation_id/message_id（消息回放时附件可解析归属）。"""
+    from sqlalchemy import update
+
+    await db.execute(
+        update(Attachment)
+        .where(Attachment.id.in_([uuid.UUID(a) for a in attachment_ids]))
+        .values(conversation_id=conversation_id, message_id=message_id)
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +90,7 @@ async def chat_stream_events(
     agent: AgentConfig,
     user: User,
     content: str,
+    attachments: list[str] | None = None,
     trace_id: str,
     model_override: Any = None,
 ) -> AsyncIterator[str]:
@@ -82,8 +98,18 @@ async def chat_stream_events(
     msg_repo = MessageRepository(db)
 
     # ---- ① 开头持久化用户消息（message-as-log，刷新可回放）----
+    att_refs = [{"attachment_id": aid} for aid in (attachments or [])] or None
     user_msg = await msg_repo.create(
-        conversation_id=conversation.id, role="user", content=content, trace_id=trace_id
+        conversation_id=conversation.id, role="user", content=content, attachments=att_refs, trace_id=trace_id
+    )
+    await db.commit()
+    # M3：附件回填 conversation_id/message_id（消息回放时附件可解析归属）
+    if att_refs:
+        await _backfill_attachments(db, [a["attachment_id"] for a in att_refs], conversation.id, user_msg.id)
+    # M3：记忆轨迹落库（maintenance 原料；user 消息一条）
+    await MemoryService().record_trace(
+        db, user.id, role="user", content=content, trace_id=trace_id,
+        conversation_id=conversation.id, message_id=user_msg.id,
     )
     await db.commit()
     await ConversationRepository(db).touch_last_message(conversation.id)
@@ -142,6 +168,11 @@ async def chat_stream_events(
         assistant_msg.id = assistant_msg_id
         for log in final_state.get("run_logs", []):
             await RunLogRepository(db).create(session_id=conversation.id, **log)
+        # M3：记忆轨迹（assistant 消息一条）
+        await MemoryService().record_trace(
+            db, user.id, role="assistant", content=fm.get("content", ""), trace_id=trace_id,
+            conversation_id=conversation.id, message_id=assistant_msg_id,
+        )
         await ConversationRepository(db).touch_last_message(conversation.id)
         await db.commit()
         return _done_payload(assistant_msg_id, fm.get("token_usage") or totals, _message_dict(assistant_msg))

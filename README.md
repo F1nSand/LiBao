@@ -80,19 +80,28 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 - **tool_search 元工具**：内置 `tl_tool_search`（常驻启用），返回匹配工具的名称+路由描述（不含 params_schema）；I4 降级（空→提示创建 / 检索挂→全量目录 / disabled→标注）
 - **两段式 ACI 注入（渐进式披露）**：启用工具数 ≤ `aci_full_limit`（30）→ 全量 ACI（现状零变化）；超过 → `tool_search` 常驻 + tool_search 匹配选中（`selected_tool_names`，上限 5）注入 bind_tools（每轮重算，不跨轮缓存 active_tools）
 
-### M3+ 接缝（下轮）
+### M3 核心闭环（本轮完成）
+- **记忆**：`/memory/traces`（append-only 轨迹，chat 每轮落 user+assistant 各一条）、`/memory/longterm` CRUD（json_card/note，版本化只增 + 软删）、`/memory/longterm/{id}/versions`、`/memory/maintenance`（LLM 整理：重要性评分/合并/抽象，`_extract_json` 剥围栏）；**memory_inject 图节点**每轮注入 importance top-N 卡片（历史后/状态栏前渲染；user_id 缺失/桥未设静默跳过，注入永不击穿对话）
+- **RAG**：`/kb/collections` CRUD、`/kb/collections/{id}/documents` 上传（txt/md，UTF-8 严格，内容入库零磁盘）、文档状态机 uploaded→chunking→indexing→indexed/failed/archived（后台 `process_document`：字符滑窗 512/64 → SiliconFlow Qwen3-Embedding-0.6B 向量化 → 批量插库）、`/kb/search` 混合检索（语义 HNSW cosine + BM25 tsvector/ts_rank + RRF k=60 融合，语义通道故障降级 bm25-only）、**kb_search 内置工具**（ContextVar org 上下文 + sessionmaker 桥，Agentic RAG 预留）
+- **附件**：`/uploads`（multipart，20MB/40011、类型白名单/40012）、`/attachments/{id}` 二进制流、`/{id}/analysis` 轮询契约（uploaded→analyzing→ready/failed，60004）、图片 I2 视觉降级（"无法分析"完成态）、txt/md 提取、pdf/office 仅 metadata；**chat 消息 attachments 链路接通**（校验 40403 → 落库 → 附件回填 conversation_id/message_id）
+
+### M3.5+ 接缝（下轮）
 | 接缝 | 现状 | 落地位置 |
 |---|---|---|
+| **MinIO 对象存储** | 本地磁盘 `{upload_dir}/{attachment_id}`（MVP） | `services/attachment.py` → M4 加 MinIO/预签名 |
+| **视觉模型（VLM）** | `analyze_image` 走 I2 降级文本（ready + reason=no_vision_model） | `services/attachment.py::_analyze_content` |
+| **Cross-Encoder 重排序** | rerank_score 恒 null | `storage/repositories/kb.py::hybrid_search` |
+| **对话自动记忆提取** | 仅手动卡片 + maintenance；context_update 自动提取未做 | `orchestration/nodes/context_update.py` |
+| **PDF/Office 文本提取** | 仅 metadata（reason 标注） | `services/attachment.py`；引入 pypdf 即可 |
 | **Docker 沙盒** | executor 对 `sandbox != none` 返回"暂未实现" | `tools/sandbox.py`（SandboxLevel 已备） |
 | **MCP 会话复用** | mcp 2.0 ClientSession cancel scope 绑定任务，跨 ASGI 请求复用会死（实测）→ 每次调用独立建连/用完即关（stdio 每次起子进程 ~1s） | `tools/mcp_manager.py`；优化需任务亲和调度（M4） |
-| **MCP 资源/提示原语** | 只映射工具（E2） | 资源→RAG 数据源、提示→Skill 库（M3/M6） |
+| **MCP 资源/提示原语** | 只映射工具（E2） | 资源→RAG 数据源、提示→Skill 库（M6） |
 | **幂等持久化** | 进程内缓存（TTL 1h/1024 条），重启丢失 | `tools/executor.py` `_idem_cache` → M4 换 Redis |
 | **live-tail 多实例** | 单进程订阅表 | `services/task.py` `_tails` → M4 Redis 广播 |
 | **max_concurrency** | 字段已流动，未强制 | `tools/executor.py` 信号量插入点已注释 |
 | **多确认** | 每节点每轮只确认第一个 require_confirm 工具 | `nodes/tool_execute.py` `confirmed_once` |
 | **任务取消 in-flight** | 取消置状态，后台运行结束时不覆盖 | `orchestration/task_run.py` |
-| **M3 记忆/RAG/附件** | 未建表 | docs 04 定义 |
-| **M5 评估/日志** | `run_log` 扁平表已建 | `/system/evals` 在 docs 03 §5.8 |
+| **M5 评估/日志** | `run_log` 扁平表已建（type 含 retrieval/memory） | `/system/evals` 在 docs 03 §5.8 |
 | **M6 RBAC/进化** | `user.role` 已存 | `api/deps.py` |
 
 其他：Redis 服务已起未用（M4 多实例 SSE 广播 / 任务队列）；CORS 已配 `localhost:5173`。
