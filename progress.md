@@ -1,5 +1,11 @@
 # 进度账本 — plan: C:\Users\Admin1\.claude\plans\immutable-inventing-breeze.md（M3）
 
+## L1 笔记（2026-08-15 工作流提速轮）
+- 用户采纳 3 条提速建议：① 全局 CLAUDE.md 验证纪律明确 L1 全量测试按天合并跑一次（L2/L3 仍每轮全量）；② Gate3 Simplify L2 降为 2 路（Reuse+Simplification），L3 恢复 4 路；③ 新增 `scripts/verify_m3.sh` M3 e2e 一键验证 —— 14 项断言全过（真实 SiliconFlow 索引 + 中文混合检索命中 + 附件分析 ready + 二进制回读一致 + 清理）。
+- 脚本踩坑（已修，注释已内联）：Git Bash→curl.exe 中文 argv 按 Windows codepage(GBK) 转码 → 后端 400「There was an error parsing the body」，JSON body 必须写文件后 `--data-binary @file`；jget 对复合结构 print 输出 Python repr（单引号）→ json.load 失败，数组计数用单 python 内联。
+
+
+
 目标：M3「记忆与知识库」核心闭环 —— 三层记忆（轨迹 + 长期记忆版本化只增 + 注入）、RAG 完整流水线（分块→向量化→语义+BM25 混合检索→RRF→kb_search 工具）、附件系统（本地磁盘存储 + 分析状态机 + 消息链路接通）。前端 MemoryView/KbView/附件契约已完整实现，后端补齐闭环。
 
 全局约束：五层单向依赖（工具→存储合法，工具不碰服务）；信封契约；错误码 40011/40012/40403/50002/60001/60004/40901 消费 + 新增 40407/40408/40409/40905；默认关闭原则；后台任务 create_task 不持引用（M4 队列接缝）；ruff（120 列 E/F/I/UP/B ignore B008）；pytest-asyncio auto + conftest（requires_db/clean_mcp_specs）。
