@@ -197,6 +197,30 @@ async def main() -> None:
             require_confirm=False,
             idempotent=False,
         )
+        await _get_or_create_tool(
+            session,
+            org,
+            name="kb_search",
+            description="检索知识库（RAG）：按自然语言查询返回匹配的知识片段（含来源文档）。",
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "自然语言检索问题"},
+                    "collection_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "限定集合 id 列表；空 = 全部集合",
+                    },
+                    "top_k": {"type": "integer", "description": "返回条数，默认 5，上限 10"},
+                    "semantic": {"type": "boolean", "description": "是否启用语义通道，默认 true"},
+                    "bm25": {"type": "boolean", "description": "是否启用关键词通道，默认 true"},
+                },
+                "required": ["query"],
+            },
+            tool_type="perception",
+            require_confirm=False,
+            idempotent=False,
+        )
         agent = await _get_or_create_agent(session, org, "tl_time_now")
         await _get_or_create_version(session, agent, "tl_time_now")
         await session.commit()

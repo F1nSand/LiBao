@@ -9,8 +9,8 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.embeddings import EmbeddingService
 from app.services.chunker import chunk_text
-from app.services.embeddings import EmbeddingService
 from app.storage.models.kb import KbChunk
 from app.storage.repositories.kb import KbRepository
 

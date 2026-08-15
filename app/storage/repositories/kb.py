@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections import defaultdict
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.embeddings import EmbeddingService
 from app.storage.models.kb import KbChunk, KbCollection, KbDocument
 
 _CJK = re.compile(r"([一-鿿])")
+_RRF_K = 60  # 倒数排名融合常数（docs 01 §9.1）
 
 
 def space_cjk(text: str) -> str:
@@ -182,3 +185,54 @@ class KbRepository:
                 "collection_name": coll_name,
             }
         return out
+
+    async def hybrid_search(
+        self,
+        org_id: uuid.UUID,
+        collection_ids: list[uuid.UUID],
+        query: str,
+        top_k: int = 5,
+        hybrid: dict | None = None,
+        embedder: EmbeddingService | None = None,
+    ) -> list[dict]:
+        """双通道 → RRF 融合（k=60）→ top_k。服务层与 kb_search 工具共用单一来源。
+
+        rerank_score 恒 null（Cross-Encoder 为 M4 接缝）；语义通道故障静默降级 bm25-only。
+        """
+        if not query.strip():
+            return []
+        top_k = max(1, min(top_k, 10))
+        hybrid = hybrid or {}
+        semantic_on = bool(hybrid.get("semantic", 1))
+        bm25_on = bool(hybrid.get("bm25", 1))
+        if not semantic_on and not bm25_on:
+            return []
+        scores: dict[uuid.UUID, float] = defaultdict(float)
+        texts: dict[uuid.UUID, str] = {}
+        if semantic_on:
+            try:
+                embedder = embedder or EmbeddingService()
+                vec = await embedder.embed_query(query)
+                for rank, (cid, text, _dist) in enumerate(await self.semantic_search(org_id, collection_ids, vec), 1):
+                    scores[cid] += 1 / (_RRF_K + rank)
+                    texts.setdefault(cid, text)
+            except Exception:  # noqa: BLE001  语义通道故障 → 降级 bm25-only（不击穿检索）
+                semantic_on = False
+        if bm25_on:
+            for rank, (cid, text, _ts) in enumerate(await self.bm25_search(org_id, collection_ids, query), 1):
+                scores[cid] += 1 / (_RRF_K + rank)
+                texts.setdefault(cid, text)
+        if not scores:
+            return []
+        ranked = sorted(scores.items(), key=lambda kv: -kv[1])[:top_k]
+        sources = await self.chunk_sources([cid for cid, _ in ranked])
+        return [
+            {
+                "chunk_id": str(cid),
+                "text": texts[cid],
+                "score": round(score, 4),
+                "rerank_score": None,
+                "source": sources.get(str(cid), {}),
+            }
+            for cid, score in ranked
+        ]

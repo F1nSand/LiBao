@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections import defaultdict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,13 +19,11 @@ from app.core.errors import (
     ERR_TASK_RUNNING,
     AppError,
 )
-from app.services.embeddings import EmbeddingService
 from app.storage.models.kb import KbCollection, KbDocument
 from app.storage.models.user import User
 from app.storage.repositories.kb import KbRepository
 
 _ALLOWED_TYPES = {"text/plain", "text/markdown"}
-_RRF_K = 60  # 倒数排名融合常数（docs 01 §9.1）
 
 
 class KbService:
@@ -145,48 +142,8 @@ class KbService:
         top_k: int = 5,
         hybrid: dict | None = None,
     ) -> list[dict]:
-        """语义 + BM25 双通道 → RRF 融合（k=60）→ top_k。rerank_score 恒 null（M4 接缝）。
-
-        空 query / 双通道全关 → [];纯 bm25 不调用 embedding API;语义通道失败（如 key 缺失）
-        静默降级为 bm25-only（检索不击穿）。
-        """
-        if not query.strip():
-            return []
-        top_k = max(1, min(top_k, 10))
-        hybrid = hybrid or {}
-        semantic_on = bool(hybrid.get("semantic", 1))
-        bm25_on = bool(hybrid.get("bm25", 1))
-        if not semantic_on and not bm25_on:
-            return []
-        repo = KbRepository(db)
-        scores: dict[uuid.UUID, float] = defaultdict(float)
-        texts: dict[uuid.UUID, str] = {}
-        if semantic_on:
-            try:
-                vec = await EmbeddingService().embed_query(query)
-                for rank, (cid, text, _dist) in enumerate(await repo.semantic_search(user.org_id, coll_ids, vec), 1):
-                    scores[cid] += 1 / (_RRF_K + rank)
-                    texts.setdefault(cid, text)
-            except Exception:  # noqa: BLE001  语义通道故障 → 降级 bm25-only（不击穿检索）
-                semantic_on = False
-        if bm25_on:
-            for rank, (cid, text, _ts) in enumerate(await repo.bm25_search(user.org_id, coll_ids, query), 1):
-                scores[cid] += 1 / (_RRF_K + rank)
-                texts.setdefault(cid, text)
-        if not scores:
-            return []
-        ranked = sorted(scores.items(), key=lambda kv: -kv[1])[:top_k]
-        sources = await repo.chunk_sources([cid for cid, _ in ranked])
-        return [
-            {
-                "chunk_id": str(cid),
-                "text": texts[cid],
-                "score": round(score, 4),
-                "rerank_score": None,  # Cross-Encoder 为 M4 接缝
-                "source": sources.get(str(cid), {}),
-            }
-            for cid, score in ranked
-        ]
+        """语义 + BM25 双通道 → RRF 融合（repository 单一来源）。rerank_score 恒 null（M4 接缝）。"""
+        return await KbRepository(db).hybrid_search(user.org_id, coll_ids, query, top_k, hybrid)
 
 
 def _spawn_pipeline(document_id: uuid.UUID) -> None:

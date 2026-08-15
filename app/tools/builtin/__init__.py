@@ -1,7 +1,7 @@
-"""内置工具注册。M1：tl_time_now；M2：tl_demo_notify（人工确认流程演示）；M2.5：tl_tool_search（工具发现元工具）。"""
+"""内置工具注册。M1：tl_time_now；M2：tl_demo_notify；M2.5：tl_tool_search；M3：tl_kb_search（知识库检索）。"""
 from __future__ import annotations
 
-from app.tools.builtin import demo_notify, time_now, tool_search
+from app.tools.builtin import demo_notify, kb_search, time_now, tool_search
 from app.tools.registry import SandboxLevel, ToolSpec, ToolType, get, register
 
 
@@ -76,6 +76,39 @@ def register_builtin_tools() -> None:
             timeout_ms=5000,
             handler=tool_search.tool_search_handler,
             meta=True,  # 平台元工具：超限模式常驻注入 + 执行守卫放行（与编排两处谓词单一来源）
+            builtin=True,
+        )
+    )
+    register(
+        ToolSpec(
+            id="tl_kb_search",
+            name="kb_search",
+            description=(
+                "检索知识库（RAG）：按自然语言查询返回匹配的知识片段（含来源文档）。"
+                "需要依据知识库内容回答时使用。反例：不要用它回答与知识库无关的问题。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "自然语言检索问题"},
+                    "collection_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "限定集合 id 列表；空 = 全部集合",
+                    },
+                    "top_k": {"type": "integer", "description": "返回条数，默认 5，上限 10"},
+                    "semantic": {"type": "boolean", "description": "是否启用语义通道，默认 true"},
+                    "bm25": {"type": "boolean", "description": "是否启用关键词通道，默认 true"},
+                },
+                "required": ["query"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=True,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=30000,
+            handler=kb_search.kb_search_handler,
             builtin=True,
         )
     )

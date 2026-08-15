@@ -7,8 +7,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from app.core.embeddings import EmbeddingService
 from app.core.errors import AppError
-from app.services.embeddings import EmbeddingService
 from app.storage.models.kb import EMBED_DIM
 
 

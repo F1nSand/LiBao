@@ -16,6 +16,7 @@ from langgraph.types import interrupt
 from app.orchestration.state_schema import AgentState
 from app.tools import executor
 from app.tools.builtin.tool_search import selected_names
+from app.tools.context import set_tool_org
 from app.tools.registry import agent_can_use, get, get_by_name
 
 
@@ -90,7 +91,12 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                 )
                 continue
 
-        result = await executor.execute(spec, tc.get("args") or {})
+        # M3：请求级 org 上下文（kb_search 等需 DB 的工具在五层约束下直连存储层）
+        set_tool_org(state.get("agent_config", {}).get("org_id"))
+        try:
+            result = await executor.execute(spec, tc.get("args") or {})
+        finally:
+            set_tool_org(None)
 
         # M2.5：LLM 调用元工具（tool_search）后 → 选中写入 selected_tool_names（两段式 ACI 注入）。
         # M1：空结果 → [] 清空旧选中；一轮内多次调用合并（去重保序）。契约见 tool_search.selected_names。
