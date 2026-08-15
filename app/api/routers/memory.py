@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
 from app.api.schemas.memory import CreateLongTermMemoryRequest
-from app.services.memory import MemoryService
+from app.services.memory import MemoryService, run_maintenance
 from app.services.serializers import serialize_longterm
 from app.storage.models.user import User
 
@@ -46,6 +46,14 @@ async def create_longterm(
         db, user.id, req.card_type, title=req.title, body=req.body, tags=req.tags
     )
     return ok(serialize_longterm(card))
+
+
+@router.post("/memory/maintenance")
+async def maintenance(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return ok(await run_maintenance(db, user.id))
 
 
 @router.get("/memory/longterm/{card_id}/versions")
