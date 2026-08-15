@@ -19,6 +19,7 @@ from app.core.errors import (
     ERR_TOOL_NAME_CONFLICT,
     AppError,
 )
+from app.api.schemas.tools import McpRegisterRequest
 from app.services.serializers import serialize_mcp_server, serialize_tool_definition
 from app.storage.models.mcp_server import McpServer
 from app.storage.models.tool_definition import ToolDefinition
@@ -33,7 +34,7 @@ from app.tools.mcp_client import (
     slugify,
 )
 from app.tools.mcp_manager import manager
-from app.tools.registry import ToolSpec, ToolType, get_by_name, register, set_enabled
+from app.tools.registry import ToolSpec, ToolType, get_by_name, register, unregister
 from app.tools.sandbox import SandboxLevel
 
 
@@ -66,7 +67,7 @@ def build_mcp_spec(server: McpServer, row: ToolDefinition, cfg: McpConnConfig) -
 
 
 class McpService:
-    async def register(self, db: AsyncSession, user: User, req: Any) -> dict[str, Any]:
+    async def register(self, db: AsyncSession, user: User, req: McpRegisterRequest) -> dict[str, Any]:
         kind, payload = parse_transport(req.url_or_command)
         cfg = McpConnConfig(transport=kind, **payload, headers=req.headers)
         try:
@@ -81,14 +82,20 @@ class McpService:
         if await server_repo.get_by_org_name(user.org_id, name):
             raise AppError(ERR_MCP_NAME_CONFLICT, f"MCP 源 {name} 已存在")
 
-        # 第一遍：全量校验工具名（无副作用，冲突整体拒绝不产生半注册）
+        # 第一遍：全量校验工具名（无副作用，冲突整体拒绝不产生半注册）。
+        # I1：源内 slug 撞名（"HTTP GET" vs "http-get"）也在此拒绝，防第二遍 register 抛 ValueError。
+        # I4：查全 org（registry 全局化后任何 org 同名行都会绑定到 spec）。
         tool_repo = ToolDefinitionRepository(db)
         planned: list[tuple[Any, str]] = []
+        seen_slugs: set[str] = set()
         for t in tools:
             tool_name = slugify(t.name)
             if not tool_name:
                 continue
-            if get_by_name(tool_name) is not None or await tool_repo.name_exists(user.org_id, tool_name):
+            if tool_name in seen_slugs:
+                raise AppError(ERR_TOOL_NAME_CONFLICT, f"工具名 {tool_name} 在源内重复（slug 冲突）")
+            seen_slugs.add(tool_name)
+            if get_by_name(tool_name) is not None or await tool_repo.name_exists_any_org(tool_name):
                 raise AppError(ERR_TOOL_NAME_CONFLICT, f"工具名 {tool_name} 已被占用（I7 遮蔽拒绝）")
             planned.append((t, tool_name))
 
@@ -160,9 +167,9 @@ class McpService:
         for row in tool_rows:
             await ToolDefinitionRepository(db).soft_delete(row)
         await db.commit()
-        # 同步桥：工具 spec 禁用 + 连接/熔断状态清理
+        # I3：摘除 registry spec（不残留 → 同进程重注册不再被假 40903 挡住）+ 熔断状态清理
         for row in tool_rows:
             spec = get_by_name(row.name)
             if spec is not None:
-                set_enabled(spec.id, False)
+                unregister(spec.id)
         await manager.close_connection(str(server.id))

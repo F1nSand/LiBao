@@ -19,7 +19,7 @@ from app.storage.db import init_db
 from app.storage.models import AgentConfig, Conversation, Org, User
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.task import TaskRepository
-from app.tools.registry import ToolSpec, register
+from app.tools.registry import ToolSpec, register, unregister
 
 
 def _db_reachable() -> bool:
@@ -52,6 +52,8 @@ class FakeChatModel:
 
 @pytest.fixture
 async def interrupt_fixture():
+    # 幂等：I6 后 register 拒同名遮蔽，进程内多次注册必须先摘除
+    unregister("tl_confirm_test")
     register(
         ToolSpec(
             id="tl_confirm_test",
@@ -87,9 +89,7 @@ async def interrupt_fixture():
         session.add(conv)
         await session.commit()
     yield sessionmaker, org, user, agent, conv
-    from app.tools.registry import _REGISTRY
-
-    _REGISTRY.pop("tl_confirm_test", None)
+    unregister("tl_confirm_test")  # 裸 _REGISTRY.pop 会残留 _NAME_INDEX（I6 后 name 遮蔽误伤）
     await engine.dispose()
 
 

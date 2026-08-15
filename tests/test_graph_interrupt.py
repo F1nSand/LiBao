@@ -7,7 +7,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, Interrupt
 
 from app.orchestration.graph import build_graph
-from app.tools.registry import ToolSpec, register
+from app.tools.registry import ToolSpec, register, unregister
 
 
 class FakeChatModel:
@@ -29,6 +29,8 @@ class FakeChatModel:
 
 @pytest.fixture
 def confirm_tool():
+    # 幂等：I6 后 register 拒同名遮蔽，进程内多次注册必须先摘除
+    unregister("tl_confirm_test")
     register(
         ToolSpec(
             id="tl_confirm_test",
@@ -41,9 +43,7 @@ def confirm_tool():
         )
     )
     yield
-    from app.tools.registry import _REGISTRY
-
-    _REGISTRY.pop("tl_confirm_test", None)
+    unregister("tl_confirm_test")
 
 
 def _agent_config() -> dict:

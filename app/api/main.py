@@ -52,7 +52,8 @@ async def lifespan(app: FastAPI):
     engine, sessionmaker = init_db(settings)
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker
-    # DB tool_definition.enabled 为事实源 → 启动时同步 registry（仅默认组织；停用状态重启不丢，F7）
+    # DB tool_definition.enabled 为事实源 → 启动时同步 registry。
+    # F7：默认组织 enabled 同步（停用状态重启不丢）；I5：全量 MCP 行重建（其他 org 的 MCP 工具不失效）。
     from app.services.tool import ToolService
 
     async with sessionmaker() as session:
@@ -65,6 +66,7 @@ async def lifespan(app: FastAPI):
         ).scalar_one_or_none()
         if org is not None:
             await ToolService().sync_registry_from_db(session, org.id)
+        await ToolService().sync_registry_from_db(session)  # 全量：MCP 行重建（不动已有 spec enabled）
     # checkpoint 表由 setup() 创建（须在 alembic upgrade head 之后，langgraph#2570 规避）
     async with PostgresCheckpointer(settings.sync_checkpoint_dsn) as saver:
         app.state.checkpointer = saver

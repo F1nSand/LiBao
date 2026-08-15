@@ -6,13 +6,11 @@ validate 真连接（fake）、close_all 清理。
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 
 from app.tools.mcp_client import McpConnConfig, McpToolInfo
 from app.tools.mcp_manager import CircuitBreaker, MCPManager
-
 
 # ---- 熔断器 ----
 
@@ -92,7 +90,26 @@ async def test_manager_breaker_open_returns_error():
     assert ok is False
     assert "熔断" in text
     # 熔断期间不建连
-    mgr._conn_factory.calls = getattr(mgr._conn_factory, "calls", 0)
+    assert mgr._breakers["s1"].is_open()
+
+
+async def test_manager_is_error_business_not_breaker_failure():
+    # I2：is_error=True 是工具的业务失败（(False, text) 非异常），源本身正常 → 不计数熔断
+    mgr = MCPManager(connection_factory=lambda server_id, cfg: FakeConn(result=(False, "业务失败")))
+    for _ in range(5):
+        ok, text = await mgr.call("s1", _cfg(), "echo", {})
+        assert ok is False and text == "业务失败"
+    assert not mgr._breakers["s1"].is_open()  # 5 连败也不开闸（阈值 3）
+
+
+async def test_manager_call_failure_counts_breaker():
+    # I2：调用期异常（stdio 流死亡等）→ record_failure，连续失败达阈值开闸
+    mgr = MCPManager(connection_factory=lambda server_id, cfg: FakeConn(fail_calls=1))
+    for _ in range(3):
+        ok, _ = await mgr.call("s1", _cfg(), "echo", {})
+        assert ok is False
+    ok, text = await mgr.call("s1", _cfg(), "echo", {})
+    assert ok is False and "熔断" in text
 
 
 async def test_manager_per_call_new_connection():

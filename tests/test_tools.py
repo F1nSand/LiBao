@@ -7,7 +7,7 @@ import pytest
 
 from app.tools import executor
 from app.tools.builtin import register_builtin_tools
-from app.tools.registry import ToolSpec, acis, all_tools, get, unregister
+from app.tools.registry import ToolSpec, acis, all_tools, get, register, unregister
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +25,17 @@ def test_registry_get_returns_spec():
     assert spec.name == "time_now"
     assert spec.enabled is True
     assert spec.idempotent is False  # 时间查询不可去重（F2：缓存会返回陈旧时间）
+
+
+def test_register_rejects_name_shadowing():
+    # I6：register() 自身拒同名遮蔽（name 静默覆盖是 I7 注册表层防线）
+    register(ToolSpec(id="t_shadow", name="shadow_probe", description="d"))
+    try:
+        with pytest.raises(ValueError) as exc:
+            register(ToolSpec(id="t_shadow2", name="shadow_probe", description="d"))
+        assert "遮蔽" in str(exc.value)
+    finally:
+        unregister("t_shadow")
 
 
 def test_aci_shape_and_sorted():

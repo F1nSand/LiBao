@@ -6,13 +6,12 @@ per-server asyncio.Lock 串行化）+ 熔断器（连续失败达阈值 → OPEN
 """
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable
 from typing import Any
 
 from app.core.config import get_settings
-from app.tools.mcp_client import McpConnConfig, McpConnection, McpConnectError, McpToolInfo
+from app.tools.mcp_client import McpConnConfig, McpConnectError, McpConnection, McpToolInfo
 
 
 class CircuitBreaker:

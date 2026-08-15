@@ -59,6 +59,8 @@ _NAME_INDEX: dict[str, str] = {}  # name → id 反向索引（name 唯一性不
 def register(spec: ToolSpec) -> None:
     if spec.id in _REGISTRY:
         raise ValueError(f"工具 id 冲突：{spec.id}")
+    if spec.name in _NAME_INDEX:
+        raise ValueError(f"工具名冲突（I7 遮蔽拒绝）：{spec.name} 已注册为 {_NAME_INDEX[spec.name]}")
     _REGISTRY[spec.id] = spec
     _NAME_INDEX[spec.name] = spec.id
 

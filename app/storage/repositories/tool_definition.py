@@ -33,6 +33,14 @@ class ToolDefinitionRepository:
         )
         return (await self.session.execute(stmt)).first() is not None
 
+    async def name_exists_any_org(self, name: str) -> bool:
+        """全 org 查重（M2.5 I4）：registry 全局化后，任何 org 的同名行都会绑定到同名 spec，
+        跨 org 同名会让启停桥/执行解析指向他人工具——注册与建行必须对称查全 org。"""
+        stmt = select(ToolDefinition.id).where(
+            ToolDefinition.name == name, ToolDefinition.deleted_at.is_(None)
+        )
+        return (await self.session.execute(stmt)).first() is not None
+
     async def list_for_org(
         self,
         org_id: uuid.UUID,

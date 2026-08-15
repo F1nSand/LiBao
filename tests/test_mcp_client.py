@@ -7,19 +7,19 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from mcp.types import CallToolResult, ImageContent, TextContent, Tool
 
 from app.tools.mcp_client import (
+    McpCallError,
     McpConnectError,
     McpConnection,
     McpToolInfo,
+    _split_command,
     derive_server_name,
     extract_text,
     parse_transport,
     slugify,
 )
-
 
 # ---- 传输判定 / 命名派生 / slug（纯函数）----
 
@@ -153,13 +153,27 @@ async def test_call_tool_is_error():
     assert text == "boom"
 
 
-async def test_call_tool_exception_wrapped():
+async def test_call_tool_exception_raises_for_breaker():
+    # I2：调用期传输异常 → 抛 McpCallError（manager 计数熔断），is_error 业务失败不走此路径
     sess = FakeSession(raise_on_call=True)
     conn = _conn(sess)
     await conn.connect()
-    ok, text = await conn.call_tool("bad", {})
-    assert ok is False
-    assert "call boom" in text
+    with pytest.raises(McpCallError) as exc:
+        await conn.call_tool("bad", {})
+    assert "call boom" in str(exc.value)
+
+
+def test_split_command_windows_path():
+    # M3：Windows 绝对路径不吞反斜杠（shlex 会把 C:\mcp\server.py 当转义吃掉）
+    assert _split_command(r"python C:\mcp\server.py") == ["python", r"C:\mcp\server.py"]
+    assert _split_command("npx @modelcontextprotocol/server-everything") == [
+        "npx",
+        "@modelcontextprotocol/server-everything",
+    ]
+
+
+def test_derive_server_name_windows_path():
+    assert derive_server_name(r"C:\mcp\server.py") == "server"
 
 
 async def test_connect_initialize_failure_raises():

@@ -118,7 +118,10 @@ class CaptureModel:
         if self._n == 0:
             self._n = 1
             return AIMessage(
-                content="", tool_calls=[{"name": "tool_search", "args": {"query": "当前时间"}, "id": "call_1", "type": "tool_call"}]
+                content="",
+                tool_calls=[
+                    {"name": "tool_search", "args": {"query": "当前时间"}, "id": "call_1", "type": "tool_call"}
+                ],
             )
         return AIMessage(content="现在是 12:00。")
 
@@ -133,7 +136,7 @@ async def test_two_stage_node_flow(monkeypatch):
     # 第 1 轮：agent_execute → 只注入 tool_search（选中为空）
     state = {"agent_config": agent, "messages": [HumanMessage(content="现在几点")], "selected_tool_names": []}
     out1 = await agent_execute_node(state, {"configurable": {"model": model}})
-    assert [a["function"]["name"] for a in out1["active_tools"]] == ["tool_search"]
+    assert [a["function"]["name"] for a in model.last_tools] == ["tool_search"]
 
     # 第 2 轮：tool_execute 执行 tool_search → 写入选中
     state2 = {**state, "messages": state["messages"] + out1["messages"]}
@@ -141,6 +144,59 @@ async def test_two_stage_node_flow(monkeypatch):
     assert out2["selected_tool_names"] == ["time_now"]
 
     # 第 3 轮：agent_execute → 选中 ACI 注入（tool_search + time_now）
-    state3 = {**state2, "messages": state2["messages"] + out2["messages"], "selected_tool_names": out2["selected_tool_names"]}
+    state3 = {
+        **state2,
+        "messages": state2["messages"] + out2["messages"],
+        "selected_tool_names": out2["selected_tool_names"],
+    }
     out3 = await agent_execute_node(state3, {"configurable": {"model": model}})
-    assert [a["function"]["name"] for a in out3["active_tools"]] == ["tool_search", "time_now"]
+    assert [a["function"]["name"] for a in model.last_tools] == ["tool_search", "time_now"]
+
+
+async def test_two_stage_meta_tool_without_agent_optin(monkeypatch):
+    # I7：超限 agent 未勾选 tool_search → ACI 强制注入 + 执行守卫放行（平台元工具语义）
+    s = get_settings()
+    monkeypatch.setattr(s, "aci_full_limit", 0)  # 1 个启用工具 > 0 → 超限
+    agent = {"model": "fake", "system_prompt": "p", "tools": ["tl_time_now"], "max_steps": 5}
+    model = CaptureModel()
+    state = {"agent_config": agent, "messages": [HumanMessage(content="现在几点")], "selected_tool_names": []}
+    out1 = await agent_execute_node(state, {"configurable": {"model": model}})
+    assert [a["function"]["name"] for a in model.last_tools] == ["tool_search"]  # 强制注入
+    state2 = {**state, "messages": state["messages"] + out1["messages"]}
+    out2 = await tool_execute_node(state2, {"configurable": {}})  # 执行不被 agent_can_use gate
+    assert out2["selected_tool_names"] == ["time_now"]
+
+
+async def test_search_empty_result_clears_selection(monkeypatch):
+    # M1：空结果（带 hint）→ 清空旧选中，防残留陈旧注入
+    s = get_settings()
+    monkeypatch.setattr(s, "aci_full_limit", 1)
+    agent = {"model": "fake", "system_prompt": "p", "tools": ["tl_tool_search", "tl_time_now"], "max_steps": 5}
+    msg = AIMessage(
+        content="",
+        tool_calls=[{"name": "tool_search", "args": {"query": "zzz不存在的查询"}, "id": "c1", "type": "tool_call"}],
+    )
+    state = {
+        "agent_config": agent,
+        "messages": [HumanMessage(content="x"), msg],
+        "selected_tool_names": ["time_now"],  # 旧选中
+    }
+    out = await tool_execute_node(state, {"configurable": {}})
+    assert out["selected_tool_names"] == []  # 空结果清空
+
+
+async def test_multiple_search_calls_merged(monkeypatch):
+    # M1：一轮内多次 tool_search → 结果合并（去重保序）
+    s = get_settings()
+    monkeypatch.setattr(s, "aci_full_limit", 1)
+    agent = {"model": "fake", "system_prompt": "p", "tools": ["tl_tool_search", "tl_time_now"], "max_steps": 5}
+    msg = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "tool_search", "args": {"query": "当前时间"}, "id": "c1", "type": "tool_call"},
+            {"name": "tool_search", "args": {"query": "通知"}, "id": "c2", "type": "tool_call"},
+        ],
+    )
+    state = {"agent_config": agent, "messages": [HumanMessage(content="x"), msg], "selected_tool_names": []}
+    out = await tool_execute_node(state, {"configurable": {}})
+    assert out["selected_tool_names"] == ["time_now", "demo_notify"]

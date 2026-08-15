@@ -48,8 +48,12 @@ class ToolService:
 
     async def create(self, db: AsyncSession, user: User, req: Any) -> ToolDefinition:
         repo = ToolDefinitionRepository(db)
+        # I4：org 内查重 + 全局 registry 查重（registry 全局化：同名 spec 会让本行绑定到他人工具）。
+        # tl_* 内置 spec 是平台拥有的（M2 既定模式：DB 行绑定内置实现，如 time_now），不挡。
         if await repo.name_exists(user.org_id, req.name):
             raise AppError(ERR_TOOL_NAME_CONFLICT, "同组织下已存在同名工具")
+        if (spec := get_by_name(req.name)) is not None and not spec.id.startswith("tl_"):
+            raise AppError(ERR_TOOL_NAME_CONFLICT, f"工具名 {req.name} 已被注册工具占用（I7 遮蔽拒绝）")
         row = await repo.create(
             org_id=user.org_id,
             name=req.name,
@@ -122,32 +126,44 @@ class ToolService:
             set_enabled(spec.id, False)
 
     async def sync_registry_from_db(self, db: AsyncSession, org_id: uuid.UUID | None = None) -> None:
-        """启动同步（F7）：DB tool_definition.enabled 为事实源 → registry spec 跟随。
+        """启动同步（F7 + I5）：DB tool_definition.enabled 为事实源 → registry spec 跟随。
 
-        只同步指定 org（种子默认组织）的行——registry 是进程级全局（M2 简化），
-        测试/其他 org 的 enabled=false 行会把内置工具打成禁用（Bug 修复）。
-        MCP 行（mcp_source 非空）：registry 无同名 spec → 从 mcp_servers 重建（惰性 handler，
-        T5）；源已软删/停用 → 工具 spec 强制禁用。
+        - org_id 指定（默认组织）：已有 spec 的行 set_enabled 跟随（F7 原语义，防测试
+          org 的 enabled=false 行把内置工具打成禁用）。
+        - org_id=None（全量启动）：只做 MCP 行重建（I5：其他 org 的 MCP 工具重启后
+          不能失效），不翻转已有 spec 的 enabled（防跨 org 污染）。
+        MCP 行（mcp_source 非空）：registry 无同名 spec → 从 mcp_servers 重建（惰性 handler）；
+        源已软删/停用 → 工具 spec 强制禁用。
         """
         repo = ToolDefinitionRepository(db)
         rows = await repo.list_for_org(org_id, limit=10000) if org_id else await repo.list_for_org_all()
         for row in rows:
             spec = get_by_name(row.name)
             if spec is not None:
-                set_enabled(spec.id, row.enabled)
+                if org_id is not None:
+                    set_enabled(spec.id, row.enabled)
             elif row.mcp_source:
                 await self._sync_mcp_spec(db, row)
 
     async def _sync_mcp_spec(self, db: AsyncSession, row: ToolDefinition) -> None:
         """MCP 行重建：读 mcp_servers 配置 → build_mcp_spec 注册 → enabled 跟随 DB 与源状态。"""
         from app.services.mcp import build_mcp_spec
-        from app.storage.models.mcp_server import McpServer
         from app.storage.repositories.mcp_server import McpServerRepository
 
-        server_id = row.mcp_source.removeprefix("mcp:")
-        server = await McpServerRepository(db).get_by_id_including_deleted(uuid.UUID(server_id))
+        try:
+            server_id = uuid.UUID(row.mcp_source.removeprefix("mcp:"))
+        except ValueError:
+            return  # M2：脏 mcp_source 行跳过，不击穿启动
+        server = await McpServerRepository(db).get_by_id_including_deleted(server_id)
         if server is None:
             return  # 源行彻底缺失：无法重建（spec 缺席 = 不可见）
+        usable = row.enabled and server.enabled and server.deleted_at is None
+        spec_id = f"mc_{slugify(server.name)}_{slugify(row.name)}"
+        if get_by_name(row.name) is not None:
+            # 已注册（默认 org 同步或本趟前面已重建）：同步 enabled。
+            # 多行同名时最后处理的行决定状态（生产被 I4 挡同名，此分支仅防脏数据）。
+            set_enabled(spec_id, usable)
+            return
         from app.tools.mcp_client import McpConnConfig
 
         cfg = McpConnConfig(
@@ -155,9 +171,7 @@ class ToolService:
         )
         register(build_mcp_spec(server, row, cfg))
         # 源软删/停用 → 工具强制禁用（可看到但不可执行）
-        set_enabled(
-            f"mc_{slugify(server.name)}_{slugify(row.name)}", row.enabled and server.enabled and server.deleted_at is None
-        )
+        set_enabled(spec_id, usable)
 
     async def search(self, db: AsyncSession, org_id: uuid.UUID, q: str) -> list[dict[str, Any]]:
         rows = await ToolDefinitionRepository(db).search(org_id, q)

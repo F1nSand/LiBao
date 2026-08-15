@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 
@@ -36,6 +38,34 @@ class McpConnectError(Exception):
     """MCP 连接/初始化失败（注册验证与执行路径共用；注册侧转 50201）。"""
 
 
+class McpCallError(Exception):
+    """MCP 调用期传输/协议异常（stdio 流死亡、SDK 超时等）——熔断计数依据。
+
+    is_error=True 的业务失败不走此异常（那是工具的失败，不是源的故障）。
+    """
+
+
+def _split_command(cmd: str) -> list[str]:
+    """命令分词：Windows 路径（盘符/反斜杠）按空白切分，避免 shlex 吞反斜杠；否则 shlex。"""
+    if sys.platform == "win32" and (":" in cmd or "\\" in cmd):
+        return cmd.split()
+    return shlex.split(cmd)
+
+
+class McpCallError(Exception):
+    """MCP 调用期传输/协议异常（stdio 流死亡、SDK 超时等）——熔断计数依据。
+
+    is_error=True 的业务失败不走此异常（那是工具的失败，不是源的故障）。
+    """
+
+
+def _split_command(cmd: str) -> list[str]:
+    """命令分词：Windows 路径（盘符/反斜杠）按空白切分，避免 shlex 吞反斜杠；否则 shlex。"""
+    if sys.platform == "win32" and (":" in cmd or "\\" in cmd):
+        return cmd.split()
+    return shlex.split(cmd)
+
+
 _PREFIX_TOKENS = {"npx", "uvx", "uv", "python", "python3"}
 _SUFFIXES = (".py", ".js", ".ts", ".sh")
 
@@ -54,7 +84,7 @@ def derive_server_name(url_or_command: str) -> str:
         label = host.removeprefix("www.").split(".")[0]
         return slugify(label) or "mcp-server"
     # 去前缀包装 token（npx/uvx/uv/python…），取最后一个剩余 token 的 basename（真实入口点）
-    tokens = [t for t in shlex.split(url_or_command) if t not in _PREFIX_TOKENS]
+    tokens = [t for t in _split_command(url_or_command) if t not in _PREFIX_TOKENS]
     if not tokens:
         return "mcp-server"
     name = os.path.basename(tokens[-1].rstrip("/"))
@@ -101,6 +131,7 @@ class McpConnection:
         self._session_factory = session_factory  # 测试注入点（fake session）
         self._streams: Any = None
         self._session: Any = None
+        self._http_client: Any = None  # 自建 httpx2 client（需自行关闭）
 
     async def connect(self) -> None:
         if self._session is not None:
@@ -111,16 +142,15 @@ class McpConnection:
             elif self.cfg.transport == "http":
                 from mcp.client.streamable_http import streamable_http_client
 
-                http_client = None
                 if self.cfg.headers:
                     import httpx2
 
-                    http_client = httpx2.AsyncClient(headers=self.cfg.headers)
-                self._streams = streamable_http_client(self.cfg.url, http_client=http_client)
+                    self._http_client = httpx2.AsyncClient(headers=self.cfg.headers)
+                self._streams = streamable_http_client(self.cfg.url, http_client=self._http_client)
             else:
                 from mcp.client.stdio import stdio_client
 
-                parts = shlex.split(self.cfg.command or "")
+                parts = _split_command(self.cfg.command or "")
                 self._streams = stdio_client(
                     StdioServerParameters(command=parts[0] if parts else "python", args=parts[1:])
                 )
@@ -146,11 +176,12 @@ class McpConnection:
         return out
 
     async def call_tool(self, name: str, args: dict[str, Any]) -> tuple[bool, str]:
-        """调用远程工具 → (ok, 文本)。异常与 is_error 都归一为 (False, 原因文本)。"""
+        """调用远程工具 → (ok, 文本)。传输/协议异常抛 McpCallError（熔断计数）；
+        is_error=True 是工具的失败（业务错），归一为 (False, 文本) 不参与熔断。"""
         try:
             result = await self._session.call_tool(name, args)
-        except Exception as exc:  # noqa: BLE001  远程失败信息保留在文本（executor 错误路径展示）
-            return False, str(exc)
+        except Exception as exc:  # noqa: BLE001  源故障 → 上抛给 manager 计数熔断
+            raise McpCallError(str(exc)) from exc
         text = extract_text(result)
         return (not bool(getattr(result, "is_error", False)), text)
 
@@ -167,3 +198,9 @@ class McpConnection:
             except Exception:  # noqa: BLE001
                 pass
             self._streams = None
+        if self._http_client is not None:
+            try:
+                await self._http_client.aclose()  # 自建 client 必须自行关闭（SDK 不负责）
+            except Exception:  # noqa: BLE001
+                pass
+            self._http_client = None

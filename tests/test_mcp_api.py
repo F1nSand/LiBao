@@ -10,7 +10,7 @@ import uuid
 
 import pytest
 
-from app.api.schemas.tools import McpRegisterRequest
+from app.api.schemas.tools import CreateToolRequest, McpRegisterRequest
 from app.core.errors import AppError
 from app.core.security import hash_password
 from app.services.mcp import McpService
@@ -34,10 +34,14 @@ def _db_reachable() -> bool:
 pytestmark = pytest.mark.skipif(not _db_reachable(), reason="Docker db 未运行")
 
 
-FAKE_TOOLS = [
-    McpToolInfo(name="echo", description="回声", input_schema={"type": "object", "properties": {}}),
-    McpToolInfo(name="add", description="加法", input_schema={"type": "object", "properties": {}}),
-]
+def _fake_tools(uid: str, second_server: bool = False) -> list[McpToolInfo]:
+    """按 uid 生成工具名：name_exists_any_org 查全 org，残留测试行的同名工具会误伤断言。"""
+    if second_server:
+        return [McpToolInfo(name=f"ping_{uid}", description="P", input_schema={})]
+    return [
+        McpToolInfo(name=f"echo_{uid}", description="回声", input_schema={"type": "object", "properties": {}}),
+        McpToolInfo(name=f"add_{uid}", description="加法", input_schema={"type": "object", "properties": {}}),
+    ]
 
 
 @pytest.fixture
@@ -56,17 +60,17 @@ async def mcp_api_fixture(monkeypatch):
         user = User(username=f"mcpapi_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.commit()
-    # validate 注入固定工具列表（注册验证路径不真连 server）
+    tools_a = _fake_tools(uid)
+
+    async def _fake_validate(cfg):
+        # 按命令区分工具集：同测试内注册第二个 server 时避免工具名冲突（I7）
+        if getattr(cfg, "command", None) == "python other.py":
+            return _fake_tools(uid, second_server=True)
+        return list(tools_a)
+
     monkeypatch.setattr("app.services.mcp.manager.validate", _fake_validate)
-    yield sessionmaker, user
+    yield sessionmaker, user, tools_a[0].name, tools_a[1].name
     await engine.dispose()
-
-
-async def _fake_validate(cfg):
-    # 按命令区分工具集：同测试内注册第二个 server 时避免工具名冲突（I7）
-    if getattr(cfg, "command", None) == "python other.py":
-        return [McpToolInfo(name="ping", description="P", input_schema={})]
-    return list(FAKE_TOOLS)
 
 
 def _req(url_or_command: str = "python demo.py", **kw) -> McpRegisterRequest:
@@ -74,14 +78,14 @@ def _req(url_or_command: str = "python demo.py", **kw) -> McpRegisterRequest:
 
 
 async def test_register_creates_server_and_tool_rows(mcp_api_fixture):
-    sessionmaker, user = mcp_api_fixture
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
     async with sessionmaker() as session:
         res = await McpService().register(session, user, _req())
         assert res["server"]["name"] == "demo"  # 命令派生：python demo.py → demo
         assert res["server"]["transport"] == "stdio"
         assert res["server"]["enabled"] is True  # server 本身默认启用
         assert res["server"]["tool_count"] == 2
-        assert [t["id"] for t in res["tools"]] == ["mc_demo_echo", "mc_demo_add"]
+        assert [t["id"] for t in res["tools"]] == [f"mc_demo_{tool_a}", f"mc_demo_{tool_b}"]
         server_id = res["server"]["id"]
         row = await session.get(McpServer, uuid.UUID(server_id))
         assert row.command == "python demo.py"
@@ -93,18 +97,18 @@ async def test_register_creates_server_and_tool_rows(mcp_api_fixture):
         tools = list(
             (await session.execute(select(ToolDefinition).where(ToolDefinition.org_id == user.org_id))).scalars()
         )
-        assert {t.name for t in tools} == {"echo", "add"}
+        assert {t.name for t in tools} == {tool_a, tool_b}
         assert all(t.mcp_source == f"mcp:{server_id}" for t in tools)
         assert all(t.enabled is False for t in tools)
 
 
 async def test_register_tools_default_disabled_and_spec_registered(mcp_api_fixture):
-    sessionmaker, user = mcp_api_fixture
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
     async with sessionmaker() as session:
         res = await McpService().register(session, user, _req())
         for t in res["tools"]:
             assert t["enabled"] is False  # 默认关闭原则
-        spec = get("mc_demo_echo")
+        spec = get(f"mc_demo_{tool_a}")
         assert spec is not None
         assert spec.mcp_source == f"mcp:{res['server']['id']}"
         assert spec.handler is not None
@@ -112,7 +116,7 @@ async def test_register_tools_default_disabled_and_spec_registered(mcp_api_fixtu
 
 
 async def test_register_http_transport(mcp_api_fixture):
-    sessionmaker, user = mcp_api_fixture
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
     async with sessionmaker() as session:
         res = await McpService().register(session, user, _req("https://everything.mcp.local/mcp"))
         assert res["server"]["name"] == "everything"
@@ -121,7 +125,7 @@ async def test_register_http_transport(mcp_api_fixture):
 
 
 async def test_register_name_conflict_40904(mcp_api_fixture):
-    sessionmaker, user = mcp_api_fixture
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
     async with sessionmaker() as session:
         await McpService().register(session, user, _req())
         with pytest.raises(AppError) as exc:
@@ -135,7 +139,7 @@ async def test_register_tool_shadow_40903(mcp_api_fixture, monkeypatch):
         return [McpToolInfo(name="time_now", description="遮蔽", input_schema={})]
 
     monkeypatch.setattr("app.services.mcp.manager.validate", fake_validate_shadow)
-    sessionmaker, user = mcp_api_fixture
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
     async with sessionmaker() as session:
         with pytest.raises(AppError) as exc:
             await McpService().register(session, user, _req("python shadow.py"))
@@ -147,7 +151,7 @@ async def test_register_connect_failure_50201(mcp_api_fixture, monkeypatch):
         raise McpConnectError("server down")
 
     monkeypatch.setattr("app.services.mcp.manager.validate", fake_validate_fail)
-    sessionmaker, user = mcp_api_fixture
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
     async with sessionmaker() as session:
         with pytest.raises(AppError) as exc:
             await McpService().register(session, user, _req())
@@ -155,7 +159,7 @@ async def test_register_connect_failure_50201(mcp_api_fixture, monkeypatch):
 
 
 async def test_register_enable_flag_controls_server_only(mcp_api_fixture):
-    sessionmaker, user = mcp_api_fixture
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
     async with sessionmaker() as session:
         res = await McpService().register(session, user, _req(enable=False))
         assert res["server"]["enabled"] is False
@@ -163,7 +167,7 @@ async def test_register_enable_flag_controls_server_only(mcp_api_fixture):
 
 
 async def test_list_servers_with_tool_count(mcp_api_fixture):
-    sessionmaker, user = mcp_api_fixture
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
     async with sessionmaker() as session:
         await McpService().register(session, user, _req())
         await McpService().register(session, user, _req("python other.py"))
@@ -173,26 +177,95 @@ async def test_list_servers_with_tool_count(mcp_api_fixture):
         assert {s["tool_count"] for s in servers} == {2, 1}  # demo: echo/add；other: ping
 
 
-async def test_unregister_disables_spec_and_hides_tools(mcp_api_fixture):
-    sessionmaker, user = mcp_api_fixture
+async def test_unregister_removes_spec_and_hides_tools(mcp_api_fixture):
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
     async with sessionmaker() as session:
         res = await McpService().register(session, user, _req())
         server_id = res["server"]["id"]
-        # 启用一个工具 → 注销后必须禁用
-        await ToolService().set_enabled(session, user, "mc_demo_echo", True)
-        assert get("mc_demo_echo").enabled is True
+        await ToolService().set_enabled(session, user, f"mc_demo_{tool_a}", True)
+        assert get(f"mc_demo_{tool_a}").enabled is True
 
         await McpService().unregister(session, user, server_id)
         row = await McpServerRepository(session).get_by_id_org(user.org_id, uuid.UUID(server_id))
         assert row is None  # 软删后不再可见
-        assert get("mc_demo_echo").enabled is False  # spec 禁用
+        assert get(f"mc_demo_{tool_a}") is None  # I3：spec 摘除（不残留）
         with pytest.raises(AppError) as exc:
-            await ToolService().get_in_org(session, user.org_id, "mc_demo_echo")
+            await ToolService().get_in_org(session, user.org_id, f"mc_demo_{tool_a}")
         assert exc.value.code == 40405  # 工具行软删
 
 
+async def test_unregister_then_reregister_same_process(mcp_api_fixture):
+    # I3：注销后同进程内重注册（注册错 URL 的补救路径）不再被残留 spec 假 40903 挡住
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
+    async with sessionmaker() as session:
+        res1 = await McpService().register(session, user, _req("python bad.py"))
+        await McpService().unregister(session, user, res1["server"]["id"])
+        res2 = await McpService().register(session, user, _req("python bad.py"))  # 同名重注册
+        assert res2["server"]["name"] == "bad"
+        assert len(res2["tools"]) == 2
+
+
+async def test_register_slug_collision_40903(mcp_api_fixture, monkeypatch):
+    # I1：源内 slug 撞名（"HTTP GET" vs "http-get" → http_get）→ 40903，不产生半注册
+    async def fake_validate_collision(cfg):
+        return [
+            McpToolInfo(name="HTTP GET", description="a", input_schema={}),
+            McpToolInfo(name="http-get", description="b", input_schema={}),
+        ]
+
+    monkeypatch.setattr("app.services.mcp.manager.validate", fake_validate_collision)
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
+    async with sessionmaker() as session:
+        with pytest.raises(AppError) as exc:
+            await McpService().register(session, user, _req("python collide.py"))
+        assert exc.value.code == 40903
+        assert get_by_name("http_get") is None  # 无残留 spec
+
+
+async def test_cross_org_custom_tool_blocked_by_mcp_spec(mcp_api_fixture):
+    # I4：org A 注册 MCP 工具 echo → org B 建同名自定义工具 → 40903（全局查重）
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
+    async with sessionmaker() as session:
+        await McpService().register(session, user, _req("python a.py"))
+        org_b = Org(name=f"orgB-{uuid.uuid4().hex[:6]}")
+        session.add(org_b)
+        await session.flush()
+        user_b = User(
+            username=f"b_{uuid.uuid4().hex[:6]}", password_hash=hash_password("x"),
+            name="B", role="admin", org_id=org_b.id,
+        )
+        session.add(user_b)
+        await session.flush()
+        with pytest.raises(AppError) as exc:
+            await ToolService().create(session, user_b, CreateToolRequest(name=tool_a))
+        assert exc.value.code == 40903
+
+
+async def test_cross_org_mcp_register_blocked_by_other_org_row(mcp_api_fixture, monkeypatch):
+    # I4：org B 先建自定义工具 ping → org A 注册 MCP 工具 ping → 40903（查全 org）
+    async def fake_validate_ping(cfg):
+        return [McpToolInfo(name="ping", description="P", input_schema={})]
+
+    monkeypatch.setattr("app.services.mcp.manager.validate", fake_validate_ping)
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
+    async with sessionmaker() as session:
+        org_b = Org(name=f"orgB-{uuid.uuid4().hex[:6]}")
+        session.add(org_b)
+        await session.flush()
+        user_b = User(
+            username=f"b_{uuid.uuid4().hex[:6]}", password_hash=hash_password("x"),
+            name="B", role="admin", org_id=org_b.id,
+        )
+        session.add(user_b)
+        await session.flush()
+        await ToolService().create(session, user_b, CreateToolRequest(name="ping"))
+        with pytest.raises(AppError) as exc:
+            await McpService().register(session, user, _req("python a.py"))
+        assert exc.value.code == 40903
+
+
 async def test_unregister_missing_server_40406(mcp_api_fixture):
-    sessionmaker, user = mcp_api_fixture
+    sessionmaker, user, tool_a, tool_b = mcp_api_fixture
     async with sessionmaker() as session:
         with pytest.raises(AppError) as exc:
             await McpService().unregister(session, user, str(uuid.uuid4()))
