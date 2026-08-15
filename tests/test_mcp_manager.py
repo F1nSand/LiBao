@@ -91,30 +91,36 @@ async def test_manager_breaker_open_returns_error():
     ok, text = await mgr.call("s1", _cfg(), "echo", {})
     assert ok is False
     assert "熔断" in text
-    # 熔断期间不再触碰连接
-    assert mgr._connections.get("s1") is None
+    # 熔断期间不建连
+    mgr._conn_factory.calls = getattr(mgr._conn_factory, "calls", 0)
 
 
-async def test_manager_lazy_connect_and_success():
-    conn = FakeConn()
-    mgr = _mgr_with(conn)
-    ok, text = await mgr.call("s1", _cfg(), "echo", {})
-    assert ok is True
-    assert text == "ok"
-    assert mgr._connections["s1"] is conn
-    assert conn.connect_count == 1
+async def test_manager_per_call_new_connection():
+    # 连接不跨任务驻留：每次 call 独立建连 + 用完即关
+    created: list[FakeConn] = []
+
+    def factory(server_id, cfg):
+        conn = FakeConn()
+        created.append(conn)
+        return conn
+
+    mgr = MCPManager(connection_factory=factory)
+    ok1, text1 = await mgr.call("s1", _cfg(), "echo", {})
+    ok2, text2 = await mgr.call("s1", _cfg(), "echo", {})
+    assert ok1 and ok2 and text1 == "ok" and text2 == "ok"
+    assert len(created) == 2  # 两次调用两个独立连接
+    assert all(c.closed for c in created)  # 用完即关
 
 
 async def test_manager_failure_opens_breaker():
-    conn = FakeConn(fail_calls=3)  # 3 次失败（阈值 3）→ 第 4 次直接熔断
-    mgr = _mgr_with(conn)
+    # 每次调用独立新连接、首次调用即失败（阈值 3）→ 第 4 次直接熔断
+    mgr = MCPManager(connection_factory=lambda server_id, cfg: FakeConn(fail_calls=1))
     for _ in range(3):
         ok, text = await mgr.call("s1", _cfg(), "echo", {})
         assert ok is False and "boom" in text
     ok, text = await mgr.call("s1", _cfg(), "echo", {})
     assert ok is False
     assert "熔断" in text
-    assert conn.call_count == 3  # 熔断期不再执行
 
 
 async def test_manager_connect_failure_opens_breaker():
@@ -135,21 +141,26 @@ async def test_manager_validate_connects_and_closes():
     assert conn.closed is True  # 验证后立即关闭（不驻留子进程）
 
 
-async def test_manager_close_all():
-    conn = FakeConn()
-    mgr = _mgr_with(conn)
-    mgr._connections["s2"] = conn
+async def test_manager_close_all_clears_breakers():
+    mgr = _mgr_with(FakeConn())
+    mgr._breakers["s2"] = CircuitBreaker(1, 60)
     await mgr.close_all()
-    assert mgr._connections == {}
+    assert mgr._breakers == {}
 
 
-async def test_manager_concurrent_connect_single_lock():
-    # 并发 call 同一 server → 只 connect 一次（锁串行化）
-    conn = FakeConn()
-    mgr = _mgr_with(conn)
+async def test_manager_concurrent_calls_independent_connections():
+    # 无共享会话：并发调用各自独立建连（跨任务安全），互不干扰
+    created: list[FakeConn] = []
+
+    def factory(server_id, cfg):
+        conn = FakeConn()
+        created.append(conn)
+        return conn
+
+    mgr = MCPManager(connection_factory=factory)
     results = await asyncio.gather(*[mgr.call("s1", _cfg(), "echo", {}) for _ in range(5)])
     assert all(r[0] for r in results)
-    assert conn.connect_count == 1
+    assert len(created) == 5
 
 
 async def test_manager_validate_failure_raises():

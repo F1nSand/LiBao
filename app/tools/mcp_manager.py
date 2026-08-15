@@ -63,8 +63,6 @@ class MCPManager:
         connection_factory: Callable[[str, McpConnConfig], McpConnection] | None = None,
     ) -> None:
         self._conn_factory = connection_factory
-        self._connections: dict[str, McpConnection] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
         self._breakers: dict[str, CircuitBreaker] = {}
 
     def _create_connection(self, server_id: str, cfg: McpConnConfig) -> McpConnection:
@@ -80,36 +78,32 @@ class MCPManager:
             self._breakers[server_id] = breaker
         return breaker
 
-    async def _get_connection(self, server_id: str, cfg: McpConnConfig) -> McpConnection:
-        conn = self._connections.get(server_id)
-        if conn is not None:
-            return conn
-        conn = self._create_connection(server_id, cfg)
-        try:
-            await conn.connect()
-        except Exception:
-            self._connections.pop(server_id, None)  # 建连失败 → 下次重新建连
-            raise
-        self._connections[server_id] = conn
-        return conn
-
     async def call(
         self, server_id: str, cfg: McpConnConfig, tool_name: str, args: dict[str, Any]
     ) -> tuple[bool, str]:
-        """执行远程工具 → (ok, 文本)。熔断中直接拒绝（I7：不静默使用）。"""
+        """执行远程工具 → (ok, 文本)。熔断中直接拒绝（I7：不静默使用）。
+
+        连接不跨任务驻留：mcp 2.0 ClientSession 的 cancel scope 绑定创建它的 asyncio 任务，
+        跨 ASGI 请求复用会触发 anyio "exit cancel scope" 错误导致连接死亡（实测）——
+        故每次调用独立建连、用完即关（stdio 每次起子进程，~1s；会话复用列为 M4 接缝）。
+        """
         breaker = self._breaker(server_id)
         if breaker.is_open() or not breaker.allow():
             return False, f"MCP 源熔断中（{server_id}）"
-        lock = self._locks.setdefault(server_id, asyncio.Lock())
-        async with lock:
+        conn = self._create_connection(server_id, cfg)
+        try:
+            await conn.connect()
+            ok, text = await conn.call_tool(tool_name, args)
+            breaker.record_success()
+            return ok, text
+        except Exception as exc:  # noqa: BLE001  连接/执行失败 → 计数熔断
+            breaker.record_failure()
+            return False, str(exc)
+        finally:
             try:
-                conn = await self._get_connection(server_id, cfg)
-                ok, text = await conn.call_tool(tool_name, args)
-                breaker.record_success()
-                return ok, text
-            except Exception as exc:  # noqa: BLE001  连接/执行失败 → 计数熔断
-                breaker.record_failure()
-                return False, str(exc)
+                await conn.close()
+            except Exception:  # noqa: BLE001  关闭尽力而为
+                pass
 
     async def validate(self, cfg: McpConnConfig) -> list[McpToolInfo]:
         """注册验证：连接 → list_tools → 立即关闭（不驻留子进程）。失败抛 McpConnectError。"""
@@ -123,25 +117,11 @@ class MCPManager:
             await conn.close()
 
     async def close_connection(self, server_id: str) -> None:
-        """注销/清理单源：关闭连接并移除熔断状态（重注册后重新计数）。"""
-        conn = self._connections.pop(server_id, None)
-        if conn is not None:
-            try:
-                await conn.close()
-            except Exception:  # noqa: BLE001  关闭尽力而为
-                pass
-        self._locks.pop(server_id, None)
+        """注销/清理单源：移除熔断状态（重注册后重新计数）。"""
         self._breakers.pop(server_id, None)
 
     async def close_all(self) -> None:
-        """关停/测试清理：关闭全部连接并清空状态。"""
-        for conn in self._connections.values():
-            try:
-                await conn.close()
-            except Exception:  # noqa: BLE001  关闭尽力而为
-                pass
-        self._connections.clear()
-        self._locks.clear()
+        """关停/测试清理：清空熔断状态（连接均短生命周期，无驻留会话）。"""
         self._breakers.clear()
 
 

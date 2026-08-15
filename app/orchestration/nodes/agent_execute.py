@@ -34,12 +34,10 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
     agent = state.get("agent_config", {})
     trace_id = (config or {}).get("configurable", {}).get("trace_id")
 
-    active_tools = state.get("active_tools")
-    if not active_tools:
-        # M2.5：两段式门控（≤ aci_full_limit 全量；超过 → tool_search + 选中注入）
-        active_tools = build_agent_tools(agent.get("tools", []), state.get("selected_tool_names", []))
-    if not active_tools:
-        active_tools = state.get("active_tools", [])
+    # M2.5：两段式门控（≤ aci_full_limit 全量；超过 → tool_search + 选中注入）。
+    # 每轮强制重算（不读 state.active_tools 缓存）——选中注入依赖本轮 selected_tool_names，
+    # 复用旧 active_tools 会让 tool_search 结果永远进不了下一轮 bind_tools（实测坑）。
+    active_tools = build_agent_tools(agent.get("tools", []), state.get("selected_tool_names", []))
 
     model = _resolve_model(state, config).bind_tools(active_tools)
 

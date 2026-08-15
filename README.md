@@ -65,21 +65,27 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 - **静态前缀稳定**：system_prompt + 工具 ACI 字节稳定 → KV Cache 友好；`agent_version.prefix_hash` 作缓存键。
 - **trace_id 全链路**：ASGI 中间件注入 → REST 信封/SSE 事件 → run_log 落库。
 
-## M2 已落地 + M2.5+ 接缝
+## M2 已落地 + M2.5 已落地 + M3+ 接缝
 
-### M2 核心闭环（本轮完成）
+### M2 核心闭环（已完成）
 - 工具管理：`GET/POST /tools`、`GET/PUT/PATCH/DELETE /tools/{id}`、`POST /tools/{id}/test`、`GET /tools/search`；DB 元数据 + registry 执行实现按 name 绑定，启停同步桥（默认关闭原则实时生效）
 - 中断/恢复：`require_confirm` 工具 → `interrupt()` → Task 行（waiting_confirm + pending_confirm）→ SSE `interrupt` 事件（带 task_id）→ `POST /tasks/{id}/resume`（`Accept: text/event-stream` 续流 / JSON 后台续跑）→ done/cancelled；拒绝分支卡片状态 `cancelled`
 - 任务：`POST/GET /tasks`、`GET /tasks/{id}`、`POST cancel`（40902）、`GET /tasks/{id}/events`（回放+live-tail）；后台运行（asyncio.create_task，完整队列为 M4）
 - 执行策略：失败静默重试（指数退避+抖动，`ToolSpec.max_retries`）+ 幂等去重（进程内缓存）+ 沙盒守卫
 - Agent 版本化：`POST/PUT/DELETE /agents`、`publish/unpublish`、`POST /agents/{id}/invoke`（试跑）；PUT=新版本，publish=发布快照（prefix_hash）
 
-### M2.5+ 接缝（下轮）
+### M2.5 核心闭环（本轮完成）
+- **MCP client**：`POST /tools/mcp/register {name?, url_or_command, headers?, enable}`（stdio 命令 / http(s) URL 双传输，验证即注册）、`GET /tools/mcp`、`DELETE /tools/mcp/{server_id}`；远程工具 → `tool_definition` 行（`mcp_source="mcp:{server_id}"` + `mcp_tool_name` 原始名）+ registry spec（`mc_<server>_<tool>`），生命周期与内置工具完全一致（默认关闭/agent 勾选/confirm/幂等/超时复用）；同名遮蔽拒绝 40903（I7）；启动同步自动重建 spec
+- **熔断（I7）**：`MCPManager` 按源计数，连续失败达 `mcp_breaker_threshold`（3）→ OPEN，冷却 `mcp_breaker_cooldown_s`（60）后 HALF_OPEN 放行一次；熔断中返回"MCP 源熔断中"，不静默使用
+- **tool_search 元工具**：内置 `tl_tool_search`（常驻启用），返回匹配工具的名称+路由描述（不含 params_schema）；I4 降级（空→提示创建 / 检索挂→全量目录 / disabled→标注）
+- **两段式 ACI 注入（渐进式披露）**：启用工具数 ≤ `aci_full_limit`（30）→ 全量 ACI（现状零变化）；超过 → `tool_search` 常驻 + tool_search 匹配选中（`selected_tool_names`，上限 5）注入 bind_tools（每轮重算，不跨轮缓存 active_tools）
+
+### M3+ 接缝（下轮）
 | 接缝 | 现状 | 落地位置 |
 |---|---|---|
 | **Docker 沙盒** | executor 对 `sandbox != none` 返回"暂未实现" | `tools/sandbox.py`（SandboxLevel 已备） |
-| **MCP client** | `POST /tools/mcp/register` 未实现 | `tools/mcp_client.py`（新建） |
-| **tool_search 元工具** | REST 版 `GET /tools/search` 已实现；模型侧元工具未做 | `tools/registry.py` |
+| **MCP 会话复用** | mcp 2.0 ClientSession cancel scope 绑定任务，跨 ASGI 请求复用会死（实测）→ 每次调用独立建连/用完即关（stdio 每次起子进程 ~1s） | `tools/mcp_manager.py`；优化需任务亲和调度（M4） |
+| **MCP 资源/提示原语** | 只映射工具（E2） | 资源→RAG 数据源、提示→Skill 库（M3/M6） |
 | **幂等持久化** | 进程内缓存（TTL 1h/1024 条），重启丢失 | `tools/executor.py` `_idem_cache` → M4 换 Redis |
 | **live-tail 多实例** | 单进程订阅表 | `services/task.py` `_tails` → M4 Redis 广播 |
 | **max_concurrency** | 字段已流动，未强制 | `tools/executor.py` 信号量插入点已注释 |
