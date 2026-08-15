@@ -48,7 +48,26 @@ class Settings(BaseSettings):
     llm_model: str = "deepseek/deepseek-chat"
     llm_api_key: str = ""
     llm_base_url: str = ""
-    llm_embed_model: str = "text-embedding-3-small"
+
+    # ---- M3 Embedding（SiliconFlow，OpenAI 兼容）----
+    # Qwen/Qwen3-Embedding-0.6B，维度 1024（与迁移 0004 的 vector(1024) 一致，见 models/kb.py EMBED_DIM）
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
+    embedding_base_url: str = "https://api.siliconflow.cn/v1"
+    embedding_api_key: str = ""
+    embedding_batch_size: int = 32
+    embedding_timeout_s: int = 60
+
+    # ---- M3 记忆 ----
+    memory_inject_limit: int = 5  # 每轮注入卡片上限（docs 01 §8.2）
+    memory_card_max_chars: int = 500  # 单卡片注入序列化上限
+    memory_trace_limit: int = 100  # maintenance 读取轨迹上限
+
+    # ---- M3 知识库 ----
+    kb_max_chunks: int = 2000  # 单文档分块上限（防 20MB 文本爆 embedding 预算）
+
+    # ---- M3 附件（本地磁盘 MVP，MinIO 为 M4 接缝）----
+    upload_dir: str = "uploads"
+    max_upload_mb: int = 20
 
     # ---- 跨域 ----
     cors_origins: list[str] = ["http://localhost:5173"]

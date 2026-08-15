@@ -1,3 +1,29 @@
+# 进度账本 — plan: C:\Users\Admin1\.claude\plans\immutable-inventing-breeze.md（M3）
+
+目标：M3「记忆与知识库」核心闭环 —— 三层记忆（轨迹 + 长期记忆版本化只增 + 注入）、RAG 完整流水线（分块→向量化→语义+BM25 混合检索→RRF→kb_search 工具）、附件系统（本地磁盘存储 + 分析状态机 + 消息链路接通）。前端 MemoryView/KbView/附件契约已完整实现，后端补齐闭环。
+
+全局约束：五层单向依赖（工具→存储合法，工具不碰服务）；信封契约；错误码 40011/40012/40403/50002/60001/60004/40901 消费 + 新增 40407/40408/40409/40905；默认关闭原则；后台任务 create_task 不持引用（M4 队列接缝）；ruff（120 列 E/F/I/UP/B ignore B008）；pytest-asyncio auto + conftest（requires_db/clean_mcp_specs）。
+
+**本轮不做**（M4+ 接缝）：MinIO、视觉模型（analyze_image I2 降级）、Cross-Encoder 重排序（rerank_score 留空）、initiate_* 占位符、对话自动记忆提取、Agentic RAG 自主决策。
+
+## 任务清单（M3）
+- [ ] T1 数据层地基（依赖 pgvector/python-multipart + Settings + errors + 迁移 0004 七表 + sessionmaker 桥）
+- [ ] T2 分块器 + EmbeddingService（httpx+重试+维度校验）
+- [ ] T3 记忆域 REST（traces/longterm CRUD/版本只增/软删）
+- [ ] T4 maintenance（LLM 整理 + json 提取 + 版本化写回）
+- [ ] T5 记忆注入（memory_inject 节点 + 渲染 + 桥接线）
+- [ ] T6 KB 集合/文档 + 后台索引流水线
+- [ ] T7 /kb/search 混合检索（语义+BM25+RRF）
+- [ ] T8 kb_search 内置工具（ContextVar + sessionmaker 桥 + seed）
+- [ ] T9 附件（/uploads 落盘 + 二进制流 + 分析状态机 + 错误码）
+- [ ] T10 消息 attachments 链路 + memory_trace + 收尾
+
+## 执行记录（M3）
+（T1 起记录）
+
+---
+
+# M2.5 历史（已完成，勿重做）
 # 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-14-m25-core-loop.md
 
 目标：M2.5 核心闭环 —— MCP client（stdio+HTTP 双传输，注册/列表/注销）+ tool_search 元工具 + 两段式 ACI 注入（渐进式披露）。前端 ToolsView 注册弹窗直接对接真实后端。**本轮不做**：Docker 沙盒、M4 队列、MCP 资源/提示原语（M3 接缝）。

@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from app.storage.models.agent import AgentConfig, AgentVersion
+from app.storage.models.attachment import Attachment
 from app.storage.models.conversation import Conversation
+from app.storage.models.kb import KbChunk, KbCollection, KbDocument
 from app.storage.models.mcp_server import McpServer
+from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion, MemoryTrace
 from app.storage.models.message import Message
 from app.storage.models.org import Org
 from app.storage.models.run_log import RunLog
@@ -14,8 +17,15 @@ from app.storage.models.user import User
 __all__ = [
     "AgentConfig",
     "AgentVersion",
+    "Attachment",
     "Conversation",
+    "KbChunk",
+    "KbCollection",
+    "KbDocument",
+    "LongTermMemory",
+    "LongTermMemoryVersion",
     "McpServer",
+    "MemoryTrace",
     "Message",
     "Org",
     "RunLog",
