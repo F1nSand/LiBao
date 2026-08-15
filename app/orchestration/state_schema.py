@@ -18,6 +18,8 @@ class AgentState(TypedDict, total=False):
     agent_config: dict[str, Any]
     # 启用的工具 ACI（dict 列表，静态前缀之一，已按 id 排序）
     active_tools: list[dict[str, Any]]
+    # M2.5 两段式：tool_search 选中注入的工具名（LastValue，上限 5，由 tool_execute 写入）
+    selected_tool_names: list[str]
     # 工具执行结果（本轮，供 finalize 校验）
     tool_results: list[dict[str, Any]]
     # 跨节点运行标记：steps / max_steps / status / context_metrics

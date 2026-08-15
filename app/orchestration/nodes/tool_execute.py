@@ -25,6 +25,7 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
     results: list[dict[str, Any]] = []
     run_logs: list[dict[str, Any]] = []
     confirmed_once = False
+    state_selected: list[str] | None = None  # M2.5：本轮 tool_search 选中（None = 未触发，保留旧值）
 
     # 授权谓词与 acis_for_tools 共用 agent_can_use（单一不变量）
     agent_tool_ids = set(state.get("agent_config", {}).get("tools", []) or [])
@@ -92,6 +93,11 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                 continue
 
         result = await executor.execute(spec, tc.get("args") or {})
+
+        # M2.5：LLM 调用 tool_search 后 → 把匹配结果写入 selected_tool_names（两段式 ACI 注入）
+        if spec.id == "tl_tool_search" and isinstance(result.output, dict) and result.output.get("matches"):
+            state_selected = [m["name"] for m in result.output["matches"] if m.get("enabled")][:5]
+
         results.append(
             {
                 "tool_call_id": tc["id"],
@@ -124,4 +130,6 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
         "messages": tool_msgs,
         "tool_results": results,
         "run_logs": (state.get("run_logs") or []) + run_logs,
+        # LastValue：本轮有 tool_search 结果才更新，否则保留旧选中
+        "selected_tool_names": state_selected if state_selected is not None else state.get("selected_tool_names", []),
     }

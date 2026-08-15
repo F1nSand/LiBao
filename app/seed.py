@@ -183,6 +183,20 @@ async def main() -> None:
             require_confirm=True,
             idempotent=True,
         )
+        await _get_or_create_tool(
+            session,
+            org,
+            name="tool_search",
+            description="搜索平台已注册的工具目录（名称+路由描述），用于发现可用工具。",
+            params_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "自然语言搜索关键词"}},
+                "required": ["query"],
+            },
+            tool_type="perception",
+            require_confirm=False,
+            idempotent=False,
+        )
         agent = await _get_or_create_agent(session, org, "tl_time_now")
         await _get_or_create_version(session, agent, "tl_time_now")
         await session.commit()

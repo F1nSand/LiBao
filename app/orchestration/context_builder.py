@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from langchain_core.messages import BaseMessage, SystemMessage
 
+from app.core.config import get_settings
 from app.core.prefix import compute_prefix_hash  # noqa: F401  重导出供 seed/测试复用
 from app.orchestration.state_schema import AgentState
-from app.tools.registry import acis, agent_can_use, get
+from app.tools.registry import acis, agent_can_use, get, get_by_name
 
 
 def static_prefix_aci() -> list[dict]:
@@ -24,6 +25,27 @@ def acis_for_tools(tool_ids: list[str]) -> list[dict]:
     """
     specs = [s for tid in tool_ids if (s := get(tid)) is not None and agent_can_use(s, tool_ids)]
     return [s.aci() for s in sorted(specs, key=lambda s: s.id)]
+
+
+def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = None) -> list[dict]:
+    """工具 ACI 注入（M2.5 两段式门控，docs 01 §7.1.1 A2）。
+
+    启用工具数 ≤ aci_full_limit → 维持现状全量 ACI（现有场景零行为变化）；
+    超过 → tool_search 常驻 + 上次搜索选中的工具 ACI（渐进式披露），选中按授权过滤。
+    """
+    specs = [s for tid in tool_ids if (s := get(tid)) is not None and agent_can_use(s, tool_ids)]
+    if len(specs) <= get_settings().aci_full_limit:
+        return [s.aci() for s in sorted(specs, key=lambda s: s.id)]
+    tool_search = get("tl_tool_search")
+    chosen = [
+        s
+        for n in (selected_names or [])
+        if (s := get_by_name(n)) is not None
+        and agent_can_use(s, tool_ids)
+        and s.id != "tl_tool_search"
+    ]
+    aci = [tool_search.aci()] if tool_search is not None and tool_search.enabled else []
+    return aci + [s.aci() for s in sorted(chosen, key=lambda s: s.id)]
 
 
 def build_context(state: AgentState) -> list[BaseMessage]:

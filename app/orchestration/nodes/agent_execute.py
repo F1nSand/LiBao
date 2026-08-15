@@ -12,7 +12,7 @@ from typing import Any, Optional
 from langchain_core.runnables import RunnableConfig
 
 from app.core.llm import LLMService
-from app.orchestration.context_builder import acis_for_tools, build_context
+from app.orchestration.context_builder import build_agent_tools, build_context
 from app.orchestration.state_schema import AgentState
 from app.orchestration.stream_core import message_text
 
@@ -36,7 +36,8 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
 
     active_tools = state.get("active_tools")
     if not active_tools:
-        active_tools = acis_for_tools(agent.get("tools", []))
+        # M2.5：两段式门控（≤ aci_full_limit 全量；超过 → tool_search + 选中注入）
+        active_tools = build_agent_tools(agent.get("tools", []), state.get("selected_tool_names", []))
     if not active_tools:
         active_tools = state.get("active_tools", [])
 

@@ -1,7 +1,7 @@
-"""内置工具注册。M1：tl_time_now；M2：tl_demo_notify（人工确认流程演示）。"""
+"""内置工具注册。M1：tl_time_now；M2：tl_demo_notify（人工确认流程演示）；M2.5：tl_tool_search（工具发现元工具）。"""
 from __future__ import annotations
 
-from app.tools.builtin import demo_notify, time_now
+from app.tools.builtin import demo_notify, time_now, tool_search
 from app.tools.registry import SandboxLevel, ToolSpec, ToolType, get, register
 
 
@@ -50,5 +50,28 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=5000,
             handler=demo_notify.handler,
+        )
+    )
+    register(
+        ToolSpec(
+            id="tl_tool_search",
+            name="tool_search",
+            description=(
+                "搜索平台已注册的工具目录，返回匹配工具的名称与路由描述（何时用/何时别用），"
+                "不含参数 schema。需要确定某个任务可用什么工具时先搜索再选择。"
+                "反例：不要用它执行任务或回答非工具发现问题。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "自然语言搜索关键词"}},
+                "required": ["query"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=True,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=5000,
+            handler=tool_search.tool_search_handler,
         )
     )
