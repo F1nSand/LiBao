@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
-from app.api.schemas.kb import CreateCollectionRequest, KbStatusRequest
+from app.api.schemas.kb import CreateCollectionRequest, KbSearchRequest, KbStatusRequest
 from app.services.kb import KbService
 from app.services.serializers import serialize_kb_collection, serialize_kb_document
 from app.storage.models.user import User
@@ -129,3 +129,13 @@ async def delete_document(
 ):
     await KbService().delete_document(db, user, document_id)
     return ok()
+
+
+@router.post("/kb/search")
+async def search_kb(
+    req: KbSearchRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    hits = await KbService().search(db, user, req.collection_ids, req.query, req.top_k, req.hybrid)
+    return ok(hits)

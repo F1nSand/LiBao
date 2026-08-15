@@ -1,13 +1,21 @@
 """知识库数据访问（docs 04 §3.6）。集合/文档软删；分块硬删重建（派生数据）。"""
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.storage.models.kb import KbChunk, KbCollection, KbDocument
+
+_CJK = re.compile(r"([一-鿿])")
+
+
+def space_cjk(text: str) -> str:
+    """CJK 逐字插空格（与迁移 0004 GENERATED tsvector 表达式一致——BM25 查询侧同一变换）。"""
+    return _CJK.sub(r"\1 ", text)
 
 
 class KbRepository:
@@ -120,3 +128,57 @@ class KbRepository:
     async def count_chunks(self, document_id: uuid.UUID) -> int:
         stmt = select(func.count()).select_from(KbChunk).where(KbChunk.document_id == document_id)
         return int((await self.session.execute(stmt)).scalar_one())
+
+    # ---- 混合检索（T7）----
+
+    def _indexed_filter(self, org_id: uuid.UUID, collection_ids: list[uuid.UUID]):
+        stmt = select(KbChunk.id, KbChunk.content).join(KbDocument, KbDocument.id == KbChunk.document_id).where(
+            KbChunk.org_id == org_id,
+            KbDocument.status == "indexed",
+            KbDocument.deleted_at.is_(None),
+        )
+        if collection_ids:
+            stmt = stmt.where(KbChunk.collection_id.in_(collection_ids))
+        return stmt
+
+    async def semantic_search(
+        self, org_id: uuid.UUID, collection_ids: list[uuid.UUID], query_vec: list[float], limit: int = 50
+    ) -> list[tuple[uuid.UUID, str, float]]:
+        """语义通道：余弦距离升序（HNSW）。返回 (chunk_id, content, distance)。"""
+        stmt = self._indexed_filter(org_id, collection_ids)
+        stmt = stmt.add_columns(KbChunk.embedding.cosine_distance(query_vec).label("dist"))
+        stmt = stmt.order_by("dist").limit(limit)
+        rows = (await self.session.execute(stmt)).all()
+        return [(r[0], r[1], float(r[2])) for r in rows]
+
+    async def bm25_search(
+        self, org_id: uuid.UUID, collection_ids: list[uuid.UUID], query: str, limit: int = 50
+    ) -> list[tuple[uuid.UUID, str, float]]:
+        """BM25 通道：tsvector @@ plainto_tsquery + ts_rank 降序（GIN）。返回 (chunk_id, content, rank)。"""
+        tsq = func.plainto_tsquery("simple", space_cjk(query))
+        stmt = self._indexed_filter(org_id, collection_ids)
+        stmt = stmt.add_columns(func.ts_rank(KbChunk.content_tsv, tsq).label("rank"))
+        stmt = stmt.where(KbChunk.content_tsv.op("@@")(tsq))
+        stmt = stmt.order_by(desc("rank")).limit(limit)
+        rows = (await self.session.execute(stmt)).all()
+        return [(r[0], r[1], float(r[2])) for r in rows]
+
+    async def chunk_sources(self, chunk_ids: list[uuid.UUID]) -> dict[str, dict]:
+        """chunk → 来源信息（文档名/集合名，检索结果 source 字段）。"""
+        if not chunk_ids:
+            return {}
+        stmt = (
+            select(KbChunk.id, KbDocument.filename, KbDocument.id, KbCollection.name, KbCollection.id)
+            .join(KbDocument, KbDocument.id == KbChunk.document_id)
+            .join(KbCollection, KbCollection.id == KbChunk.collection_id)
+            .where(KbChunk.id.in_(chunk_ids))
+        )
+        out: dict[str, dict] = {}
+        for cid, filename, doc_id, coll_name, coll_id in (await self.session.execute(stmt)).all():
+            out[str(cid)] = {
+                "document_id": str(doc_id),
+                "filename": filename,
+                "collection_id": str(coll_id),
+                "collection_name": coll_name,
+            }
+        return out
