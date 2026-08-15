@@ -149,12 +149,12 @@ async def run_maintenance(db: AsyncSession, user_id: uuid.UUID, model: Any = Non
 
     model 可注入（测试 FakeChatModel）；LLM 失败/解析失败 → 60001 retryable。
     """
-    svc = MemoryService()
     repo = MemoryRepository(db)
     cards = await repo.list_cards(user_id, limit=200)
     traces = await repo.recent_traces(user_id, get_settings().memory_trace_limit)
     cards_text = "\n".join(
-        f"- [{c.id}] ({c.card_type}, importance={c.importance:.2f}) {c.title or ''}: {json.dumps(c.content, ensure_ascii=False)}"
+        f"- [{c.id}] ({c.card_type}, importance={c.importance:.2f}) {c.title or ''}: "
+        f"{json.dumps(c.content, ensure_ascii=False)}"
         for c in cards
     )
     traces_text = "\n".join(f"- [{t.role}] {t.content[:200]}" for t in traces)
