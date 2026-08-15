@@ -10,13 +10,11 @@ from sqlalchemy import inspect, select, text
 
 from app.storage.db import init_db
 from app.storage.models import (
-    Attachment,
     KbChunk,
     KbCollection,
     KbDocument,
     LongTermMemory,
     LongTermMemoryVersion,
-    MemoryTrace,
     Org,
     User,
 )
@@ -89,7 +87,6 @@ async def test_vector_column_insert_and_cosine_search(m3_fixture):
         session.add_all([c1, c2])
         await session.commit()
         # cosine_distance 排序：query [1.0]*1024 应命中 c1
-        from pgvector.sqlalchemy import Vector
 
         qv = [1.0] * 1024
         top = (

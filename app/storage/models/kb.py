@@ -7,7 +7,6 @@ CJK 逐字插空格使每个汉字成为 unigram token（无中文分词扩展�
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import FetchedValue, ForeignKey, Integer, String, Text, UniqueConstraint
