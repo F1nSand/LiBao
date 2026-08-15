@@ -56,6 +56,10 @@ async def lifespan(app: FastAPI):
     # F7：默认组织 enabled 同步（停用状态重启不丢）；I5：全量 MCP 行重建（其他 org 的 MCP 工具不失效）。
     from app.services.tool import ToolService
 
+    # M3：sessionmaker 桥（kb_search 工具/记忆注入在五层约束下直连存储层）
+    from app.storage.db import set_sessionmaker
+
+    set_sessionmaker(sessionmaker)
     async with sessionmaker() as session:
         from sqlalchemy import select
 

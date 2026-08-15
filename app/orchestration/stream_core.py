@@ -37,8 +37,12 @@ def _chunk_text(chunk: Any) -> str:
     return message_text(getattr(chunk, "content", ""))
 
 
-def build_initial_state(agent: Any, content: str) -> dict[str, Any]:
-    """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。"""
+def build_initial_state(agent: Any, content: str, user_id: str | None = None, org_id: str | None = None) -> dict[str, Any]:
+    """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。
+
+    user_id/org_id 供 M3 memory_inject（注入）与 kb_search 工具（org 上下文）使用；
+    缺失时注入静默跳过（不击穿对话）。
+    """
     return {
         "messages": [HumanMessage(content=content)],
         "agent_config": {
@@ -46,7 +50,9 @@ def build_initial_state(agent: Any, content: str) -> dict[str, Any]:
             "system_prompt": agent.system_prompt,
             "tools": agent.tools or [],
             "max_steps": agent.max_steps,
+            "org_id": org_id or str(getattr(agent, "org_id", "") or ""),
         },
+        "user_id": user_id,
         # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs
         "flags": {"steps": 0},
         "tool_results": [],

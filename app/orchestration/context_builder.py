@@ -52,12 +52,18 @@ def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = No
 
 
 def build_context(state: AgentState) -> list[BaseMessage]:
-    """组装进模型的完整消息列表：SystemMessage(静态) + 历史 + 状态栏(尾部动态)。"""
+    """组装进模型的完整消息列表：SystemMessage(静态) + 历史 + 记忆注入块 + 状态栏(尾部动态)。"""
     agent = state.get("agent_config", {})
     system_prompt = agent.get("system_prompt", "")
 
     system = SystemMessage(content=system_prompt)
     history: list[BaseMessage] = list(state.get("messages", []))
+
+    # M3 记忆注入（docs 01 §8.2）：历史之后、状态栏之前（动态内容永远追加尾部）
+    refs = state.get("memory_refs") or []
+    if refs:
+        lines = [f"- [{r['title']}] {r['content_text']}" for r in refs]
+        history.append(SystemMessage(content="[长期记忆]\n" + "\n".join(lines)))
 
     # 状态栏（代码维护，append-only 尾部，docs 01 §4.3）
     status_bar = state.get("flags", {}).get("status_bar")

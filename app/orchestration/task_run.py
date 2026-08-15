@@ -142,11 +142,12 @@ async def run_task_graph(
                 )
                 return
             await TaskService().set_running(db, task)
+            user_id = str(task.user_id) if task.user_id else None
         await _run_graph_common(
             graph=graph,
             sessionmaker=sessionmaker,
             task_id=task_id,
-            initial=build_initial_state(agent, _task_input_text(task.input)),
+            initial=build_initial_state(agent, _task_input_text(task.input), user_id=user_id),
             trace_id=trace_id,
             model_override=model_override,
         )

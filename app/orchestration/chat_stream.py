@@ -148,7 +148,7 @@ async def chat_stream_events(
 
     async for frame in stream_graph_events(
         graph=graph,
-        initial=build_initial_state(agent, content),
+        initial=build_initial_state(agent, content, user_id=str(user.id), org_id=str(agent.org_id)),
         graph_config=graph_config,
         emit=emit,
         on_interrupt=on_interrupt,
@@ -327,7 +327,7 @@ async def agent_invoke_events(
 
     async for frame in stream_graph_events(
         graph=graph,
-        initial=build_initial_state(agent, content),
+        initial=build_initial_state(agent, content, user_id=str(user.id), org_id=str(agent.org_id)),
         graph_config=graph_config,
         emit=emit,
         on_interrupt=on_interrupt,
