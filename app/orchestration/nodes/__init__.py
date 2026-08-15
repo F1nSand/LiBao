@@ -1,4 +1,4 @@
-"""编排节点统一出口（docs 01 §3.1：route / memory_inject / agent_execute / tool_execute / context_update / finalize）。"""
+"""编排节点统一出口（docs 01 §3.1：route/memory_inject/agent_execute/tool_execute/context_update/finalize）。"""
 from __future__ import annotations
 
 from app.orchestration.nodes.agent_execute import agent_execute_node
