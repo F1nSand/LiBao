@@ -1,6 +1,7 @@
 """主图（docs 01 §3.1，ADR-01）。单主图 + 节点策略；M1 恒走单 Agent（multi 为 M4 接缝）。
 
-流：START→route→memory_inject→agent_execute→(有 tool_calls ?→tool_execute→memory_inject | 无→context_update)→finalize→END
+流：START→route→memory_inject→agent_execute→(有 tool_calls ?→tool_execute→memory_inject
+| 无→context_update)→finalize→END
 M3：memory_inject 每轮在 LLM 前注入长期记忆（user_id 缺失/桥未设时静默跳过）。
 max_steps 守卫：steps 达上限后 tool_execute 直接转 context_update（死亡螺旋防护 OC10）。
 """

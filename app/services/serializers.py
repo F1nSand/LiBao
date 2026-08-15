@@ -5,6 +5,7 @@ from typing import Any
 
 from app.storage.models.agent import AgentConfig, AgentVersion
 from app.storage.models.conversation import Conversation
+from app.storage.models.kb import KbCollection, KbDocument
 from app.storage.models.mcp_server import McpServer
 from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion, MemoryTrace
 from app.storage.models.message import Message
@@ -105,6 +106,35 @@ def serialize_mcp_server(s: McpServer, tool_count: int = 0) -> dict[str, Any]:
         "enabled": s.enabled,
         "tool_count": tool_count,
         "created_at": _dt(s.created_at),
+    }
+
+
+def serialize_kb_collection(c: KbCollection, document_count: int = 0) -> dict[str, Any]:
+    """知识库集合（docs 03 §5.6 / FrontEnd KbCollection）。"""
+    return {
+        "id": str(c.id),
+        "name": c.name,
+        "description": c.description,
+        "chunk_size": c.chunk_size,
+        "overlap": c.chunk_overlap,
+        "document_count": document_count,
+        "created_at": _dt(c.created_at),
+    }
+
+
+def serialize_kb_document(d: KbDocument) -> dict[str, Any]:
+    """知识库文档（docs 03 §5.6 / FrontEnd KbDocument）。"""
+    return {
+        "id": str(d.id),
+        "collection_id": str(d.collection_id),
+        "name": d.filename,
+        "mime_type": d.content_type,
+        "size": d.size_bytes,
+        "status": d.status,
+        "chunk_count": d.chunk_count,
+        "progress": None if d.status in {"indexed", "failed", "archived"} else d.status,
+        "error": d.error,
+        "created_at": _dt(d.created_at),
     }
 
 
