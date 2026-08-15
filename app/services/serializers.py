@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.storage.models.agent import AgentConfig, AgentVersion
+from app.storage.models.attachment import Attachment
 from app.storage.models.conversation import Conversation
 from app.storage.models.kb import KbCollection, KbDocument
 from app.storage.models.mcp_server import McpServer
@@ -106,6 +107,18 @@ def serialize_mcp_server(s: McpServer, tool_count: int = 0) -> dict[str, Any]:
         "enabled": s.enabled,
         "tool_count": tool_count,
         "created_at": _dt(s.created_at),
+    }
+
+
+def serialize_attachment(a: Attachment) -> dict[str, Any]:
+    """附件（docs 03 §5.9 / FrontEnd Attachment）。"""
+    return {
+        "id": str(a.id),
+        "mime_type": a.content_type,
+        "size": a.size_bytes,
+        "status": a.status,
+        "name": a.filename,
+        "created_at": _dt(a.created_at),
     }
 
 
