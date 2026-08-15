@@ -70,8 +70,8 @@ async def test_list_cards_sorted_by_importance_desc(memory_fixture):
     sessionmaker, user, other = memory_fixture
     async with sessionmaker() as session:
         svc = MemoryService()
-        c1 = await svc.create_card(session, user.id, "note", "低", {"text": "x"}, importance=0.2)
-        c2 = await svc.create_card(session, user.id, "note", "高", {"text": "y"}, importance=0.9)
+        await svc.create_card(session, user.id, "note", "低", {"text": "x"}, importance=0.2)
+        await svc.create_card(session, user.id, "note", "高", {"text": "y"}, importance=0.9)
         await svc.create_card(session, user.id, "note", "中", {"text": "z"}, importance=0.5)
         cards = await svc.list_cards(session, user.id)
         assert [c.title for c in cards] == ["高", "中", "低"]
