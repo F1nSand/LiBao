@@ -98,20 +98,17 @@ async def chat_stream_events(
     msg_repo = MessageRepository(db)
 
     # ---- ① 开头持久化用户消息（message-as-log，刷新可回放）----
+    # C8：用户消息 + 附件回填 + 记忆轨迹 + touch 合并为单事务（原 3 次独立 commit，D10 同事务偏差）
     att_refs = [{"attachment_id": aid} for aid in (attachments or [])] or None
     user_msg = await msg_repo.create(
         conversation_id=conversation.id, role="user", content=content, attachments=att_refs, trace_id=trace_id
     )
-    await db.commit()
-    # M3：附件回填 conversation_id/message_id（消息回放时附件可解析归属）
     if att_refs:
         await _backfill_attachments(db, [a["attachment_id"] for a in att_refs], conversation.id, user_msg.id)
-    # M3：记忆轨迹落库（maintenance 原料；user 消息一条）
     await MemoryService().record_trace(
         db, user.id, role="user", content=content, trace_id=trace_id,
         conversation_id=conversation.id, message_id=user_msg.id,
     )
-    await db.commit()
     await ConversationRepository(db).touch_last_message(conversation.id)
     await db.commit()
 
@@ -262,6 +259,16 @@ async def resume_stream_events(
             for log in final_state.get("run_logs", []):
                 await RunLogRepository(db).create(session_id=conversation_id, **log)
             await ConversationRepository(db).touch_last_message(conversation_id)
+            # C8：resume 续答轮补 assistant 轨迹（maintenance 原料；此前 resume 不落轨迹）
+            await MemoryService().record_trace(
+                db,
+                user.id,
+                role="assistant",
+                content=fm.get("content", ""),
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                message_id=assistant_msg_id,
+            )
         # F10：重读任务行，避免覆盖并发取消（与 task_run 一致）
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status != "cancelled":
@@ -280,6 +287,8 @@ async def resume_stream_events(
 
     async def on_error(exc: Exception) -> None:
         # F5：SSE 轨 resume 图级异常 → 任务置 failed（与 task_run 一致）
+        # E1：on_final 落库失败会毒化 session → 先 rollback，防 set_failed 也失败
+        await db.rollback()
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status == "running":
             await task_service.set_failed(db, updated, str(exc))

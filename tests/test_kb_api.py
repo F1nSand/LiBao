@@ -10,10 +10,12 @@ import uuid
 import pytest
 from sqlalchemy import select
 
+from app.api.routers.kb import _decode_text
 from app.core.errors import AppError
 from app.core.security import hash_password
 from app.services.kb import KbService
 from app.services.kb_pipeline import process_document
+from app.services.serializers import kb_document_progress
 from app.storage.db import init_db
 from app.storage.models import KbChunk, Org, User
 from app.storage.repositories.kb import KbRepository
@@ -176,6 +178,69 @@ async def test_delete_collection_cascades(kb_fixture):
         assert exc.value.code == 40407
         remain = (await session.execute(select(KbChunk).where(KbChunk.collection_id == coll_id))).scalars().all()
         assert remain == []  # chunks 硬删
+
+
+async def test_progress_is_number_for_all_statuses():
+    """S2：KB 文档 progress 恒为 number（前端 KbDocument.progress?: number，ChunkStatus 以 >=100 判成功）。"""
+    for status, expected in [
+        ("uploaded", 0),
+        ("chunking", 30),
+        ("indexing", 70),
+        ("indexed", 100),
+        ("failed", 100),
+        ("archived", 100),
+    ]:
+        assert kb_document_progress(status) == expected
+        assert isinstance(kb_document_progress(status), int)
+
+
+async def test_pipeline_insert_failure_marks_failed(kb_fixture, monkeypatch):
+    """C1：插库段异常 → 文档置 failed（不再永久卡 indexing）。"""
+    sessionmaker, user, user2 = kb_fixture
+    svc = KbService()
+    embedder = FakeEmbedder()
+
+    async def boom(*a, **k):
+        raise RuntimeError("simulated insert failure")
+
+    monkeypatch.setattr(KbRepository, "insert_chunks", boom)
+    doc_id, _ = await _upload_doc(sessionmaker, user, svc, "doc.txt", "abc" * 200)
+    await process_document(sessionmaker, doc_id, embedder=embedder)
+    async with sessionmaker() as session:
+        doc = await svc.get_document(session, user, doc_id)
+        assert doc.status == "failed"
+        assert "索引落库失败" in (doc.error or "")
+
+
+async def test_document_counts(kb_fixture):
+    """S11：document_counts 统计非软删文档数（单条 GROUP BY）。"""
+    sessionmaker, user, user2 = kb_fixture
+    svc = KbService()
+    coll = await svc.create_collection(sessionmaker(), user, name="count-coll")
+    for name, content in [("a.txt", "aaa"), ("b.txt", "bbb")]:
+        await _upload_doc(sessionmaker, user, svc, name, content, collection_id=coll.id)
+    async with sessionmaker() as session:
+        counts = await svc.document_counts(session, user, [coll.id])
+        assert counts[coll.id] == 2
+
+
+async def test_empty_content_40001(kb_fixture):
+    """S8：空内容 → 40001（参数缺失，非 40014 超长）。"""
+    sessionmaker, user, user2 = kb_fixture
+    svc = KbService()
+    coll = await svc.create_collection(sessionmaker(), user, name="empty-coll")
+    async with sessionmaker() as session:
+        with pytest.raises(AppError) as exc:
+            await svc.upload_document(session, user, coll.id, filename="e.txt", content="", content_type="text/plain")
+        assert exc.value.code == 40001
+
+
+async def test_decode_text_invalid_utf8_40012():
+    """S3：KB 上传非法 UTF-8 → 40012（纯单元；原 ValueError → 50001）。"""
+    with pytest.raises(AppError) as exc:
+        _decode_text(b"\xff\xfe\x00")
+    assert exc.value.code == 40012
+    assert _decode_text("你好".encode()) == "你好"
 
 
 async def test_cross_org_document_404(kb_fixture):

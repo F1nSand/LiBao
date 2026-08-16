@@ -14,6 +14,7 @@ from app.core.security import hash_password
 from app.services.memory import MemoryService, _extract_json, run_maintenance
 from app.storage.db import init_db
 from app.storage.models import Org, User
+from app.storage.models.memory import LongTermMemoryVersion
 from tests.conftest import requires_db
 
 pytestmark = requires_db
@@ -118,6 +119,36 @@ async def test_maintenance_llm_error_60001(maint_fixture):
         with pytest.raises(AppError) as exc:
             await run_maintenance(session, user.id, model=FakeMaintainModel("{}", raise_error=True))
         assert exc.value.code == 60001
+
+
+async def test_maintenance_invalid_update_id_60001(maint_fixture):
+    """C2/S4：LLM 输出合法 JSON 但 update id 非法 UUID → 60001 retryable（非裸 500）。"""
+    sessionmaker, user = maint_fixture
+    async with sessionmaker() as session:
+        plan = {"update": [{"id": "not-a-uuid", "content": {"text": "x"}}], "create": [], "delete": []}
+        with pytest.raises(AppError) as exc:
+            await run_maintenance(session, user.id, model=FakeMaintainModel(json.dumps(plan)))
+        assert exc.value.code == 60001
+        assert exc.value.retryable is True
+
+
+async def test_maintenance_version_conflict_60001(maint_fixture):
+    """C4：并发写版本撞 UNIQUE(memory_id, version) → 60001 retryable（IntegrityError 在 commit 处）。"""
+    sessionmaker, user = maint_fixture
+    async with sessionmaker() as session:
+        svc = MemoryService()
+        card = await svc.create_card(session, user.id, "note", "并发", {"text": "v1"})
+        # 模拟另一 maintenance 已写入 version=2
+        session.add(
+            LongTermMemoryVersion(memory_id=card.id, version=2, content={"text": "外部 v2"}, importance=0.5)
+        )
+        await session.commit()
+    async with sessionmaker() as session:
+        plan = {"update": [{"id": str(card.id), "content": {"text": "本会话 v2"}, "importance": 0.8}]}
+        with pytest.raises(AppError) as exc:
+            await run_maintenance(session, user.id, model=FakeMaintainModel(json.dumps(plan)))
+        assert exc.value.code == 60001
+        assert exc.value.retryable is True
 
 
 async def test_maintenance_importance_clamped(maint_fixture):

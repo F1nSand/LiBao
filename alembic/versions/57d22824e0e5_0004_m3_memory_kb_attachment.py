@@ -10,18 +10,19 @@ M3：pgvector 扩展 + 记忆三表 + 知识库三表 + 附件表。
 """
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
+
 # revision identifiers, used by Alembic.
 revision: str = '57d22824e0e5'
-down_revision: Union[str, None] = '58ff6088852e'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = '58ff6088852e'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 EMBED_DIM = 1024
 CJK_SPACE = r"([一-鿿])"  # 中文字符逐字插空格（raw string 必须）
@@ -140,8 +141,8 @@ def upgrade() -> None:
     op.create_index(op.f("ix_kb_chunks_org_id"), "kb_chunks", ["org_id"], unique=False)
     # HNSW 向量索引（余弦距离；空表建索引瞬间完成，表大后改 CREATE INDEX CONCURRENTLY 的接缝）
     op.execute(
-        f"CREATE INDEX ix_kb_chunks_embedding_hnsw ON kb_chunks "
-        f"USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)"
+        "CREATE INDEX ix_kb_chunks_embedding_hnsw ON kb_chunks "
+        "USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)"
     )
     # GIN tsvector 索引（BM25 通道）
     op.execute("CREATE INDEX ix_kb_chunks_content_tsv_gin ON kb_chunks USING gin (content_tsv)")

@@ -1,6 +1,7 @@
 """知识库数据访问（docs 04 §3.6）。集合/文档软删；分块硬删重建（派生数据）。"""
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from collections import defaultdict
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.embeddings import EmbeddingService
 from app.storage.models.kb import KbChunk, KbCollection, KbDocument
+
+logger = logging.getLogger(__name__)
 
 _CJK = re.compile(r"([一-鿿])")
 _RRF_K = 60  # 倒数排名融合常数（docs 01 §9.1）
@@ -42,6 +45,23 @@ class KbRepository:
             KbCollection.deleted_at.is_(None),
         )
         return (await self.session.execute(stmt)).first() is not None
+
+    async def document_counts(
+        self, org_id: uuid.UUID, collection_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        """各集合非软删文档数（单条 GROUP BY，供集合列表 document_count；S11）。"""
+        if not collection_ids:
+            return {}
+        stmt = (
+            select(KbDocument.collection_id, func.count())
+            .where(
+                KbDocument.org_id == org_id,
+                KbDocument.deleted_at.is_(None),
+                KbDocument.collection_id.in_(collection_ids),
+            )
+            .group_by(KbDocument.collection_id)
+        )
+        return {cid: int(n) for cid, n in (await self.session.execute(stmt)).all()}
 
     async def list_collections(self, org_id: uuid.UUID) -> list[KbCollection]:
         stmt = (
@@ -216,7 +236,8 @@ class KbRepository:
                 for rank, (cid, text, _dist) in enumerate(await self.semantic_search(org_id, collection_ids, vec), 1):
                     scores[cid] += 1 / (_RRF_K + rank)
                     texts.setdefault(cid, text)
-            except Exception:  # noqa: BLE001  语义通道故障 → 降级 bm25-only（不击穿检索）
+            except Exception as exc:  # noqa: BLE001  语义通道故障 → 降级 bm25-only（不击穿检索）
+                logger.warning("semantic channel degraded to bm25-only: %s", exc)
                 semantic_on = False
         if bm25_on:
             for rank, (cid, text, _ts) in enumerate(await self.bm25_search(org_id, collection_ids, query), 1):

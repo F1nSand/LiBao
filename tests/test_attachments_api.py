@@ -11,8 +11,9 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.security import hash_password
 from app.services.attachment import AttachmentService, analyze_attachment
+from app.services.serializers import serialize_attachment
 from app.storage.db import init_db
-from app.storage.models import Org, User
+from app.storage.models import Attachment, Org, User
 from tests.conftest import requires_db
 
 pytestmark = requires_db
@@ -141,6 +142,22 @@ async def test_delete_removes_file_and_row(att_fixture):
             await svc.get_attachment(session, user, att_id)
         assert exc.value.code == 40403
         assert not (tmp / str(att_id)).exists()  # 磁盘文件已删
+
+
+async def test_serialize_attachment_has_attachment_id():
+    """S1：serialize_attachment 同时返回 id 与 attachment_id（前端 POST /uploads 消费 attachment_id）。"""
+    a = Attachment(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        filename="a.txt",
+        content_type="text/plain",
+        size_bytes=3,
+        storage_path="/tmp/a",
+        status="uploaded",
+    )
+    data = serialize_attachment(a)
+    assert data["attachment_id"] == str(a.id)
+    assert data["id"] == str(a.id)  # 旧字段保留兼容
 
 
 async def test_other_user_attachment_40403(att_fixture):

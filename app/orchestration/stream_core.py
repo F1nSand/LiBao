@@ -183,6 +183,16 @@ async def stream_graph_events(
             await keepalive_task
 
     if final_state is not None and on_final is not None:
-        payload = await on_final(final_state)
+        # C3：on_final（落库）失败不得穿出——否则 assistant 消息 + done 帧丢失、resume 任务卡 running。
+        # 走 on_error 兜底（后台运行器用它置任务 failed），再发 error 帧结束流。
+        try:
+            payload = await on_final(final_state)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("on_final failed")
+            if on_error is not None:
+                with contextlib.suppress(Exception):
+                    await on_error(exc)
+            yield emit("error", {"code": ERR_LLM_FAILURE, "message": str(exc), "retryable": True})
+            return
         if payload:
             yield emit("done", payload)

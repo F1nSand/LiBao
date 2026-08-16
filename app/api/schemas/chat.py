@@ -14,7 +14,8 @@ CONTENT_LIMIT = 32000
 class ChatMessageInput(BaseModel):
     content: str
     role: Literal["user"] = "user"
-    attachments: list[str] = []
+    # S9：附件 ID 用 uuid 类型校验，非法值由 pydantic 返回 422（此前路由 uuid.UUID(aid) 裸抛 500）
+    attachments: list[uuid.UUID] = []
 
     @field_validator("content")
     @classmethod

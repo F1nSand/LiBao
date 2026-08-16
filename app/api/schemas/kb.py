@@ -17,7 +17,7 @@ class KbSearchRequest(BaseModel):
     collection_ids: list[uuid.UUID] = []
     query: str
     top_k: int = 5
-    hybrid: dict | None = None  # {"semantic": float 0-1, "bm25": float 0-1}；缺省双通道
+    hybrid: dict | None = None  # {"semantic": bool, "bm25": bool} 开关；缺省双通道（S10 注释与实现一致）
 
 
 class KbStatusRequest(BaseModel):

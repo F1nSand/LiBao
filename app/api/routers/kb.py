@@ -9,11 +9,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
 from app.api.schemas.kb import CreateCollectionRequest, KbSearchRequest, KbStatusRequest
+from app.core.errors import AppError
 from app.services.kb import KbService
-from app.services.serializers import serialize_kb_collection, serialize_kb_document
+from app.services.serializers import kb_document_progress, serialize_kb_collection, serialize_kb_document
 from app.storage.models.user import User
 
 router = APIRouter()
+
+
+def _decode_text(data: bytes) -> str:
+    """KB 文本提取（严格 UTF-8）。非法 → 40012（S3：客户端内容错误，非 50001）。"""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise AppError(40012, f"文件不是有效的 UTF-8 文本: {exc}") from exc
 
 
 @router.get("/kb/collections")
@@ -21,8 +30,10 @@ async def list_collections(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await KbService().list_collections(db, user)
-    return ok([serialize_kb_collection(c, 0) for c in rows])
+    svc = KbService()
+    rows = await svc.list_collections(db, user)
+    counts = await svc.document_counts(db, user, [c.id for c in rows])
+    return ok([serialize_kb_collection(c, counts.get(c.id, 0)) for c in rows])
 
 
 @router.post("/kb/collections")
@@ -67,10 +78,7 @@ async def upload_document(
     """multipart 上传：txt/md 提取文本入库 → uploaded → 后台处理链。"""
     svc = KbService()
     data = await file.read()
-    try:
-        content = data.decode("utf-8")  # 严格模式
-    except UnicodeDecodeError as exc:
-        raise ValueError(f"文件不是有效的 UTF-8 文本: {exc}") from exc
+    content = _decode_text(data)
     doc = await svc.upload_document(
         db, user, collection_id, filename=file.filename or "untitled",
         content=content, content_type=file.content_type or "text/plain", size_bytes=len(data),
@@ -96,7 +104,12 @@ async def get_document_status(
 ):
     doc = await KbService().get_document(db, user, document_id)
     return ok(
-        {"status": doc.status, "chunk_count": doc.chunk_count, "progress": doc.error is not None, "error": doc.error}
+        {
+            "status": doc.status,
+            "chunk_count": doc.chunk_count,
+            "progress": kb_document_progress(doc.status),
+            "error": doc.error,
+        }
     )
 
 

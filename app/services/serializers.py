@@ -111,9 +111,13 @@ def serialize_mcp_server(s: McpServer, tool_count: int = 0) -> dict[str, Any]:
 
 
 def serialize_attachment(a: Attachment) -> dict[str, Any]:
-    """附件（docs 03 §5.9 / FrontEnd Attachment）。"""
+    """附件（docs 03 §5.9 / FrontEnd Attachment + UploadResponse）。
+
+    S1：attachment_id 与 id 并存（前端 POST /uploads 消费 attachment_id，旧消费方读 id）。
+    """
     return {
         "id": str(a.id),
+        "attachment_id": str(a.id),
         "mime_type": a.content_type,
         "size": a.size_bytes,
         "status": a.status,
@@ -135,6 +139,11 @@ def serialize_kb_collection(c: KbCollection, document_count: int = 0) -> dict[st
     }
 
 
+def kb_document_progress(status: str) -> int:
+    """KB 文档进度 0-100（S2 统一 number；前端 ChunkStatus 以 >=100 判成功，终端态一律 100）。"""
+    return {"uploaded": 0, "chunking": 30, "indexing": 70}.get(status, 100)
+
+
 def serialize_kb_document(d: KbDocument) -> dict[str, Any]:
     """知识库文档（docs 03 §5.6 / FrontEnd KbDocument）。"""
     return {
@@ -145,7 +154,7 @@ def serialize_kb_document(d: KbDocument) -> dict[str, Any]:
         "size": d.size_bytes,
         "status": d.status,
         "chunk_count": d.chunk_count,
-        "progress": None if d.status in {"indexed", "failed", "archived"} else d.status,
+        "progress": kb_document_progress(d.status),
         "error": d.error,
         "created_at": _dt(d.created_at),
     }

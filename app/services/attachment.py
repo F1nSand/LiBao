@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from pathlib import Path
 
@@ -23,6 +24,8 @@ from app.core.errors import (
 from app.storage.models.attachment import Attachment
 from app.storage.models.user import User
 from app.storage.repositories.attachment import AttachmentRepository
+
+logger = logging.getLogger(__name__)
 
 _IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 _TEXT_TYPES = {"text/plain", "text/markdown"}
@@ -147,10 +150,20 @@ def _analyze_content(att: Attachment) -> dict:
     }
 
 
+def _log_task_failure(task: asyncio.Task) -> None:
+    """后台任务异常观测（C5）：create_task 丢弃引用，异常会静默——done_callback 兜底记录。"""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("后台任务失败: %s", exc)
+
+
 def _spawn_analyze(attachment_id: uuid.UUID) -> None:
     """经桥触发后台分析链（桥未设时静默：停留 uploaded，轮询可见）。"""
     from app.storage.db import get_sessionmaker
 
     sessionmaker = get_sessionmaker()
     if sessionmaker is not None:
-        asyncio.create_task(analyze_attachment(sessionmaker, attachment_id))
+        t = asyncio.create_task(analyze_attachment(sessionmaker, attachment_id))
+        t.add_done_callback(_log_task_failure)

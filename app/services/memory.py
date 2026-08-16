@@ -11,6 +11,7 @@ import uuid
 from typing import Any
 
 from langchain_core.messages import HumanMessage
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -192,33 +193,42 @@ async def run_maintenance(db: AsyncSession, user_id: uuid.UUID, model: Any = Non
         raise AppError(ERR_LLM_FAILURE, "记忆整理失败: 输出结构非法", retryable=True)
 
     created = updated = deleted = 0
-    # keep：显式保留（不操作）
-    # update：只增新版本
-    for item in plan.get("update", []) or []:
-        card = await repo.get_card(user_id, uuid.UUID(str(item["id"])))
-        if card is None:
-            continue
-        importance = float(item.get("importance", card.importance))
-        await repo.add_version(card, item.get("content") or card.content, max(0.0, min(1.0, importance)))
-        updated += 1
-    # create：新卡片（source=maintenance）
-    for item in plan.get("create", []) or []:
-        importance = float(item.get("importance", 0.5))
-        await repo.create_card(
-            user_id=user_id,
-            card_type=item.get("card_type", "note"),
-            content=item.get("content") or {},
-            importance=max(0.0, min(1.0, importance)),
-            source="maintenance",
-        )
-        created += 1
-    # delete：软删
-    for card_id in plan.get("delete", []) or []:
-        card = await repo.get_card(user_id, uuid.UUID(str(card_id)))
-        if card is not None:
-            await repo.soft_delete(card)
-            deleted += 1
-    await db.commit()
+    try:
+        # keep：显式保留（不操作）
+        # update：只增新版本
+        for item in plan.get("update", []) or []:
+            card = await repo.get_card(user_id, uuid.UUID(str(item["id"])))
+            if card is None:
+                continue
+            importance = float(item.get("importance", card.importance))
+            await repo.add_version(card, item.get("content") or card.content, max(0.0, min(1.0, importance)))
+            updated += 1
+        # create：新卡片（source=maintenance）
+        for item in plan.get("create", []) or []:
+            importance = float(item.get("importance", 0.5))
+            await repo.create_card(
+                user_id=user_id,
+                card_type=item.get("card_type", "note"),
+                content=item.get("content") or {},
+                importance=max(0.0, min(1.0, importance)),
+                source="maintenance",
+            )
+            created += 1
+        # delete：软删
+        for card_id in plan.get("delete", []) or []:
+            card = await repo.get_card(user_id, uuid.UUID(str(card_id)))
+            if card is not None:
+                await repo.soft_delete(card)
+                deleted += 1
+        # C4：IntegrityError（版本 UNIQUE 冲突）在 commit 处抛——try 必须包住末尾 commit
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise AppError(ERR_LLM_FAILURE, "记忆整理失败: 版本冲突，请重试", retryable=True) from exc
+    except (KeyError, ValueError, TypeError) as exc:
+        # C2/S4：LLM 输出合法 JSON 但形状错（缺 id/UUID 非法/importance 非数字）→ 60001 retryable，不裸 500
+        await db.rollback()
+        raise AppError(ERR_LLM_FAILURE, f"记忆整理失败: 输出形状非法: {exc}", retryable=True) from exc
     return {
         "summary": f"整理完成：更新 {updated} 张、新建 {created} 张、删除 {deleted} 张",
         "cards_created": created,

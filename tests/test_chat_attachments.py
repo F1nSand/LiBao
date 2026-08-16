@@ -9,7 +9,9 @@ import uuid
 
 import pytest
 from langchain_core.messages import AIMessage
+from pydantic import ValidationError
 
+from app.api.schemas.chat import ChatMessageInput
 from app.core.security import hash_password
 from app.orchestration.chat_stream import chat_stream_events
 from app.orchestration.graph import build_graph
@@ -98,6 +100,14 @@ async def test_chat_with_attachment_links_and_trace(chat_att_fixture):
         assert traces[0].content == "看下这个附件"
         assert traces[0].conversation_id == conv.id
         assert traces[0].message_id == user_msg.id
+
+
+def test_chat_message_input_attachments_uuid_validation():
+    """S9：attachments 非法 UUID → pydantic ValidationError（路由自然 422，而非 uuid.UUID 裸抛 500）。"""
+    m = ChatMessageInput(content="x", attachments=[uuid.uuid4()])
+    assert len(m.attachments) == 1
+    with pytest.raises(ValidationError):
+        ChatMessageInput(content="x", attachments=["not-a-uuid"])
 
 
 async def test_plain_text_still_records_trace(chat_att_fixture):

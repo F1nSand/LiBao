@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from app.orchestration.context_builder import acis_for_tools, build_context, compute_prefix_hash
 from app.orchestration.graph import build_graph
+from app.orchestration.stream_core import stream_graph_events
 from app.tools.builtin import register_builtin_tools
 
 
@@ -76,6 +77,38 @@ async def test_mock_llm_single_tool_call_roundtrip():
     # 消息流：user → assistant(tool_call) → tool → assistant(final)
     roles = [m.type for m in result["messages"]]
     assert roles == ["human", "ai", "tool", "ai"]
+
+
+async def test_stream_core_on_final_failure_emits_error():
+    """C3：on_final 落库失败 → error 帧发出、无 done 帧、on_error 被调（异常不穿出崩溃）。"""
+
+    class FakeGraph:
+        async def astream(self, initial, config, stream_mode=None):
+            yield ("values", {"final_message": {"content": "hi"}})
+
+    async def boom_final(state):
+        raise RuntimeError("db down")
+
+    on_error_calls = []
+
+    async def on_error(exc):
+        on_error_calls.append(exc)
+
+    frames = []
+    async for frame in stream_graph_events(
+        graph=FakeGraph(),
+        initial={},
+        graph_config={},
+        emit=lambda t, p: f"event: {t}\ndata: {p}\n\n",
+        on_final=boom_final,
+        on_error=on_error,
+    ):
+        frames.append(frame)
+
+    joined = "".join(frames)
+    assert "event: error" in joined
+    assert "event: done" not in joined
+    assert len(on_error_calls) == 1
 
 
 def test_static_prefix_byte_stable():

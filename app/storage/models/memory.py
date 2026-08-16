@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -55,6 +55,7 @@ class LongTermMemoryVersion(Base):
     """长期记忆版本（append-only，UNIQUE(memory_id, version)）。"""
 
     __tablename__ = "longterm_memory_version"
+    __table_args__ = (UniqueConstraint("memory_id", "version", name="uniq_longterm_memory_version"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     memory_id: Mapped[uuid.UUID] = mapped_column(
