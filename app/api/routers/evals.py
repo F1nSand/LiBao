@@ -93,15 +93,6 @@ async def run_eval_endpoint(
     return ok(serialize_eval_run(run))
 
 
-@router.get("")
-async def list_runs_alias(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """契约路径 GET /system/evals（docs 03 §5.8）：评估运行列表别名（同 /runs）。"""
-    return ok(await EvalService().list_runs(db))
-
-
 @router.get("/runs")
 async def list_runs(
     user: User = Depends(get_current_user),

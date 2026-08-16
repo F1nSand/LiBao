@@ -53,6 +53,17 @@ async def list_logs(
     return ok(paged([serialize_run_log(lg) for lg in items], total, page, page_size))
 
 
+@router.get("/system/evals")
+async def evals_runs_alias(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """契约路径 GET /system/evals（docs 03 §5.8）：评估运行列表别名（同 /system/evals/runs）。"""
+    from app.services.eval import EvalService
+
+    return ok(await EvalService().list_runs(db))
+
+
 @router.get("/system/cost")
 async def get_cost(
     start: str | None = Query(None, description="ISO 时间范围起点"),
