@@ -14,6 +14,7 @@ export type StreamSegment =
   | { kind: 'text'; id: string; text: string }
   | { kind: 'tool'; id: string; cardId: string }
   | { kind: 'agent'; id: string; from: string; to: string; reason?: string }
+  | { kind: 'thinking'; id: string; text: string }
 
 export type ToolCardStatus =
   | 'pending'
@@ -109,7 +110,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
   let pendingText = ''
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
-  /** 文本追加到"唯一"文本段（始终置顶）：与持久化渲染（content 在前、tools 在后）一致，杜绝 done 后文本"跳位" */
+  /** 文本追加到"唯一"文本段（回复气泡正文；活动区在气泡上方，视觉位置不依赖数组序） */
   function flushText(): void {
     if (!pendingText) return
     const first = state.segments.find((s) => s.kind === 'text')
@@ -250,6 +251,11 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
         state.segments.push({ kind: 'agent', id: segId(), from, to, reason })
         break
       }
+      case 'thinking': {
+        // 思考（docs/03 §3.3 监视器预留）：后端发射即入活动区，不发射永不出现
+        state.segments.push({ kind: 'thinking', id: segId(), text: (p.text ?? '') as string })
+        break
+      }
       case 'done': {
         flushText()
         flushNow()
@@ -270,7 +276,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
         break
       }
       default: {
-        // thinking / run_progress / tool_exec：监视器预留，MVP 忽略
+        // run_progress / tool_exec：监视器预留，MVP 忽略
         break
       }
     }

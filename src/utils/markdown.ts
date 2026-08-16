@@ -63,9 +63,16 @@ export function renderMarkdown(src: string): string {
     .replace(/<input\s(?![^>]*type=)/g, '<input type="checkbox" ')
 }
 
-/** 流式期裸文本：仅 HTML 转义（配合 white-space: pre-wrap 打字机效果，不做 markdown 解析） */
-export function renderTextBare(src: string): string {
-  return escapeHtml(src)
+/** 流式拆分（docs/02 §5.4.1）：stable = 最后一个换行前的已完成文本；tail = 末行局部（正在输入的 token）。
+ * 流式期对 stable 做 markdown 渲染（随行渐进），tail 保持纯文本——避免半个词/未闭合块被打断。 */
+export function splitStreamingText(raw: string): { stable: string; tail: string } {
+  const idx = raw.lastIndexOf('\n')
+  if (idx === -1) return { stable: '', tail: raw }
+  return { stable: raw.slice(0, idx + 1), tail: raw.slice(idx + 1) }
 }
 
-export { escapeHtml }
+/** 流式渲染：stable 走 markdown 管线；tail 为原始末行（模板插值自动转义，安全模型不变） */
+export function renderStreamingMarkdown(raw: string): { html: string; tail: string } {
+  const { stable, tail } = splitStreamingText(raw)
+  return { html: renderMarkdown(stable), tail }
+}

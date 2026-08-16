@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderMarkdown, renderTextBare, MARKDOWN_WHITELIST } from './markdown'
+import { renderMarkdown, splitStreamingText, renderStreamingMarkdown, MARKDOWN_WHITELIST } from './markdown'
 
 describe('renderMarkdown 管线', () => {
   it('GFM 表格渲染为 table', () => {
@@ -71,9 +71,42 @@ describe('XSS 防护', () => {
   })
 })
 
-describe('renderTextBare 流式裸文本', () => {
-  it('HTML 转义但不解析 markdown', () => {
-    expect(renderTextBare('<script>').toLowerCase()).toContain('&lt;script&gt;')
+describe('splitStreamingText 流式拆分', () => {
+  it('无换行 → 全部为 tail（末行局部）', () => {
+    expect(splitStreamingText('第一行')).toEqual({ stable: '', tail: '第一行' })
+  })
+
+  it('有换行 → 换行前为 stable、末行为 tail', () => {
+    expect(splitStreamingText('第一行\n第二行')).toEqual({ stable: '第一行\n', tail: '第二行' })
+  })
+
+  it('以换行结尾 → 无 tail', () => {
+    expect(splitStreamingText('第一行\n')).toEqual({ stable: '第一行\n', tail: '' })
+  })
+
+  it('空串 → 全空', () => {
+    expect(splitStreamingText('')).toEqual({ stable: '', tail: '' })
+  })
+})
+
+describe('renderStreamingMarkdown 流式渲染', () => {
+  it('已完成部分渲染 markdown，tail 为原始末行', () => {
+    const r = renderStreamingMarkdown('# 标题\n正文中')
+    expect(r.html).toContain('<h1>标题</h1>')
+    expect(r.tail).toBe('正文中')
+  })
+
+  it('tail 保持原始（模板插值转义，不注入脚本）', () => {
+    const r = renderStreamingMarkdown('正常\n<script>')
+    expect(r.tail).toBe('<script>') // 原始文本；由 Vue 插值转义
+    expect(r.html).not.toContain('<script>')
+  })
+
+  it('代码围栏未闭合：已完成行进入代码块（语法高亮），末行为 tail', () => {
+    const r = renderStreamingMarkdown('```js\nconst a = 1\nco')
+    expect(r.html).toContain('language-js')
+    expect(r.html).toContain('hljs-keyword') // const 被高亮包裹 → 代码块含该行
+    expect(r.tail).toBe('co')
   })
 })
 

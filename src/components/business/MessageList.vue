@@ -10,7 +10,6 @@ import MessageBubble from './MessageBubble.vue'
  * 吸底策略：用户上翻时不强制滚。流式消息置底部：stream.segments 非空且未 finished 时追加一个流式气泡。
  */
 const props = defineProps<{ messages: Message[]; stream?: StreamState | null }>()
-const emit = defineEmits<{ retry: [] }>()
 
 const containerRef = ref<HTMLElement | null>(null)
 
@@ -38,10 +37,10 @@ defineExpose({ containerRef })
     <div v-if="messages.length === 0 && !showStreamBubble" class="msg-empty">开始对话吧～</div>
     <template v-else>
       <div v-for="msg in messages" :key="msg.id" class="msg-row">
-        <MessageBubble :message="msg" @retry="emit('retry')" />
+        <MessageBubble :message="msg" />
       </div>
       <div v-if="showStreamBubble" class="msg-row">
-        <MessageBubble :stream="stream" @retry="emit('retry')" />
+        <MessageBubble :stream="stream" />
       </div>
     </template>
   </div>

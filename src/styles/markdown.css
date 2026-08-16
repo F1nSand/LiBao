@@ -5,8 +5,11 @@
   word-break: break-word;
 }
 
-/* 流式期裸文本：保留换行的打字机预览 */
-.markdown-body.streaming {
+/* 流式期：已完成部分走 markdown 渐进渲染；末行 tail 纯文本同正文基线 */
+.stream-tail {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   white-space: pre-wrap;
 }
 

@@ -85,6 +85,18 @@ describe('useChatStream 状态机', () => {
     expect(cs.state.streaming).toBe(true) // 切换事件不改变流式状态
   })
 
+  it('thinking → segments 追加 thinking 段（text）', async () => {
+    const cs = useChatStream()
+    await cs.start(chatReq as never)
+    chatHandlers!.onEvent(ev('message_start', 1, { message_id: 'm1', agent_id: 'a', conversation_id: 'c', task_id: 't1' }))
+    chatHandlers!.onEvent(ev('thinking', 2, { text: '正在推理…', ts: 1700000000000 }))
+    expect(cs.state.segments).toHaveLength(1)
+    expect(cs.state.segments[0]).toMatchObject({ kind: 'thinking', text: '正在推理…' })
+    // 缺 text 兜底空串，不崩
+    chatHandlers!.onEvent(ev('thinking', 3, { ts: 1700000000000 }))
+    expect(cs.state.segments[1]).toMatchObject({ kind: 'thinking', text: '' })
+  })
+
   it('tool_call → 建卡；占位→回填 done', async () => {
     const cs = useChatStream()
     await cs.start(chatReq as never)

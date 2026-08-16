@@ -31,7 +31,7 @@ Mock 演示账号：`admin/admin123`（管理员）· `dev/dev123`（开发者�
 - `src/utils/sse-parser.ts`：`SseParser`（增量分帧）+ `SeqGuard`（seq 去重）+ `parseSseFrame`（容错丢帧）。
 - `src/composables/useChatStream.ts`：状态机 `message_start→token→tool_call→tool_result(占位/回填)→…→done`；token 走 `utils/rAF.ts` 合并帧；`tool_result placeholder:true` 按 `job_ref` 定位卡片 + 看门狗超时；`interrupt` → `confirmInterrupt` → `POST /tasks/{id}/resume` 续流（复用 segments 不回滚）。**`confirmInterrupt` 缺 task_id 必须 fail-fast**，不得用 conversation_id 冒充。
 
-**Markdown 安全管线**（`src/utils/markdown.ts`）：`markdown-it(GFM, html:false, hljs 高亮) → DOMPurify 白名单净化 → 后处理`（链接加 target/rel、任务列表补 `type=checkbox`）。LLM 输出视为不可信。流式期 `renderTextBare` 裸文本，`done` 后一次性 `renderMarkdown`。
+**Markdown 安全管线**（`src/utils/markdown.ts`）：`markdown-it(GFM, html:false, hljs 高亮) → DOMPurify 白名单净化 → 后处理`（链接加 target/rel、任务列表补 `type=checkbox`）。LLM 输出视为不可信。流式期 `renderStreamingMarkdown` 渐进渲染（stable 渲染 + 末行 tail），`done` 后一次性 `renderMarkdown`。
 
 **单通用 Agent（后端 M5 契约，前端已收敛）**：无 `/agents` API、无 Agents 页/菜单。chat/conversation/task 请求**均不带 `agent_id`**（固定用后端默认通用 Agent）；`Task.agent_id` / `Conversation.agent_id` 仍返回（= 默认 Agent id，仅展示）。subagent 由主 Agent 经内置工具 `tl_dispatch_subagent` 派发，前端渲染 `agent_switch` 事件即可（payload `{from_agent,to_agent,reason}` 不变）。`agent_control` 是 `ToolType` 合法值。
 
@@ -48,7 +48,8 @@ Mock 演示账号：`admin/admin123`（管理员）· `dev/dev123`（开发者�
 - **Mock 在 Node 侧运行**：`src/mock/*` 里不能用 `import.meta.env`（用插件 `configResolved` 注入 `setMockFast`）；token 编码用 `Buffer` 而非 `btoa`（btoa 对中文抛异常）。
 - **InterruptConfirmDialog 不要从 `@close` 再 emit confirm**——按钮 emit 一次即可，否则二次 resume 导致助手消息重复落库。
 - **e2e 依赖 mock 确定性**：playwright `webServer` 用 `--mode e2e`（`VITE_MOCK_FAST=1` 零延迟）；不要用 `reuseExistingServer` 复用普通 dev server。
-- **文本×工具卡混排**：流式期用 `StreamState.segments`（文本段唯一且置顶，工具卡在后）；刷新后从持久化 `Message.tool_calls[].position` 分组渲染（FD-12'，字符级插入点无法还原）。流式期与持久化布局一致（content 在前、tools 在后），done 后无跳位。
+- **助手消息 = 活动区 + 回复气泡**（docs/02 §5.4.3）：工具调用/agent 切换/思考进 `.msg-activity`（紧凑行非气泡，回复气泡**上方**往下递进），文本进 `.msg-text` 气泡。流式段按事件序拆分两区；持久化 `Message.tool_calls[].position` 分组。**工具失败无重试按钮**——重试由 agent/用户以语言发起，`ToolCallCard` 只保留错误文案。
+- **流式 markdown 渐进渲染**（docs/02 §5.4.1）：`MarkdownRenderer` streaming 走 `renderStreamingMarkdown`（`splitStreamingText` 按换行切分：stable 渲染 + 末行 `.stream-tail` 纯文本）；done 全量。`stable` 仅在换行跨越时变化 → 解析天然节流。
 - 消息持久化在 mock 的 `doneEvent` 里 push 到 `messages[conv]`；新会话（conversation_id=null）由 mock server 先注册 conversation。
 - **mock 任务事件端点是 GET**（`/tasks/{id}/events`，契约 docs/03 §5.3 / 真实后端 / `TaskDetail.vue` 都是 GET）——改 mock 路由时不要只留 POST。
 - **`agent_switch` 仅流式期显示**：`MessageBubble` 的 `.agent-switch` 指示条挂在 `showStreamBubble`（`!finished`）的流式气泡里，done 后被持久化消息替换即消失（`Message` 无持久化字段）。不要写依赖 done 后仍可见该指示条的 e2e 断言（mock-fast 下是竞态）。

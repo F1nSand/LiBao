@@ -8,19 +8,27 @@ import AttachmentBubble from './AttachmentBubble.vue'
 
 /**
  * 消息气泡（docs/02 §5.3/§5.4.3）：
- * - message：持久化消息（文本整体 + 工具卡按 position 分组，FD-12'）
- * - stream：流式实时段（text/tool 按事件序交错）
+ * 助手消息 = 「活动区 + 回复气泡」双区——工具调用 / agent 切换 / 思考以紧凑行出现在
+ * 回复气泡上方（多工具/思考往下递进，非气泡）；文本为气泡正文。
+ * - message：持久化消息（content → 气泡；tool_calls[] 按 position → 活动区）
+ * - stream：流式实时段（按事件序拆分到两区）
  */
 const props = defineProps<{
   message?: Message
   stream?: StreamState | null
 }>()
-const emit = defineEmits<{ retry: [] }>()
 
-type Seg =
-  | { kind: 'text'; content: string; streaming: boolean }
+type ActivityItem =
   | { kind: 'tool'; card: ToolCallCardState }
   | { kind: 'agent'; from: string; to: string; reason?: string }
+  | { kind: 'thinking'; text: string }
+
+type TextSeg = { kind: 'text'; content: string; streaming: boolean }
+
+interface RenderParts {
+  activity: ActivityItem[]
+  text: TextSeg | null
+}
 
 function fromRecord(c: ToolCallRecord): ToolCallCardState {
   return {
@@ -34,29 +42,42 @@ function fromRecord(c: ToolCallRecord): ToolCallCardState {
   }
 }
 
-const segments = computed<Seg[]>(() => {
-  if (props.stream) {
-    return props.stream.segments.map((s) => {
-      if (s.kind === 'text') {
-        // 流式期裸文本；done 后（无持久化场景）切 markdown 渲染
-        return { kind: 'text', content: s.text, streaming: !props.stream!.finished }
-      }
-      if (s.kind === 'agent') {
-        return { kind: 'agent', from: s.from, to: s.to, reason: s.reason }
-      }
-      return { kind: 'tool', card: props.stream!.toolCalls[s.cardId] }
-    })
+function partsFromStream(s: StreamState): RenderParts {
+  const activity: ActivityItem[] = []
+  let text: TextSeg | null = null
+  for (const seg of s.segments) {
+    if (seg.kind === 'text') {
+      // 文本：唯一文本段 → 回复气泡（活动区下方）；done 后无持久化场景切 markdown 渲染
+      text = { kind: 'text', content: seg.text, streaming: !s.finished }
+    } else if (seg.kind === 'tool') {
+      const card = s.toolCalls[seg.cardId]
+      if (card) activity.push({ kind: 'tool', card })
+    } else if (seg.kind === 'agent') {
+      activity.push({ kind: 'agent', from: seg.from, to: seg.to, reason: seg.reason })
+    } else {
+      activity.push({ kind: 'thinking', text: seg.text })
+    }
   }
-  const m = props.message
-  if (!m) return []
-  const segs: Seg[] = []
-  if (m.content) segs.push({ kind: 'text', content: m.content, streaming: false })
+  return { activity, text }
+}
+
+function partsFromMessage(m: Message): RenderParts {
+  const activity: ActivityItem[] = []
   const calls = [...(m.tool_calls ?? [])].sort((a, b) => a.position - b.position)
-  for (const c of calls) segs.push({ kind: 'tool', card: fromRecord(c) })
-  return segs
+  for (const c of calls) activity.push({ kind: 'tool', card: fromRecord(c) })
+  return {
+    activity,
+    text: m.content ? { kind: 'text', content: m.content, streaming: false } : null,
+  }
+}
+
+const parts = computed<RenderParts>(() => {
+  if (props.stream) return partsFromStream(props.stream)
+  if (props.message) return partsFromMessage(props.message)
+  return { activity: [], text: null }
 })
 
-const role = computed(() => props.stream ? 'assistant' : props.message?.role ?? 'user')
+const role = computed(() => (props.stream ? 'assistant' : props.message?.role ?? 'user'))
 </script>
 
 <template>
@@ -68,30 +89,38 @@ const role = computed(() => props.stream ? 'assistant' : props.message?.role ?? 
     </div>
 
     <div class="msg-content">
-      <!-- 用户消息：纯文本 + 附件 -->
+      <!-- 用户消息：纯文本 + 附件（独立气泡，不套 .msg-text 助手框） -->
       <template v-if="role === 'user' && message">
         <AttachmentBubble v-if="message.attachments?.length" :refs="message.attachments" />
-        <div class="msg-text user-text">{{ message.content }}</div>
+        <div class="user-text">{{ message.content }}</div>
       </template>
 
-      <!-- 助手消息：段落混排 -->
+      <!-- 助手消息：活动区（工具/切换/思考）在回复气泡上方，往下递进 -->
       <template v-else>
-        <div v-if="!segments.length && !stream" class="msg-empty">…</div>
-        <div v-for="(seg, i) in segments" :key="i" class="msg-seg" :class="{ agent: seg.kind === 'agent' }">
-          <MarkdownRenderer v-if="seg.kind === 'text'" :raw="seg.content" :streaming="seg.streaming" />
-          <ToolCallCard
-            v-else-if="seg.kind === 'tool'"
-            :tool-name="seg.card.tool_name"
-            :status="seg.card.status"
-            :error="seg.card.error"
-            @retry="emit('retry')"
-          />
-          <div v-else class="agent-switch">
-            <el-icon :size="13"><Switch /></el-icon>
-            <span class="agent-switch-label"><b>{{ seg.from }}</b> → <b>{{ seg.to }}</b></span>
-            <span v-if="seg.reason" class="agent-switch-reason">{{ seg.reason }}</span>
-          </div>
+        <div v-if="parts.activity.length" class="msg-activity">
+          <template v-for="(item, i) in parts.activity" :key="i">
+            <ToolCallCard
+              v-if="item.kind === 'tool'"
+              :tool-name="item.card.tool_name"
+              :status="item.card.status"
+              :error="item.card.error"
+            />
+            <div v-else-if="item.kind === 'agent'" class="agent-switch">
+              <el-icon :size="13"><Switch /></el-icon>
+              <span class="agent-switch-label"><b>{{ item.from }}</b> → <b>{{ item.to }}</b></span>
+              <span v-if="item.reason" class="agent-switch-reason">{{ item.reason }}</span>
+            </div>
+            <div v-else class="thinking-row">
+              <el-icon :size="13"><Aim /></el-icon>
+              <span class="thinking-text">{{ item.text }}</span>
+            </div>
+          </template>
         </div>
+
+        <div v-if="parts.text" class="msg-text">
+          <MarkdownRenderer :raw="parts.text.content" :streaming="parts.text.streaming" />
+        </div>
+        <div v-if="!parts.activity.length && !parts.text && !stream" class="msg-empty">…</div>
       </template>
     </div>
   </div>
@@ -136,30 +165,31 @@ const role = computed(() => props.stream ? 'assistant' : props.message?.role ?? 
   word-break: break-word;
   max-width: 100%;
 }
-.msg:not(.user) .msg-text {
-  background: #fff;
-}
-.msg-seg {
+.msg-text {
   background: var(--app-content-bg);
   border: 1px solid var(--app-border-light);
   border-radius: 2px 12px 12px 12px;
   padding: 8px 14px;
 }
-.msg-seg + .msg-seg {
-  margin-top: 6px;
-}
-/* agent 切换指示条：弱化视觉，不套气泡框 */
-.msg-seg.agent {
-  background: transparent;
-  border: none;
-  padding: 2px 14px;
-}
-.agent-switch {
+
+/* 活动区：紧凑行（工具/agent切换/思考），非气泡，往下递进 */
+.msg-activity {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 2px 2px 6px;
+}
+.agent-switch,
+.thinking-row {
+  display: inline-flex;
   gap: 6px;
   color: var(--app-text-muted);
   font-size: 12px;
+  line-height: 20px;
+}
+.agent-switch {
+  align-items: center;
 }
 .agent-switch-label b {
   font-weight: 600;
@@ -167,6 +197,17 @@ const role = computed(() => props.stream ? 'assistant' : props.message?.role ?? 
 }
 .agent-switch-reason {
   color: var(--app-text-muted);
+}
+.thinking-row {
+  align-items: flex-start;
+  max-width: 100%;
+}
+.thinking-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .msg-empty {
   color: var(--app-text-muted);

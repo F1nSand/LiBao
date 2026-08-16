@@ -284,3 +284,17 @@
   - **发现缺口并修复**：POST /system/evals/run 后台异步（asyncio.create_task），前端 onRunEval 立即取 detail → 空结果表。修法：SystemView 加轮询至终态（2.5s / 120s 超时）。实测结果表「1+1 PASS」✅
 - 验证：typecheck ✓ / lint 0err（3 既有 any）/ **109 单测 PASS** / **21 e2e PASS**。
 - 不做（记录）：评估运行历史列表展示（当前只显示单次运行结果；runs 列表接口已有，前端未接）；评估集创建/用例管理（SystemView 只读展示，创建走后端 seed/手动）。
+
+## 2026-08-17 对话显示优化（L3）：删重试按钮 + 工具活动区 + 流式 Markdown
+- 计划：C:\Users\Admin1\.claude\plans\sleepy-humming-sparrow.md（覆写）
+- 三项用户要求：
+  - ① 删工具失败重试按钮——重试由 agent/用户语言发起，前端不点击重试。
+  - ② 工具调用不作为气泡，改优雅地出现在 agent 回复气泡上方；多工具/思考往下递进。
+  - ③ 流式输出实时渲染 markdown（原来 done 才一次性渲染，不优雅）。
+- 改动：
+  - **A 重试链路清空**：ToolCallCard 删 emit retry + `.tool-retry`（失败保留 error 文案）；MessageBubble/MessageList/ChatView 删 retry emit 链 + onRetry。
+  - **B 活动区 + 回复气泡**：MessageBubble 重构——computed 拆 `activityItems`（tool/agent/thinking，非气泡紧凑行）+ `textSeg`；模板活动区在上（`v-for` 往下递进）、回复气泡在下；持久化消息 content→气泡、tool_calls[]→活动区；ToolCallCard 改行式（保留 `.tool-card` class 与状态文案）；agent-switch 并入活动区；useChatStream StreamSegment 加 `thinking` + case（后端发射即显示，预留）。
+  - **C 流式 markdown**：markdown.ts 加 `splitStreamingText`（换行切分 stable/tail）+ `renderStreamingMarkdown`（stable 走管线、tail 原始转义）；删 `renderTextBare`；MarkdownRenderer streaming 改 stable markdown 渐进 + `.stream-tail` 末行纯文本，done 全量；markdown.css 去 streaming pre-wrap、加 `.stream-tail`。
+- 测试：+7 markdown（4 splitStreaming + 3 renderStreaming）+ 3 MessageBubble（活动区在上、流式拆分、用户消息无活动区）；MarkdownRenderer.spec 改 streaming 断言；119 单测 PASS。
+- 验证：typecheck ✓ / lint 0err / **119 单测 PASS** / **21 e2e PASS** / DOM 手测（mock 非 fast）：流式中 `.msg-activity .tool-card` + markdown-body 渐进渲染；完成后活动区在气泡上方、重试按钮 0、stream-tail 残留 0；计算路径中断确认后同样无重试按钮；0 页面错误。
+- 不做（记录）：工具活动区折叠/收起（用户要求可见递进）；工具卡展开参数回放；中断弹窗/composer/SSE 层不动；后端 thinking 发射（另一 agent）。

@@ -70,14 +70,7 @@ function stop() {
   resetForNext()
 }
 
-/** 工具失败重试：重发最后一条用户消息（重跑整轮） */
-function onRetry() {
-  const lastUser = [...chat.currentMessages].reverse().find((m) => m.role === 'user')
-  if (!lastUser || stream.state.streaming) return
-  void sendWith(lastUser.content)
-}
-
-/** send() 的内容注入版（输入框与重试共用） */
+/** send() 的内容注入版 */
 async function sendWith(content: string, attachments: string[] = []) {
   if (!content || composerDisabled.value) return
   if (content.length > TOKEN_LIMIT) {
@@ -139,7 +132,6 @@ function onKeydown(e: KeyboardEvent) {
         v-show="mode === 'chat'"
         :messages="chat.currentMessages"
         :stream="stream.state"
-        @retry="onRetry"
       />
 
       <div v-show="mode === 'chat'" class="composer">
