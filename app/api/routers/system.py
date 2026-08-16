@@ -11,8 +11,8 @@ from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
 from app.api.schemas.common import paged
 from app.core.config import get_settings
-from app.core.cost import provider_for
 from app.services.serializers import serialize_run_log, serialize_trace_event
+from app.services.system import SystemService
 from app.storage.models.user import User
 from app.storage.repositories.run_log import RunLogRepository
 
@@ -72,37 +72,11 @@ async def get_cost(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """成本/调用量统计（docs 03 §5.8 CostStat）：token_usage.cost 聚合（2h）。"""
-    start_dt = _parse_iso(start)
-    end_dt = _parse_iso(end)
-    logs = await RunLogRepository(db).list_llm_in_range(start=start_dt, end=end_dt)
-    total_cost = 0.0
-    calls = 0
-    by_provider: dict[str, dict] = {}
-    series: dict[str, dict] = {}
-    for log in logs:
-        model = (log.input or {}).get("model", "")
-        prov = provider_for(model)
-        if provider and prov != provider:
-            continue
-        cost = float(((log.token_usage) or {}).get("cost", 0.0) or 0.0)
-        calls += 1
-        total_cost += cost
-        p = by_provider.setdefault(prov, {"provider": prov, "cost": 0.0, "calls": 0})
-        p["cost"] += cost
-        p["calls"] += 1
-        day = log.created_at.date().isoformat() if log.created_at else ""
-        s = series.setdefault(day, {"date": day, "cost": 0.0, "calls": 0})
-        s["cost"] += cost
-        s["calls"] += 1
-    return ok(
-        {
-            "total_cost": round(total_cost, 6),
-            "total_calls": calls,
-            "by_provider": sorted(by_provider.values(), key=lambda x: -x["cost"]),
-            "series": [series[k] for k in sorted(series)],
-        }
+    """成本/调用量统计（docs 03 §5.8 CostStat）：token_usage.cost SQL 聚合（M5 观测模块化）。"""
+    data = await SystemService().get_cost(
+        db, start=_parse_iso(start), end=_parse_iso(end), provider=provider
     )
+    return ok(data)
 
 
 @router.get("/system/logs/trace/{trace_id}")

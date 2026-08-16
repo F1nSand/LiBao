@@ -90,13 +90,15 @@ async def test_route_node_surfaces_regular_event_note():
         set_dispatch_ctx(None)
 
 
-def test_arbitrate_filters_regular():
+def test_arbitrate_classifies_priority():
     events = [
         {"type": "a", "priority": "regular"},
-        {"type": "b", "priority": "urgent"},  # 预留：不进 context
-        {"type": "c", "priority": "light"},  # 预留
+        {"type": "b", "priority": "urgent"},
+        {"type": "c", "priority": "light"},  # 预留：不进 context
     ]
-    assert [e["type"] for e in arbitrate(events)] == ["a"]
+    classified = arbitrate(events)
+    assert [e["type"] for e in classified["regular"]] == ["a"]
+    assert [e["type"] for e in classified["urgent"]] == ["b"]
 
 
 async def test_graph_run_registers_placeholder_job():

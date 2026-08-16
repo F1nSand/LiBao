@@ -15,6 +15,7 @@ from app.storage.models.run_log import RunLog
 from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
+from app.storage.models.webhook import WebhookConfig
 
 __all__ = [
     "AgentConfig",
@@ -39,4 +40,5 @@ __all__ = [
     "Task",
     "ToolDefinition",
     "User",
+    "WebhookConfig",
 ]

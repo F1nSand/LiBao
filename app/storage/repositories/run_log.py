@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import Float, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.storage.models.run_log import RunLog
@@ -74,11 +74,23 @@ class RunLogRepository:
         items_stmt = stmt.order_by(RunLog.created_at.desc()).limit(limit).offset(offset)
         return list((await self.session.execute(items_stmt)).scalars()), total
 
-    async def list_llm_in_range(self, *, start: datetime | None = None, end: datetime | None = None) -> list[RunLog]:
-        """LLM 调用（type=llm）成本聚合原料（2h /system/cost）。"""
-        stmt = select(RunLog).where(RunLog.type == "llm")
+    async def aggregate_llm(
+        self, *, start: datetime | None = None, end: datetime | None = None
+    ) -> list[tuple[Any, str, int, float]]:
+        """按 (日, model) SQL GROUP BY 聚合 LLM 调用（count + cost），替代 Python 全量循环（M5 观测）。"""
+        stmt = (
+            select(
+                func.date(RunLog.created_at).label("day"),
+                RunLog.input["model"].as_string().label("model"),
+                func.count().label("calls"),
+                func.coalesce(func.cast(RunLog.token_usage["cost"].astext, Float), 0.0).label("cost"),
+            )
+            .where(RunLog.type == "llm")
+            .group_by("day", "model")
+            .order_by("day")
+        )
         if start is not None:
             stmt = stmt.where(RunLog.created_at >= start)
         if end is not None:
             stmt = stmt.where(RunLog.created_at <= end)
-        return list((await self.session.execute(stmt)).scalars())
+        return list((await self.session.execute(stmt)).all())

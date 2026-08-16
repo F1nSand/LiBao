@@ -16,6 +16,7 @@ ERR_INPUT_TOO_LONG = 40014
 # ---- 认证 401xx ----
 ERR_UNAUTHORIZED = 40101
 ERR_TOKEN_EXPIRED = 40102
+ERR_HOOK_TOKEN = 40103  # webhook x-hook-token 缺失/不匹配（docs 03 §5.10）
 
 # ---- 权限 403xx ----
 ERR_FORBIDDEN = 40301

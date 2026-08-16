@@ -39,4 +39,44 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run alembic upgrade head
+      - run: uv run python -m app.seed
       - run: uv run pytest tests/
+
+  # M5 评估回归门禁（docs 06 §7 / docs 05 §3）：改动 agent_config/工具/编排 → 评估回归通过才发布。
+  # 用 seed 的 smoke_eval（8 条）控 token 成本；LLM_API_KEY 未配置时该 job 跳过（不阻塞 PR）。
+  evaluation-regression:
+    runs-on: ubuntu-latest
+    needs: test
+    if: secrets.LLM_API_KEY != ''
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent
+          POSTGRES_DB: agent
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U agent"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+    env:
+      DATABASE_URL: postgresql+asyncpg://agent:agent@localhost:5432/agent
+      CHECKPOINT_DSN: postgresql://agent:agent@localhost:5432/agent
+      REDIS_URL: redis://localhost:6379/0
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - run: uv run alembic upgrade head
+      - run: uv run python -m app.seed
+      - name: 启动后端并等待
+        run: |
+          nohup uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000 > /tmp/backend.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/api/v1/system/health >/dev/null 2>&1 && break; sleep 1; done
+      - run: bash scripts/verify_eval.sh

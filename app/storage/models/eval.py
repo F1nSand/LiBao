@@ -35,6 +35,7 @@ class EvalCase(Base):
     )
     input: Mapped[str] = mapped_column(Text, nullable=False)
     expected: Mapped[str] = mapped_column(Text, nullable=False)
+    layer: Mapped[str] = mapped_column(String(8), default="L3", nullable=False)  # L1-L5 分层（docs 06 §3.1）
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)  # 停用不放行（docs 06 §3.2）
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -47,6 +48,9 @@ class EvalRun(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     eval_set_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("eval_sets.id"), index=True, nullable=False
+    )
+    baseline_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eval_runs.id"), nullable=True  # 配对比较：基线 run（docs 06 §2.4）
     )
     status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)  # pending/running/done/failed
     progress: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)  # 0-1

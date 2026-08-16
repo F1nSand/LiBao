@@ -51,18 +51,39 @@ class EvalRepository:
         )
         return list((await self.session.execute(stmt)).scalars())
 
-    async def create_case(self, set_id: uuid.UUID, input: str, expected: str) -> EvalCase:
-        row = EvalCase(eval_set_id=set_id, input=input, expected=expected, active=True)
+    async def create_case(self, set_id: uuid.UUID, input: str, expected: str, layer: str = "L3") -> EvalCase:
+        row = EvalCase(eval_set_id=set_id, input=input, expected=expected, layer=layer, active=True)
         self.session.add(row)
         return row
 
     async def get_case(self, case_id: uuid.UUID) -> EvalCase | None:
         return await self.session.get(EvalCase, case_id)
 
+    async def delete_case(self, case_id: uuid.UUID) -> None:
+        row = await self.session.get(EvalCase, case_id)
+        if row is not None:
+            await self.session.delete(row)
+
+    # ---- 集 ----
+
+    async def count_runs(self, set_id: uuid.UUID) -> int:
+        stmt = select(func.count()).select_from(EvalRun).where(EvalRun.eval_set_id == set_id)
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    async def delete_cases_for_set(self, set_id: uuid.UUID) -> None:
+        from sqlalchemy import delete
+
+        await self.session.execute(delete(EvalCase).where(EvalCase.eval_set_id == set_id))
+
+    async def delete_set(self, set_id: uuid.UUID) -> None:
+        row = await self.session.get(EvalSet, set_id)
+        if row is not None:
+            await self.session.delete(row)
+
     # ---- 运行 ----
 
-    async def create_run(self, eval_set_id: uuid.UUID) -> EvalRun:
-        row = EvalRun(eval_set_id=eval_set_id, status="pending", progress=0.0)
+    async def create_run(self, eval_set_id: uuid.UUID, baseline_run_id: uuid.UUID | None = None) -> EvalRun:
+        row = EvalRun(eval_set_id=eval_set_id, baseline_run_id=baseline_run_id, status="pending", progress=0.0)
         self.session.add(row)
         return row
 
@@ -85,10 +106,12 @@ class EvalRepository:
         actual: str | None,
         pass_: bool,
         score: float | None,
+        latency_ms: int | None = None,
+        cost: float | None = None,
     ) -> EvalResult:
         row = EvalResult(
             run_id=run_id, case_id=case_id, input=input, expected=expected, actual=actual,
-            pass_=pass_, score=score,
+            pass_=pass_, score=score, latency_ms=latency_ms, cost=cost,
         )
         self.session.add(row)
         return row

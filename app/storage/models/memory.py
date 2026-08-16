@@ -26,7 +26,7 @@ class MemoryTrace(Base):
         UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True
     )
     message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    trace_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False)  # system/user/assistant/tool
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
     meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

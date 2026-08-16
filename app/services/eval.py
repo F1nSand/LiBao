@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -14,10 +15,16 @@ from langchain_core.messages import HumanMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cost import estimate_cost
 from app.core.errors import ERR_EVAL_CASE_NOT_FOUND, ERR_EVAL_RUN_NOT_FOUND, ERR_EVAL_SET_NOT_FOUND, AppError
 from app.core.llm import LLMService
 from app.orchestration.stream_core import build_initial_state, message_text
-from app.services.serializers import serialize_eval_result, serialize_eval_run, serialize_eval_set
+from app.services.serializers import (
+    serialize_eval_case,
+    serialize_eval_result,
+    serialize_eval_run,
+    serialize_eval_set,
+)
 from app.services.tool import ToolService
 from app.storage.models.agent import AgentConfig
 from app.storage.models.eval import EvalCase, EvalRun, EvalSet
@@ -56,12 +63,18 @@ class EvalService:
 
     # ---- 用例 ----
 
-    async def add_case(self, db: AsyncSession, user: User, set_id: uuid.UUID, input: str, expected: str) -> EvalCase:
+    async def add_case(
+        self, db: AsyncSession, user: User, set_id: uuid.UUID, input: str, expected: str, layer: str = "L3"
+    ) -> EvalCase:
         s = await self.get_set_owned(db, user, set_id)
-        row = await EvalRepository(db).create_case(s.id, input, expected)
+        row = await EvalRepository(db).create_case(s.id, input, expected, layer=layer)
         await db.commit()
         await db.refresh(row)
         return row
+
+    async def list_cases(self, db: AsyncSession, user: User, set_id: uuid.UUID) -> list[dict[str, Any]]:
+        s = await self.get_set_owned(db, user, set_id)
+        return [serialize_eval_case(c) for c in await EvalRepository(db).list_cases(s.id)]
 
     async def patch_case(
         self, db: AsyncSession, user: User, set_id: uuid.UUID, case_id: uuid.UUID, active: bool
@@ -76,11 +89,45 @@ class EvalService:
         await db.refresh(case)
         return case
 
+    async def delete_case(self, db: AsyncSession, user: User, set_id: uuid.UUID, case_id: uuid.UUID) -> None:
+        s = await self.get_set_owned(db, user, set_id)
+        repo = EvalRepository(db)
+        case = await repo.get_case(case_id)
+        if case is None or case.eval_set_id != s.id:
+            raise AppError(ERR_EVAL_CASE_NOT_FOUND, "评估用例不存在或不属于该评估集")
+        await repo.delete_case(case_id)
+        await db.commit()
+
+    # ---- 集 ----
+
+    async def patch_set(
+        self, db: AsyncSession, user: User, set_id: uuid.UUID, name: str | None, description: str | None
+    ) -> EvalSet:
+        s = await self.get_set_owned(db, user, set_id)
+        if name is not None:
+            s.name = name
+        if description is not None:
+            s.description = description
+        await db.commit()
+        await db.refresh(s)
+        return s
+
+    async def delete_set(self, db: AsyncSession, user: User, set_id: uuid.UUID) -> None:
+        s = await self.get_set_owned(db, user, set_id)
+        repo = EvalRepository(db)
+        if await repo.count_runs(s.id) > 0:
+            raise AppError(40904, "评估集已有运行历史，不可删除（可停用用例）")
+        await repo.delete_cases_for_set(s.id)  # 先删用例（无结果引用），再删集
+        await repo.delete_set(s.id)
+        await db.commit()
+
     # ---- 运行 ----
 
-    async def create_run(self, db: AsyncSession, user: User, set_id: uuid.UUID) -> EvalRun:
+    async def create_run(
+        self, db: AsyncSession, user: User, set_id: uuid.UUID, baseline_run_id: uuid.UUID | None = None
+    ) -> EvalRun:
         s = await self.get_set_owned(db, user, set_id)
-        row = await EvalRepository(db).create_run(s.id)
+        row = await EvalRepository(db).create_run(s.id, baseline_run_id=baseline_run_id)
         await db.commit()
         await db.refresh(row)
         return row
@@ -95,6 +142,59 @@ class EvalService:
             raise AppError(ERR_EVAL_RUN_NOT_FOUND, "评估运行不存在")
         results = await repo.list_results(run_id)
         return {"run": serialize_eval_run(run), "results": [serialize_eval_result(r) for r in results]}
+
+    async def pairwise(self, db: AsyncSession, run_id: uuid.UUID, baseline_run_id: uuid.UUID) -> dict[str, Any]:
+        """配对比较（docs 06 §2.4，McNemar 思路）：同评估集两 run 逐题比胜负。
+
+        判断「真变好还是运气」——不是两个成功率数字谁大；一次只动一个变量。
+        """
+        repo = EvalRepository(db)
+        run = await repo.get_run(run_id)
+        baseline = await repo.get_run(baseline_run_id)
+        if run is None or baseline is None:
+            raise AppError(ERR_EVAL_RUN_NOT_FOUND, "评估运行不存在")
+        results = await repo.list_results(run_id)
+        base_results = await repo.list_results(baseline_run_id)
+        base_map = {str(r.case_id): r for r in base_results}
+
+        matrix: list[dict[str, Any]] = []
+        wins = losses = ties = 0
+        for cr in results:
+            br = base_map.get(str(cr.case_id))
+            if br is None:
+                continue
+            outcome = "win" if (cr.pass_ and not br.pass_) else ("lose" if (not cr.pass_ and br.pass_) else "tie")
+            wins += outcome == "win"
+            losses += outcome == "lose"
+            ties += outcome == "tie"
+            matrix.append(
+                {
+                    "case_id": str(cr.case_id),
+                    "input": cr.input,
+                    "baseline_pass": br.pass_,
+                    "candidate_pass": cr.pass_,
+                    "outcome": outcome,
+                }
+            )
+
+        def _rate(rs: list[Any]) -> float:
+            return round(sum(1 for r in rs if r.pass_) / len(rs), 4) if rs else 0.0
+
+        base_rate = _rate(base_results)
+        cand_rate = _rate(results)
+        return {
+            "run_id": str(run.id),
+            "baseline_run_id": str(baseline.id),
+            "matrix": matrix,
+            "summary": {
+                "baseline_pass_rate": base_rate,
+                "candidate_pass_rate": cand_rate,
+                "delta": round(cand_rate - base_rate, 4),
+                "wins": wins,
+                "losses": losses,
+                "ties": ties,
+            },
+        }
 
 
 async def run_eval(graph: Any, sessionmaker: Any, eval_run_id: uuid.UUID, model_override: Any = None) -> None:
@@ -125,11 +225,11 @@ async def run_eval(graph: Any, sessionmaker: Any, eval_run_id: uuid.UUID, model_
                 actual = await _run_single_case(
                     graph, agent, case.input, str(eval_set.org_id), model_override, enabled_tool_ids
                 )
-                passed, score = await _judge(case.input, case.expected, actual, model_override)
+                passed, score, latency_ms, cost = await _judge(case.input, case.expected, actual, model_override)
                 passed_count += int(passed)
                 await repo.create_result(
                     run_id=run.id, case_id=case.id, input=case.input, expected=case.expected,
-                    actual=actual, pass_=passed, score=score,
+                    actual=actual, pass_=passed, score=score, latency_ms=latency_ms, cost=cost,
                 )
                 run.progress = round(i / len(cases), 3)
                 await db.commit()
@@ -173,18 +273,25 @@ async def _run_single_case(
     return str(fm.get("content", "") or "")
 
 
-async def _judge(input_text: str, expected: str, actual: str | None, model_override: Any = None) -> tuple[bool, float]:
-    """LLM-as-a-Judge 最小闭环：单次调用判定 pass + score；解析失败按失败计。"""
+async def _judge(
+    input_text: str, expected: str, actual: str | None, model_override: Any = None
+) -> tuple[bool, float, int, float]:
+    """LLM-as-a-Judge 最小闭环：单次调用判定 pass + score + latency_ms + cost；解析失败按失败计。"""
+    start = time.perf_counter()
     prompt = _JUDGE_PROMPT.format(input=input_text, expected=expected, actual=(actual or "(空)")[:2000])
     try:
         model = model_override or LLMService.build_model()
         resp = await model.ainvoke([HumanMessage(content=prompt)])
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        usage = dict(getattr(resp, "usage_metadata", None) or {})
+        model_name = getattr(resp, "response_metadata", {}).get("model", "") or ""
+        cost = estimate_cost(usage, model_name or (model_override and "deepseek" or ""))
         data = _parse_judge(message_text(getattr(resp, "content", "")))
         passed = bool(data.get("pass"))
-        return passed, float(data.get("score", 1.0 if passed else 0.0))
+        return passed, float(data.get("score", 1.0 if passed else 0.0)), latency_ms, cost
     except Exception as exc:  # noqa: BLE001
         logger.warning("eval judge failed: %s", exc)
-        return False, 0.0
+        return False, 0.0, int((time.perf_counter() - start) * 1000), 0.0
 
 
 def _parse_judge(text: str) -> dict:

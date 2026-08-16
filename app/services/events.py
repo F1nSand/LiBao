@@ -41,7 +41,12 @@ def drain_events(thread_key: str) -> list[dict[str, Any]]:
     return _inbox.pop(thread_key, [])
 
 
-def arbitrate(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """规则裁决器（docs 01 §5.3.2，默认规则起步）：只处理 regular——排空进 context。
-    urgent/light 预留（本轮不进 context，也不做打断）。裁决结果 = 待渲染给模型的事件。"""
-    return [e for e in events if (e.get("priority") or EVENT_REGULAR) == EVENT_REGULAR]
+def arbitrate(events: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """规则裁决器（docs 01 §5.3.2，默认规则起步）：按 priority 分类。
+    - urgent：置顶进 context（紧急优先响应，M6 前补强）；
+    - regular：排空进 context；
+    - light：预留（独立并行执行，本轮不进 context）。
+    """
+    urgent = [e for e in events if (e.get("priority") or EVENT_REGULAR) == EVENT_URGENT]
+    regular = [e for e in events if (e.get("priority") or EVENT_REGULAR) == EVENT_REGULAR]
+    return {"urgent": urgent, "regular": regular}

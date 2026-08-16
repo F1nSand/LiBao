@@ -106,7 +106,11 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 | **任务亲和调度** | 单实例 MVP 下 worker 天然单消费者（BRPOP）；多实例需实例 id + task:claim + per-instance 队列 | 本轮不做，接缝标注（docs 05） |
 | **agent_switch 持久化** | 纯流式事件，Message 无持久化字段 | 协调项（前端 done 后指示条消失）；需则加 message JSONB 列 |
 | **占位 TTL 看门狗** | `initiate_*` 占位→回填已落地，TTL 超时置失败未做 | `placeholder_events`（task 表）+ 定时器（后续） |
-| **M5 评估/日志** | `run_log` 扁平表已建（type 含 retrieval/memory） | `/system/evals` 在 docs 03 §5.8 |
+| **M5 评估/日志** ✅ 完整化 | 配对比较 + 评估集 seed（smoke 8 + m5_core 20 条五层）+ `verify_eval.sh` + CI 门禁；`/system/cost` SQL 聚合 | `services/eval.py` + `scripts/verify_eval.sh` |
+| **hooks/webhook** ✅ M6 前落地 | `webhook_configs` + `/hooks/{tool_id}` 接收（x-hook-token 鉴权 + x-idempotency-key 去重）→ 事件入队安全点消费 | `routers/hooks.py` + `services/webhook.py` |
+| **事件 urgent 档** ✅ M6 前落地 | `arbitrate` 分类，urgent 置顶进 context（紧急优先）；light 预留 | `services/events.py` + `nodes/route.py` |
+| **占位 TTL 看门狗** ✅ M6 前落地 | 占位任务超 TTL 轮边界惰性回填 error；任务表 `placeholder_events` 写端留后续 | `nodes/route.py` `PLACEHOLDER_TTL_S` |
+| **任务亲和调度** | 单实例 MVP 下 worker 天然单消费者（BRPOP）；多实例需实例 id + task:claim + per-instance 队列 | 多实例接缝（M6 部署） |
 | **M6 RBAC/进化** | `user.role` 已存 | `api/deps.py` |
 
 其他：Redis 服务已起未用（M4 多实例 SSE 广播 / 任务队列）；CORS 已配 `localhost:5173`。

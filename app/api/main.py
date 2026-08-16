@@ -24,6 +24,7 @@ from app.api.routers import (
     chat,
     conversations,
     evals,
+    hooks,
     kb,
     memory,
     notifications,
@@ -158,6 +159,7 @@ def create_app() -> FastAPI:
         notifications.router,
         users.router,
         evals.router,
+        hooks.router,
         system.router,
     ):
         app.include_router(router, prefix=settings.base_url)

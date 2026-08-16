@@ -239,6 +239,7 @@ def serialize_eval_case(c: EvalCase) -> dict[str, Any]:
         "eval_set_id": str(c.eval_set_id),
         "input": c.input,
         "expected": c.expected,
+        "layer": c.layer,  # L1-L5 分层（docs 06 §3.1）
         "active": c.active,
     }
 
@@ -248,6 +249,7 @@ def serialize_eval_run(r: EvalRun) -> dict[str, Any]:
     return {
         "id": str(r.id),
         "eval_set_id": str(r.eval_set_id),
+        "baseline_run_id": str(r.baseline_run_id) if r.baseline_run_id else None,  # 配对比较基线（docs 06 §2.4）
         "status": r.status,
         "progress": r.progress,
         "pass_rate": r.pass_rate,
@@ -264,6 +266,8 @@ def serialize_eval_result(r: EvalResult) -> dict[str, Any]:
         "actual": r.actual,
         "pass": r.pass_,
         "score": r.score,
+        "latency_ms": r.latency_ms,
+        "cost": r.cost,
     }
 
 
