@@ -73,6 +73,18 @@ hybrid_search RRF 叠加/降级语义、_indexed_filter join、ContextVar 无泄
 ## Gate3 Simplify（恢复后执行）
 四路并行（Reuse/Simplification/Efficiency/Altitude）审 `git diff 7ac4647..HEAD` → 合并去重 → 应用/跳过记录
 
+## M3.5 契约对齐轮（2026-08-16，后端×前端并行，以 FrontEnd/types/api.ts + mock/server.ts 为事实源）
+
+**结论：后端与前端契约已对齐**（静态逐字段审计 + 运行时 :8000 实测）：
+- SSE 事件（message_start/token/tool_call/tool_result/interrupt/done）字段与 useChatStream 消费一致；
+  tool_call 事件前端只读 {tool_call_id,tool_name,input,require_confirm}，done 消息 tool_calls 含 position（position 兜底候选无需）
+- kb progress 已统一 number（normalizeProgress 候选无需）；reindex/archive 返回 ok() 空——前端 store 忽略返回值，兼容
+- trajectory：kind=user/assistant + thinking/diff=null + before_seq/limit/has_more（context/steering/compaction 为 mock 注入，契约允许）
+- users/notifications/uploads/system-logs/cost/evals 输出形状全部匹配 Paged/信封/字段级
+- **修复 1 处契约 bug**：evals 路由缺 `/system/evals` 前缀 → `GET /system/evals/sets` 404（前端会误判未实现降级）。
+  `APIRouter(prefix="/system/evals")` 修复，实测 200。
+- 运行时实测：login/me/conversations/users/notifications/system/logs/cost/evals/kb/collections/memory/tools/search/agents 形状全部正确
+
 ## M3.5 收尾轮（2026-08-16）
 
 **Gate2 14 项修复全部落地**（commit 1c39d37）：

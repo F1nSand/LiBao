@@ -14,7 +14,8 @@ from app.services.eval import EvalService, run_eval
 from app.services.serializers import serialize_eval_case, serialize_eval_run, serialize_eval_set
 from app.storage.models.user import User
 
-router = APIRouter()
+# 契约路径 /system/evals/*（docs 03 §5.8）：相对路径 + prefix，注册在 /api/v1 下即全路径
+router = APIRouter(prefix="/system/evals")
 
 
 class CreateEvalSetRequest(BaseModel):
