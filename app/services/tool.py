@@ -167,6 +167,15 @@ class ToolService:
         # id 派生规则与 serialize_tool_definition 一致（单一来源）
         return [{k: serialize_tool_definition(t)[k] for k in ("id", "name", "description", "enabled")} for t in rows]
 
+    async def enabled_tool_ids(self, db: AsyncSession, org_id: uuid.UUID) -> list[str]:
+        """本组织已启用工具 → registry spec id（MCP/自定义启用即对通用助手开放，org 隔离）。"""
+        names = await ToolDefinitionRepository(db).list_enabled_names(org_id)
+        ids = []
+        for n in names:
+            spec = get_by_name(n)
+            ids.append(spec.id if spec is not None else f"tl_{n}")
+        return ids
+
     async def test(self, db: AsyncSession, org_id: uuid.UUID, tool_id: str, params: dict[str, Any]) -> dict[str, Any]:
         row = await self.get_in_org(db, org_id, tool_id)
         spec = get_by_name(row.name)

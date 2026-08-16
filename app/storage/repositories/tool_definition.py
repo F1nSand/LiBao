@@ -77,6 +77,19 @@ class ToolDefinitionRepository:
         stmt = select(ToolDefinition).where(ToolDefinition.deleted_at.is_(None))
         return list((await self.session.execute(stmt)).scalars())
 
+    async def list_enabled_names(self, org_id: uuid.UUID) -> list[str]:
+        """本组织已启用的工具名（单通用 Agent 有效工具集：seed 精选 ∪ 已启用，org 隔离）。"""
+        stmt = (
+            select(ToolDefinition.name)
+            .where(
+                ToolDefinition.org_id == org_id,
+                ToolDefinition.enabled.is_(True),
+                ToolDefinition.deleted_at.is_(None),
+            )
+            .order_by(ToolDefinition.name)
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
     async def search(self, org_id: uuid.UUID, q: str, *, limit: int = 20) -> list[ToolDefinition]:
         """工具发现（REST 版 G3）：name/description ILIKE，org 隔离。"""
         pattern = f"%{q}%"

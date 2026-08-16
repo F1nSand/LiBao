@@ -18,6 +18,7 @@ from app.core.errors import ERR_EVAL_CASE_NOT_FOUND, ERR_EVAL_RUN_NOT_FOUND, ERR
 from app.core.llm import LLMService
 from app.orchestration.stream_core import build_initial_state, message_text
 from app.services.serializers import serialize_eval_result, serialize_eval_run, serialize_eval_set
+from app.services.tool import ToolService
 from app.storage.models.agent import AgentConfig
 from app.storage.models.eval import EvalCase, EvalRun, EvalSet
 from app.storage.models.user import User
@@ -118,9 +119,12 @@ async def run_eval(graph: Any, sessionmaker: Any, eval_run_id: uuid.UUID, model_
 
         cases = await repo.list_active_cases(run.eval_set_id)
         passed_count = 0
+        enabled_tool_ids = await ToolService().enabled_tool_ids(db, eval_set.org_id)
         try:
             for i, case in enumerate(cases, 1):
-                actual = await _run_single_case(graph, agent, case.input, str(eval_set.org_id), model_override)
+                actual = await _run_single_case(
+                    graph, agent, case.input, str(eval_set.org_id), model_override, enabled_tool_ids
+                )
                 passed, score = await _judge(case.input, case.expected, actual, model_override)
                 passed_count += int(passed)
                 await repo.create_result(
@@ -154,9 +158,11 @@ async def _first_published_agent(db: AsyncSession, org_id: uuid.UUID) -> AgentCo
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def _run_single_case(graph: Any, agent: AgentConfig, input_text: str, org_id: str, model_override: Any) -> str:
+async def _run_single_case(
+    graph: Any, agent: AgentConfig, input_text: str, org_id: str, model_override: Any, enabled_tool_ids: list[str]
+) -> str:
     """单用例：独立 thread 跑一次图（values 模式取最终态）。require_confirm 工具不确认 → case 失败。"""
-    initial = build_initial_state(agent, input_text, user_id=None, org_id=org_id)
+    initial = build_initial_state(agent, input_text, user_id=None, org_id=org_id, enabled_tool_ids=enabled_tool_ids)
     graph_config: dict[str, Any] = {"configurable": {"thread_id": f"eval-{uuid.uuid4()}"}}
     if model_override is not None:
         graph_config["configurable"]["model"] = model_override

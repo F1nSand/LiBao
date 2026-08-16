@@ -276,6 +276,47 @@ async def main() -> None:
             idempotent=False,
             enabled=False,
         )
+        # 平台工具 DB 行（/tools 管理页可见可控）：dispatch_subagent（派发）/ initiate_demo（占位演示）默认启用
+        await _get_or_create_tool(
+            session,
+            org,
+            name="dispatch_subagent",
+            description=(
+                "派发专家 subagent 完成专业子任务（research 资料调研 / code_review 代码评审 / "
+                "proposal_review 方案评审）；subagent 独立上下文只回传结论。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "subagent": {"type": "string", "description": "subagent 名"},
+                    "task": {"type": "string", "description": "子任务描述"},
+                    "context": {"type": "string", "description": "可选补充事实"},
+                },
+                "required": ["subagent", "task"],
+            },
+            tool_type="agent_control",
+            require_confirm=False,
+            idempotent=False,
+            enabled=True,
+        )
+        await _get_or_create_tool(
+            session,
+            org,
+            name="initiate_demo",
+            description="发起一个演示后台任务：立即返回占位（job_ref），delay 秒后回填真值（占位/回填演示）。",
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "delay": {"type": "integer", "description": "延迟秒数，默认 3"},
+                    "note": {"type": "string", "description": "任务备注"},
+                },
+                "required": [],
+            },
+            tool_type="execution",
+            require_confirm=False,
+            idempotent=False,
+            enabled=True,
+        )
         # 单通用 Agent：挂齐感知 + 派发 + 异步占位演示工具（fetch_url/analyze_image 全局默认关，启用后即对通用助手开放）
         agent_tools = [
             "tl_time_now",

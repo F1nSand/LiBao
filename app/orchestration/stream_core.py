@@ -46,20 +46,30 @@ def _chunk_text(chunk: Any) -> str:
 
 
 def build_initial_state(
-    agent: Any, content: str, user_id: str | None = None, org_id: str | None = None
+    agent: Any,
+    content: str,
+    user_id: str | None = None,
+    org_id: str | None = None,
+    enabled_tool_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。
 
     user_id/org_id 供 M3 memory_inject（注入）与 kb_search 工具（org 上下文）使用；
     缺失时注入静默跳过（不击穿对话）。
+
+    单通用 Agent 有效工具集 = seed 精选（agent.tools）∪ 本组织已启用工具（enabled_tool_ids）——
+    MCP/自定义工具启用后即对通用助手开放（约束优先：仍要求 spec.enabled，tool_execute 守卫同源）。
     """
+    seed_tools = set(agent.tools or [])
+    if enabled_tool_ids:
+        seed_tools |= set(enabled_tool_ids)
     return {
         "messages": [HumanMessage(content=content)],
         "agent_config": {
             "name": agent.name,
             "model": agent.model,
             "system_prompt": agent.system_prompt,
-            "tools": agent.tools or [],
+            "tools": sorted(seed_tools),  # 确定性排序（前缀稳定；启停实时生效）
             "max_steps": agent.max_steps,
             "org_id": org_id or str(getattr(agent, "org_id", "") or ""),
         },
