@@ -14,6 +14,7 @@ from typing import Any
 from langgraph.types import Command
 
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
+from app.services.notification import NotificationService
 from app.services.task import TaskService, push_event
 from app.storage.repositories.agent import AgentRepository
 from app.storage.repositories.task import TaskRepository
@@ -86,6 +87,9 @@ async def _run_graph_common(
             if updated.status != "cancelled":  # 运行中被取消不覆盖
                 fm = final_state.get("final_message", {}) or {}
                 await svc.set_done(db, updated, final_message=fm)
+                # 2d：demo_notify 确认执行后落通知（工具结果产生源）
+                if updated.user_id is not None:
+                    await NotificationService.maybe_notify_from_tool_results(db, updated.user_id, final_state)
                 push_event(
                     str(task_id),
                     "done",

@@ -16,6 +16,7 @@ SSE_EVENT_TYPES = (
     "interrupt",
     "done",
     "error",
+    "notification",
 )
 
 

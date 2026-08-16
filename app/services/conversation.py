@@ -10,9 +10,37 @@ from app.core.errors import ERR_CONVERSATION_NOT_FOUND, AppError
 from app.services.serializers import serialize_conversation, serialize_message
 from app.storage.models.agent import AgentConfig
 from app.storage.models.conversation import Conversation
+from app.storage.models.message import Message
 from app.storage.models.user import User
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
+
+
+def _trajectory_node(m: Message, seq: int) -> dict[str, Any]:
+    """消息 → TrajectoryNode（docs 03 §5.2.1 / FrontEnd TrajectoryNode）。"""
+    tool_calls = [
+        {
+            "tool_call_id": tc.get("tool_call_id"),
+            "tool_name": tc.get("tool_name"),
+            "input": tc.get("input"),
+            "output": tc.get("output"),
+            "ok": tc.get("ok"),
+            "duration_ms": tc.get("duration_ms", 0),
+            "position": tc.get("position", 0),
+        }
+        for tc in (m.tool_calls or [])
+    ]
+    return {
+        "seq": seq,
+        "kind": m.role,  # user/assistant（context/steering/compaction 为 mock 扩展，真实无）
+        "time": int(m.created_at.timestamp() * 1000) if m.created_at else 0,
+        "content": m.content,
+        "thinking": None,  # 未单独存推理链
+        "diff": None,  # 无 context/system 更新差异
+        "token_usage": m.token_usage,
+        "trace_id": m.trace_id,
+        "tool_calls": tool_calls,
+    }
 
 
 class ConversationService:
@@ -50,3 +78,20 @@ class ConversationService:
         from app.api.schemas.common import paged
 
         return paged([serialize_message(m) for m in msgs], total, page, page_size)
+
+    async def trajectory(
+        self, db: AsyncSession, conversation: Conversation, before_seq: int | None = None, limit: int = 50
+    ) -> dict[str, Any]:
+        """只读轨迹（docs 03 §5.2.1）：由 message + tool_calls 派生，非独立存储。
+
+        seq 为按消息序的前端派生索引（非持久化；新消息插入会移位，可接受）。
+        before_seq 加载更早一页；has_more 表示还有更早。
+        """
+        msgs = await MessageRepository(db).list_by_conversation(conversation.id, limit=10000, offset=0)
+        nodes = [_trajectory_node(m, seq) for seq, m in enumerate(msgs, 1)]
+        candidates = [n for n in nodes if n["seq"] < before_seq] if before_seq is not None else nodes
+        return {
+            "conversation_id": str(conversation.id),
+            "nodes": candidates[-limit:],
+            "has_more": len(candidates) > limit,
+        }

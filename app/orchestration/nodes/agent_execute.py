@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from langchain_core.runnables import RunnableConfig
 
+from app.core.cost import estimate_cost
 from app.core.llm import LLMService
 from app.orchestration.context_builder import build_agent_tools, build_context
 from app.orchestration.state_schema import AgentState
@@ -51,9 +52,15 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
     totals["prompt_tokens"] = totals.get("prompt_tokens", 0) + int(usage.get("input_tokens", 0))
     totals["completion_tokens"] = totals.get("completion_tokens", 0) + int(usage.get("output_tokens", 0))
     totals["total_tokens"] = totals.get("total_tokens", 0) + int(usage.get("total_tokens", 0))
+    # 2b：成本估算（token×定价表；provider 真实账单为 M4 接缝）——totals 供 done 事件 cost 字段
+    cost = estimate_cost(usage, agent.get("model", ""))
+    totals["cost"] = totals.get("cost", 0.0) + cost
 
     flags = dict(state.get("flags", {}))
     flags["steps"] = flags.get("steps", 0) + 1
+
+    token_usage = dict(usage or {})
+    token_usage["cost"] = cost
 
     return {
         "messages": [response],
@@ -67,7 +74,7 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
                 "trace_id": trace_id,
                 "input": {"model": agent.get("model"), "tool_count": len(active_tools)},
                 "output": {"content": _text_of(response)[:500]},
-                "token_usage": usage or None,
+                "token_usage": token_usage,
                 "duration_ms": duration_ms,
                 "status": "ok",
             }

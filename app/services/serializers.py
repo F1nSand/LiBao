@@ -6,10 +6,13 @@ from typing import Any
 from app.storage.models.agent import AgentConfig, AgentVersion
 from app.storage.models.attachment import Attachment
 from app.storage.models.conversation import Conversation
+from app.storage.models.eval import EvalCase, EvalResult, EvalRun, EvalSet
 from app.storage.models.kb import KbCollection, KbDocument
 from app.storage.models.mcp_server import McpServer
 from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion, MemoryTrace
 from app.storage.models.message import Message
+from app.storage.models.notification import Notification
+from app.storage.models.run_log import RunLog
 from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
@@ -194,6 +197,83 @@ def serialize_longterm_version(v: LongTermMemoryVersion, title: str | None = Non
         "title": title,
         "body": v.content,
         "created_at": _dt(v.created_at),
+    }
+
+
+def serialize_notification(n: Notification) -> dict[str, Any]:
+    """通知（docs 03 §5.11 / FrontEnd Notification）。"""
+    return {
+        "id": str(n.id),
+        "title": n.title,
+        "body": n.body,
+        "level": n.level,
+        "read": n.read,
+        "created_at": _dt(n.created_at),
+    }
+
+
+def serialize_eval_set(s: EvalSet, case_count: int = 0) -> dict[str, Any]:
+    """评估集（docs 03 §5.8 / FrontEnd EvalSet）。"""
+    return {
+        "id": str(s.id),
+        "name": s.name,
+        "description": s.description,
+        "case_count": case_count,
+        "created_at": _dt(s.created_at),
+    }
+
+
+def serialize_eval_case(c: EvalCase) -> dict[str, Any]:
+    """评估用例（FrontEnd EvalCase）。"""
+    return {
+        "id": str(c.id),
+        "eval_set_id": str(c.eval_set_id),
+        "input": c.input,
+        "expected": c.expected,
+        "active": c.active,
+    }
+
+
+def serialize_eval_run(r: EvalRun) -> dict[str, Any]:
+    """评估运行（FrontEnd EvalRun）。progress 0-1。"""
+    return {
+        "id": str(r.id),
+        "eval_set_id": str(r.eval_set_id),
+        "status": r.status,
+        "progress": r.progress,
+        "pass_rate": r.pass_rate,
+        "created_at": _dt(r.created_at),
+    }
+
+
+def serialize_eval_result(r: EvalResult) -> dict[str, Any]:
+    """评估结果（FrontEnd EvalCaseResult）。"""
+    return {
+        "case_id": str(r.case_id),
+        "input": r.input,
+        "expected": r.expected,
+        "actual": r.actual,
+        "pass": r.pass_,
+        "score": r.score,
+    }
+
+
+def serialize_run_log(log: RunLog) -> dict[str, Any]:
+    """系统日志（docs 03 §5.8 / FrontEnd SystemLog）。level 由 status 映射（run_log 无 level 列）。"""
+    level = {"ok": "INFO", "error": "ERROR", "retried": "WARNING"}.get(log.status, "INFO")
+    out = log.output or {}
+    message = str(out.get("content") or out.get("summary") or "")[:500] or None
+    return {
+        "id": str(log.id),
+        "trace_id": log.trace_id,
+        "level": level,
+        "event": log.node,
+        "service": "agent-backend",
+        "message": message,
+        "input": log.input,
+        "output": log.output,
+        "duration_ms": log.duration_ms,
+        "created_at": _dt(log.created_at),
     }
 
 

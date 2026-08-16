@@ -18,7 +18,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.envelope import fail
-from app.api.routers import agents, attachments, auth, chat, conversations, kb, memory, system, tasks, tools
+from app.api.routers import (
+    agents,
+    attachments,
+    auth,
+    chat,
+    conversations,
+    evals,
+    kb,
+    memory,
+    notifications,
+    system,
+    tasks,
+    tools,
+    users,
+)
 from app.core.config import get_settings
 from app.core.errors import ERR_INTERNAL, AppError, http_status_for
 from app.core.logging import set_trace_id, setup_logging
@@ -125,6 +139,9 @@ def create_app() -> FastAPI:
         memory.router,
         kb.router,
         attachments.router,
+        notifications.router,
+        users.router,
+        evals.router,
         system.router,
     ):
         app.include_router(router, prefix=settings.base_url)

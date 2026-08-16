@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.events import sse_emitter
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
 from app.services.memory import MemoryService
+from app.services.notification import NotificationService
 from app.services.task import TaskService, push_event
 from app.storage.models.agent import AgentConfig
 from app.storage.models.attachment import Attachment
@@ -281,6 +282,8 @@ async def resume_stream_events(
         elif updated is not None:
             push_event(str(task.id), "cancelled", {"status": "cancelled"})
             await db.commit()  # 拒绝分支无 set_done：此处落消息持久化（E5）
+        # 2d：demo_notify 确认执行后落通知（工具结果产生源）
+        await NotificationService.maybe_notify_from_tool_results(db, user.id, final_state)
         return _done_payload(
             assistant_msg_id, fm.get("token_usage") or totals, _message_dict(assistant_msg) if assistant_msg else None
         )

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import ERR_STATE_NOT_CANCELLABLE, ERR_TASK_NOT_FOUND, AppError
+from app.services.notification import NotificationService
 from app.services.serializers import serialize_task
 from app.storage.models.task import Task
 from app.storage.models.user import User
@@ -117,11 +118,25 @@ class TaskService:
         await TaskRepository(db).update_finish(task, status="done", output=final_message)
         await db.commit()
         await db.refresh(task)
+        # 2d：任务完成通知（任务事件产生源）
+        if task.user_id is not None:
+            await NotificationService().create(
+                db,
+                user_id=task.user_id,
+                title="任务已完成",
+                level="success",
+                body=str((final_message or {}).get("content", ""))[:200] or None,
+            )
 
     async def set_failed(self, db: AsyncSession, task: Task, message: str) -> None:
         await TaskRepository(db).update_finish(task, status="failed", error={"code": "task_error", "message": message})
         await db.commit()
         await db.refresh(task)
+        # 2d：任务失败通知（任务事件产生源）
+        if task.user_id is not None:
+            await NotificationService().create(
+                db, user_id=task.user_id, title="任务执行失败", level="error", body=message[:200]
+            )
 
     # ---- 取消 / 恢复 ----
     async def cancel(self, db: AsyncSession, task: Task) -> None:

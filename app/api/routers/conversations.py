@@ -71,3 +71,15 @@ async def list_messages(
     conv = await ConversationService().get_owned(db, conversation_id, user.id)
     data = await ConversationService().messages(db, conv, page, page_size)
     return ok(data)
+
+
+@router.get("/conversations/{conversation_id}/trajectory")
+async def get_conversation_trajectory(
+    conversation_id: uuid.UUID,
+    before_seq: int | None = Query(None, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    conv = await ConversationService().get_owned(db, conversation_id, user.id)
+    return ok(await ConversationService().trajectory(db, conv, before_seq, limit))

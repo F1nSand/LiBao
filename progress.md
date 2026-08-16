@@ -73,6 +73,24 @@ hybrid_search RRF 叠加/降级语义、_indexed_filter join、ContextVar 无泄
 ## Gate3 Simplify（恢复后执行）
 四路并行（Reuse/Simplification/Efficiency/Altitude）审 `git diff 7ac4647..HEAD` → 合并去重 → 应用/跳过记录
 
+## M3.5 收尾轮（2026-08-16）
+
+**Gate2 14 项修复全部落地**（commit 1c39d37）：
+- HIGH：S1 `serialize_attachment` 补 `attachment_id`（前端 UploadResponse 契约）、C1 kb_pipeline 插库段异常捕获+先 rollback 再 `_fail`
+- MEDIUM：C2/S4 maintenance apply 形状校验→60001 retryable、C3 stream_core on_final 保护（on_error 兜底+error 帧）、C4 IntegrityError（包 commit）→60001、C5 spawn 后台任务 done_callback 日志、S2 progress 统一 number、S3 KB 非法 UTF-8→40012（`_decode_text`）、S5 迁移 0001-0004 ruff 清零
+- LOW：C6 `_fail` 单条 UPDATE 原子化、C7 LongTermMemoryVersion ORM UNIQUE 声明、C8 resume 补 assistant 轨迹+用户消息单事务、S7 语义降级日志、S8 空内容 40001、S9 attachments 校验 UUID→422、S10 hybrid 注释改开关、S11 document_counts GROUP BY
+- 新增测试 7 项；非 DB 测试全过（含 stream_core on_final / pydantic 校验 / 纯序列化）
+
+**前端五组新接口全部落地**（19 端点，commit 待）：
+- trajectory：`GET /conversations/{id}/trajectory`（message+tool_calls 派生，before_seq/limit/has_more，零建表）
+- notifications：`GET /notifications`、`PATCH /{id}/read`、`GET /notifications/stream`（SSE 按 user_id，镜像 task live-tail）；产生源 = 任务 done/failed + demo_notify 确认执行
+- users：5 端点 admin 专属（复用 User 现有字段，零建表）
+- system-logs：`GET /system/logs`（分页+trace_id/level/时间过滤）、`GET /system/logs/trace/{id}`（run_log 派生 TraceEvent）
+- evals + cost：迁移 0005（notifications + eval 四表）+ 8 端点 + 最小运行器（逐 case 跑 agent 图 + LLM-as-a-Judge）+ `GET /system/cost`（token_usage.cost 聚合）
+- 新增测试 24 项（207 collect）；`pass` 关键字冲突用 `pass_` 属性映射 `pass` 列
+
+**验证状态**：ruff 全绿 + 207 collect；DB-backed 测试因 Docker db 未运行而 skip（待 `docker compose up -d db` + `alembic upgrade head` 后全量跑）。
+
 ---
 
 # M2.5 历史（已完成，勿重做）
