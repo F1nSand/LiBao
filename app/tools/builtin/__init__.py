@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from app.tools.builtin import (
     analyze_image,
+    calculator,
+    datetime_calc,
     demo_notify,
     dispatch_subagent,
     fetch_url,
@@ -11,6 +13,8 @@ from app.tools.builtin import (
     kb_search,
     time_now,
     tool_search,
+    unit_converter,
+    weather,
 )
 from app.tools.registry import SandboxLevel, ToolSpec, ToolType, get, register
 
@@ -173,6 +177,115 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=10000,
             handler=analyze_image.analyze_image_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_weather",
+            name="weather",
+            description=(
+                "查询天气：城市名/拼音/坐标 → 当前温度/天气/湿度/风。需要知道某地天气时使用；"
+                "受出站白名单限制（wttr.in 需在 fetch_url_allowlist）。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "城市名/拼音/坐标，如 Beijing 或 上海"},
+                },
+                "required": ["location"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=False,  # 默认关闭：网络工具，管理员启用 + allowlist 授权
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=15000,
+            handler=weather.weather_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_calculator",
+            name="calculator",
+            description=(
+                "安全算术计算器：计算 + - * / % 与括号表达式（如 (3+4)*2-1）。"
+                "需要精确数学计算时使用。反例：不要用于日期/单位换算（用 datetime_calc/unit_converter）。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "expression": {"type": "string", "description": "算术表达式（数字与 + - * / % 括号）"},
+                },
+                "required": ["expression"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=True,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=5000,
+            handler=calculator.calculator_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_datetime_calc",
+            name="datetime_calc",
+            description=(
+                "日期/时间计算：now（当前日期时间）、add_days（加/减天数）、weekday（星期几）、"
+                "days_between（两日期间隔天数）。需要日期计算时使用。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "op": {"type": "string", "enum": ["now", "add_days", "weekday", "days_between"]},
+                    "date": {"type": "string", "description": "基准日期 YYYY-MM-DD，默认今天"},
+                    "days": {"type": "integer", "description": "add_days 的天数（负数为减）"},
+                    "other": {"type": "string", "description": "days_between 的另一日期"},
+                },
+                "required": ["op"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=True,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=5000,
+            handler=datetime_calc.datetime_calc_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_unit_converter",
+            name="unit_converter",
+            description=(
+                "单位换算：长度(length)/重量(weight)/温度(temperature)/速度(speed)。"
+                "需要单位换算时使用（如 5 公里是多少米）。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "enum": ["length", "weight", "temperature", "speed"]},
+                    "value": {"type": "number", "description": "数值"},
+                    "from_unit": {
+                        "type": "string",
+                        "description": "源单位（m/km/cm/mm/mi/ft/in；kg/g/t/lb/oz；C/F/K；m/s/km/h/mph/kn）",
+                    },
+                    "to_unit": {"type": "string", "description": "目标单位"},
+                },
+                "required": ["category", "value", "from_unit", "to_unit"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=True,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=5000,
+            handler=unit_converter.unit_converter_handler,
             builtin=True,
         )
     )

@@ -50,7 +50,7 @@ AGENT_ID="$(printf '%s' "$CONV" | jget data.agent_id)"
 
 echo "[4] 流式派发 subagent（SSE 断言 2 条 agent_switch + done）"
 cat > "$TMP/chat.json" <<JSON
-{"conversation_id":"$CONV_ID","message":{"content":"请使用 dispatch_subagent 派发 research subagent 调研：1+1 等于几。完成后把结论告诉我。"},"stream":true}
+{"conversation_id":"$CONV_ID","message":{"content":"请务必先调用 dispatch_subagent 工具派发 code_review subagent 审查这段 Python 代码：def add(a, b): return a + b。不要直接回答，派发后报告审查结论。"},"stream":true}
 JSON
 # 显式捕获 curl 退出码（set -e 下命令替换失败会静默终止，改为 fail+exit 明确报错）
 if ! curl -sN -X POST "$BASE/chat/stream" "${AUTH[@]}" -H 'Content-Type: application/json' \

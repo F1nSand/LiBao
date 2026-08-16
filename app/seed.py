@@ -32,6 +32,9 @@ AGENT_SYSTEM_PROMPT = (
     "- 需要检索知识库 / 抓取网页汇总资料时 → 派发「资料调研」research；\n"
     "- 需要审查代码、找缺陷或改进点时 → 派发「代码评审」code_review；\n"
     "- 需要评审方案 / 计划（可行性、风险、遗漏、更优解）时 → 派发「方案评审」proposal_review。\n"
+    "实用工具直接用（不需要派发 subagent）：\n"
+    "- 数学计算 → calculator（如 (3+4)*2-1）；日期计算 → datetime_calc（now/add_days/weekday/days_between）；\n"
+    "- 单位换算 → unit_converter（长度/重量/温度/速度）；当前时间 → time_now；查天气 → weather（若已启用）。\n"
     "派发后基于 subagent 结论继续回答用户，用中文回答。\n"
     "用户要求发送通知/提醒时使用 demo_notify 工具（该工具为演示人工确认流程：会先请求确认，确认后才真正发送）。"
 )
@@ -384,7 +387,78 @@ async def main() -> None:
             idempotent=False,
             enabled=True,
         )
-        # 单通用 Agent：挂齐感知 + 派发 + 异步占位演示工具（fetch_url/analyze_image 全局默认关，启用后即对通用助手开放）
+        # 实用工具：计算器/日期计算/单位换算默认开（离线纯本地）；天气默认关（网络，需 allowlist 授权）
+        await _get_or_create_tool(
+            session,
+            org,
+            name="calculator",
+            description="安全算术计算器：+ - * / % 与括号表达式（如 (3+4)*2-1）。",
+            params_schema={
+                "type": "object",
+                "properties": {"expression": {"type": "string", "description": "算术表达式"}},
+                "required": ["expression"],
+            },
+            tool_type="execution",
+            require_confirm=False,
+            idempotent=False,
+            enabled=True,
+        )
+        await _get_or_create_tool(
+            session,
+            org,
+            name="datetime_calc",
+            description="日期计算：now/add_days/weekday/days_between。",
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "op": {"type": "string", "enum": ["now", "add_days", "weekday", "days_between"]},
+                    "date": {"type": "string", "description": "YYYY-MM-DD，默认今天"},
+                    "days": {"type": "integer", "description": "add_days 天数"},
+                    "other": {"type": "string", "description": "days_between 另一日期"},
+                },
+                "required": ["op"],
+            },
+            tool_type="execution",
+            require_confirm=False,
+            idempotent=False,
+            enabled=True,
+        )
+        await _get_or_create_tool(
+            session,
+            org,
+            name="unit_converter",
+            description="单位换算：length/weight/temperature/speed。",
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "enum": ["length", "weight", "temperature", "speed"]},
+                    "value": {"type": "number"},
+                    "from_unit": {"type": "string"},
+                    "to_unit": {"type": "string"},
+                },
+                "required": ["category", "value", "from_unit", "to_unit"],
+            },
+            tool_type="execution",
+            require_confirm=False,
+            idempotent=False,
+            enabled=True,
+        )
+        await _get_or_create_tool(
+            session,
+            org,
+            name="weather",
+            description="查询天气（wttr.in，需 fetch_url_allowlist 授权）。",
+            params_schema={
+                "type": "object",
+                "properties": {"location": {"type": "string", "description": "城市名/拼音/坐标"}},
+                "required": ["location"],
+            },
+            tool_type="perception",
+            require_confirm=False,
+            idempotent=False,
+            enabled=False,
+        )
+        # 单通用 Agent：挂齐感知/派发/占位演示/实用工具（fetch_url/analyze_image/weather 默认关，启用后开放）
         agent_tools = [
             "tl_time_now",
             "tl_demo_notify",
@@ -394,6 +468,10 @@ async def main() -> None:
             "tl_analyze_image",
             "tl_dispatch_subagent",
             "tl_initiate_demo",
+            "tl_calculator",
+            "tl_datetime_calc",
+            "tl_unit_converter",
+            "tl_weather",
         ]
         agent = await _get_or_create_agent(
             session, org, name=AGENT_NAME, prompt=AGENT_SYSTEM_PROMPT, tool_ids=agent_tools, is_default=True
