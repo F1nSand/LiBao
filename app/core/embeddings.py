@@ -67,7 +67,7 @@ class EmbeddingService:
                     raise AppError(ERR_INTERNAL, "embedding API key 配置错误（401）")
                 if resp.status_code != 200:
                     last_exc = RuntimeError(f"embedding HTTP {resp.status_code}")
-                    if resp.status_code in (429, *range(500, 600)) and attempt < _MAX_RETRIES:
+                    if (resp.status_code == 429 or resp.status_code >= 500) and attempt < _MAX_RETRIES:
                         await asyncio.sleep(self._backoff(attempt))
                         continue
                     break

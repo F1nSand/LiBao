@@ -68,15 +68,14 @@ class NotificationService:
         await db.refresh(row)
         return row
 
-    @staticmethod
-    async def maybe_notify_from_tool_results(db: AsyncSession, user_id: uuid.UUID, final_state: dict[str, Any]) -> None:
-        """demo_notify 确认执行后落一条通知（确认后工具结果 status=done）。"""
-        for r in final_state.get("tool_results") or []:
-            if r.get("tool_name") == "tl_demo_notify" and r.get("status") == "done":
-                await NotificationService().create(
-                    db,
-                    user_id=user_id,
-                    title="通知已送达",
-                    body=str((r.get("input") or {}).get("message", "") or "工具已执行"),
-                    level="success",
-                )
+async def maybe_notify_from_tool_results(db: AsyncSession, user_id: uuid.UUID, final_state: dict[str, Any]) -> None:
+    """demo_notify 确认执行后落一条通知（确认后工具结果 status=done）。"""
+    for r in final_state.get("tool_results") or []:
+        if r.get("tool_name") == "tl_demo_notify" and r.get("status") == "done":
+            await NotificationService().create(
+                db,
+                user_id=user_id,
+                title="通知已送达",
+                body=str((r.get("input") or {}).get("message", "") or "工具已执行"),
+                level="success",
+            )

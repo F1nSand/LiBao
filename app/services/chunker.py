@@ -15,8 +15,8 @@ def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]
     if overlap < 0:
         overlap = 0
     step = chunk_size - overlap
-    if step <= 0:  # 防御：chunk_size=0 或 overlap=chunk_size-1 后 step 仍 ≤0
-        return [text] if text else []
+    if step <= 0:  # 防御：chunk_size=0 或 overlap=chunk_size-1 后 step 仍 ≤0（text 已在上方保证非空）
+        return [text]
     chunks: list[str] = []
     start = 0
     n = len(text)

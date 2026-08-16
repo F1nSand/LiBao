@@ -6,7 +6,12 @@ import uuid
 import pytest
 
 from app.core.security import hash_password
-from app.services.notification import NotificationService, subscribe_notifications, unsubscribe_notifications
+from app.services.notification import (
+    NotificationService,
+    maybe_notify_from_tool_results,
+    subscribe_notifications,
+    unsubscribe_notifications,
+)
 from app.services.task import TaskService
 from app.storage.db import init_db
 from app.storage.models import AgentConfig, Org, User
@@ -96,7 +101,7 @@ async def test_demo_notify_tool_result_creates_notification(notif_fixture):
         ]
     }
     async with sessionmaker() as session:
-        await NotificationService.maybe_notify_from_tool_results(session, user.id, final_state)
+        await maybe_notify_from_tool_results(session, user.id, final_state)
     async with sessionmaker() as session:
         data = await NotificationService().list_paged(session, user.id, 1, 20)
         assert data["total"] == 1

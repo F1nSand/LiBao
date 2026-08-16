@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.events import sse_emitter
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
 from app.services.memory import MemoryService
-from app.services.notification import NotificationService
+from app.services.notification import maybe_notify_from_tool_results
+from app.services.serializers import serialize_message
 from app.services.task import TaskService, push_event
 from app.storage.models.agent import AgentConfig
 from app.storage.models.attachment import Attachment
@@ -44,19 +45,6 @@ async def _backfill_attachments(
     )
 
 logger = logging.getLogger(__name__)
-
-
-def _message_dict(msg: Message) -> dict[str, Any]:
-    return {
-        "id": str(msg.id),
-        "role": msg.role,
-        "content": msg.content,
-        "tool_calls": msg.tool_calls or [],
-        "token_usage": msg.token_usage,
-        "attachments": msg.attachments or [],
-        "trace_id": msg.trace_id,
-        "created_at": msg.created_at.isoformat() if msg.created_at else None,
-    }
 
 
 def _graph_config(
@@ -174,7 +162,7 @@ async def chat_stream_events(
         )
         await ConversationRepository(db).touch_last_message(conversation.id)
         await db.commit()
-        return _done_payload(assistant_msg_id, fm.get("token_usage") or totals, _message_dict(assistant_msg))
+        return _done_payload(assistant_msg_id, fm.get("token_usage") or totals, serialize_message(assistant_msg))
 
     async for frame in stream_graph_events(
         graph=graph,
@@ -284,9 +272,11 @@ async def resume_stream_events(
             push_event(str(task.id), "cancelled", {"status": "cancelled"})
             await db.commit()  # 拒绝分支无 set_done：此处落消息持久化（E5）
         # 2d：demo_notify 确认执行后落通知（工具结果产生源）
-        await NotificationService.maybe_notify_from_tool_results(db, user.id, final_state)
+        await maybe_notify_from_tool_results(db, user.id, final_state)
         return _done_payload(
-            assistant_msg_id, fm.get("token_usage") or totals, _message_dict(assistant_msg) if assistant_msg else None
+            assistant_msg_id,
+            fm.get("token_usage") or totals,
+            serialize_message(assistant_msg) if assistant_msg else None,
         )
 
     async def on_error(exc: Exception) -> None:

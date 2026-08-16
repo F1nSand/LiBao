@@ -238,7 +238,6 @@ class KbRepository:
                     texts.setdefault(cid, text)
             except Exception as exc:  # noqa: BLE001  语义通道故障 → 降级 bm25-only（不击穿检索）
                 logger.warning("semantic channel degraded to bm25-only: %s", exc)
-                semantic_on = False
         if bm25_on:
             for rank, (cid, text, _ts) in enumerate(await self.bm25_search(org_id, collection_ids, query), 1):
                 scores[cid] += 1 / (_RRF_K + rank)

@@ -26,11 +26,6 @@ def _resolve_model(state: AgentState, config: Optional[RunnableConfig]) -> Any: 
     return LLMService.build_model(agent.get("model"))
 
 
-def _text_of(response: Any) -> str:
-    """提取最终回答文本（兼容 content 为 str 或 content blocks 列表）。"""
-    return message_text(getattr(response, "content", ""))
-
-
 async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig] = None) -> dict[str, Any]:  # noqa: UP045  LangGraph 需 Optional 形式
     agent = state.get("agent_config", {})
     trace_id = (config or {}).get("configurable", {}).get("trace_id")
@@ -73,7 +68,7 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
                 "type": "llm",
                 "trace_id": trace_id,
                 "input": {"model": agent.get("model"), "tool_count": len(active_tools)},
-                "output": {"content": _text_of(response)[:500]},
+                "output": {"content": message_text(getattr(response, "content", ""))[:500]},
                 "token_usage": token_usage,
                 "duration_ms": duration_ms,
                 "status": "ok",

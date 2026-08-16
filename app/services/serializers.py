@@ -62,6 +62,33 @@ def serialize_message(msg: Message) -> dict[str, Any]:
     }
 
 
+def serialize_trajectory_node(m: Message, seq: int) -> dict[str, Any]:
+    """消息 → TrajectoryNode（docs 03 §5.2.1 / FrontEnd TrajectoryNode）。"""
+    tool_calls = [
+        {
+            "tool_call_id": tc.get("tool_call_id"),
+            "tool_name": tc.get("tool_name"),
+            "input": tc.get("input"),
+            "output": tc.get("output"),
+            "ok": tc.get("ok"),
+            "duration_ms": tc.get("duration_ms", 0),
+            "position": tc.get("position", 0),
+        }
+        for tc in (m.tool_calls or [])
+    ]
+    return {
+        "seq": seq,
+        "kind": m.role,  # user/assistant（context/steering/compaction 为 mock 扩展，真实无）
+        "time": int(m.created_at.timestamp() * 1000) if m.created_at else 0,
+        "content": m.content,
+        "thinking": None,  # 未单独存推理链
+        "diff": None,  # 无 context/system 更新差异
+        "token_usage": m.token_usage,
+        "trace_id": m.trace_id,
+        "tool_calls": tool_calls,
+    }
+
+
 def serialize_agent(agent: AgentConfig) -> dict[str, Any]:
     return {
         "id": str(agent.id),
@@ -255,6 +282,20 @@ def serialize_eval_result(r: EvalResult) -> dict[str, Any]:
         "actual": r.actual,
         "pass": r.pass_,
         "score": r.score,
+    }
+
+
+def serialize_trace_event(log: RunLog) -> dict[str, Any]:
+    """RunLog → TraceEvent（docs 03 §5.8 / FrontEnd TraceEvent）。"""
+    return {
+        "node_type": log.type,  # llm/tool/retrieval/memory/node
+        "name": log.node,
+        "status": "success" if log.status == "ok" else "failed",
+        "token_usage": log.token_usage,
+        "duration_ms": log.duration_ms,
+        "input": log.input,
+        "output": log.output,
+        "ts": int(log.created_at.timestamp() * 1000) if log.created_at else 0,
     }
 
 

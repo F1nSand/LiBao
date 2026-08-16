@@ -5,8 +5,7 @@ import uuid
 
 import pytest
 
-from app.api.routers.system import _trace_event
-from app.services.serializers import serialize_run_log
+from app.services.serializers import serialize_run_log, serialize_trace_event
 from app.storage.db import init_db
 from app.storage.repositories.run_log import RunLogRepository
 from tests.conftest import requires_db
@@ -67,7 +66,7 @@ async def test_trace_events(log_fixture):
     async with sessionmaker() as session:
         repo = RunLogRepository(session)
         logs = await repo.list_by_trace_id(f"tr_{uid}")
-        events = [_trace_event(lg) for lg in logs]
+        events = [serialize_trace_event(lg) for lg in logs]
         assert sorted(e["node_type"] for e in events) == ["llm", "tool"]
         assert sorted(e["status"] for e in events) == ["failed", "success"]
         assert all(e["ts"] > 0 for e in events)

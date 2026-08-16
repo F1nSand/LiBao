@@ -117,12 +117,12 @@ async def run_eval(graph: Any, sessionmaker: Any, eval_run_id: uuid.UUID, model_
         await db.commit()
 
         cases = await repo.list_active_cases(run.eval_set_id)
-        pass_flags: list[bool] = []
+        passed_count = 0
         try:
             for i, case in enumerate(cases, 1):
                 actual = await _run_single_case(graph, agent, case.input, str(eval_set.org_id), model_override)
                 passed, score = await _judge(case.input, case.expected, actual, model_override)
-                pass_flags.append(passed)
+                passed_count += int(passed)
                 await repo.create_result(
                     run_id=run.id, case_id=case.id, input=case.input, expected=case.expected,
                     actual=actual, pass_=passed, score=score,
@@ -130,7 +130,7 @@ async def run_eval(graph: Any, sessionmaker: Any, eval_run_id: uuid.UUID, model_
                 run.progress = round(i / len(cases), 3)
                 await db.commit()
             run.status = "done"
-            run.pass_rate = round(sum(pass_flags) / len(cases), 4) if cases else 0.0
+            run.pass_rate = round(passed_count / len(cases), 4) if cases else 0.0
             await db.commit()
         except Exception as exc:  # noqa: BLE001  任一 case 崩溃 → run failed（记录）
             logger.warning("eval run %s failed: %s", eval_run_id, exc)

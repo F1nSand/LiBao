@@ -72,7 +72,7 @@ async def test_create_duplicate_username_40001(user_fixture):
             await svc.create_user(
                 session, username=admin.username, password="p", name="x", role="viewer", org_id=org.id
             )
-        assert exc.value.code == 40001
+        assert exc.value.code == 40906
 
 
 async def test_change_role_and_status_and_delete(user_fixture):

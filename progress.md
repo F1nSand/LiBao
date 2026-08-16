@@ -70,8 +70,44 @@
 ### 已核实合规（勿重审）
 hybrid_search RRF 叠加/降级语义、_indexed_filter join、ContextVar 无泄漏、graph after_tool steps 守卫、memory_inject 静默降级、迁移与模型列一致（除 C7）、附件删除-分析竞态、embedding 分批、五层依赖主体、错误码场景、seed 幂等、前端契约主体（memory/kb/analysis/message.attachments 形状）
 
-## Gate3 Simplify（恢复后执行）
-四路并行（Reuse/Simplification/Efficiency/Altitude）审 `git diff 7ac4647..HEAD` → 合并去重 → 应用/跳过记录
+## Gate3 Simplify（2026-08-16 执行完成）
+四路并行（Reuse/Simplification/Efficiency/Altitude）审 `git diff 7ac4647..HEAD` → 合并去重（40 条→去重后 ~30）→ **应用 16 / 跳过 12**。
+
+### 应用（16 项，均为安全小改动）
+- `memory.py` `_content_to_text` → 复用 `stream_core.message_text`（删整函数，消除逐字重复）
+- `kb.py` hybrid_search 死赋值 `semantic_on=False` 删除（降级由独立分支天然实现）
+- 新建 `app/core/async_utils.py`：`spawn_background`+`log_task_failure` 收敛 kb/attachment 两处后台 spawn
+- `kb.py` 裸 40012/40011 → `ERR_DOCUMENT_TYPE_UNSUPPORTED`(新增别名)/`ERR_FILE_TOO_LARGE`
+- `user.py` 裸 40001 → 新增 `ERR_USERNAME_CONFLICT=40906`（与 collection 冲突码 40905 对齐；测试断言同步）
+- `memory.py` `_clamp_importance` 收敛 4 处钳位
+- `eval.py` `pass_flags` 列表 → `passed_count` 计数
+- `chunker.py` 冗余分支 `[text] if text else []` → `[text]`
+- `agent_execute.py` 删 `_text_of` 冗余 helper（直接用 `message_text`）
+- `context_builder.py` 删死代码 `static_prefix_aci`（全库无调用）
+- `task_run.py` 提取 `_mark_failed` 收敛 run/resume 异常兜底
+- `embeddings.py` `in (429,*range(500,600))` → `==429 or >=500`
+- `system.py` 提取 `_parse_iso`；`_trace_event` → `serializers.serialize_trace_event`
+- `serializers.py` 新增 `serialize_trajectory_node`（conversation.py 收敛，契约单一落地）
+- `chat_stream.py` `_message_dict` → `serialize_message`（done 消息契约单一落地）
+- `notification.py` `maybe_notify_from_tool_results` @staticmethod → 模块级函数
+
+### 跳过（12 项，记录理由）
+- SSE fanout 收敛（task.push_event vs notification.push_notification）：任务 live-tail 终态哨兵语义不同；M4 多实例按 README 接缝 Redis 重构 fanout，此刻收敛收益短
+- count 子查询 helper（user/notification/run_log 3 处）：3×3 行重复，抽象成本≈收益
+- eval `_parse_judge` 复用 `_extract_json`：两函数语义略不同（围栏/规范化），跨服务 import 增耦合
+- trajectory SQL 分页下推（Efficiency med）：limit=10000 上界足够开发量级；分页语义改动需更多测试，M4 长会话优化一并做
+- /system/cost SQL GROUP BY 聚合（Efficiency med）：开发量级日志量小，Python 聚合正确可读；前缀 provider 推导 SQL 复杂，M5 观测模块化
+- eval 各 case 并行 gather：后台评估非热路径；共享 session 并发写需重构，M4 队列
+- hybrid_search bm25 并行：收益有限（语义通道已主导）
+- run_logs/memory_trace 加索引：开发量级不可感，需迁移 0006，M5 增长时一并
+- Altitude 结构性项（get_cost→SystemService、run_eval spawn→service、_decode_text→service、_require_admin→deps、service import api paged）：结构性重构/既有模式，M6 RBAC 或 M5 观测模块化时做
+- `_backfill_attachments`→repo、`get_document_status`→serialize_kb_status、chat 附件校验→service：低价值小重构，本轮聚焦更高价值项
+
+### ✅ **M3 正式闭环**（三道 gate 全过）
+- Gate1 Test：207/207 + ruff clean ✅
+- Gate2 Review：14 项发现全部修复 ✅（commit 1c39d37）
+- Gate3 Simplify：应用 16 / 跳过 12（commit 待）✅
+- 状态：M3 记忆/知识库/附件 + 五组接口全部收尾，进入前后端联调阶段
 
 ## M3.5 契约对齐轮（2026-08-16，后端×前端并行，以 FrontEnd/types/api.ts + mock/server.ts 为事实源）
 

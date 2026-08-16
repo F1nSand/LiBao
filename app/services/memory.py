@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import ERR_LLM_FAILURE, ERR_MEMORY_NOT_FOUND, AppError
 from app.core.llm import LLMService
+from app.orchestration.stream_core import message_text
 from app.services.serializers import serialize_longterm_version, serialize_memory_trace
 from app.storage.models.memory import LongTermMemory
 from app.storage.repositories.memory import MemoryRepository
@@ -91,7 +92,7 @@ class MemoryService:
             content=body,
             title=title,
             tags=tags,
-            importance=max(0.0, min(1.0, importance)),
+            importance=_clamp_importance(importance),
         )
         await db.commit()
         return card
@@ -110,7 +111,7 @@ class MemoryService:
         if card is None:
             raise AppError(ERR_MEMORY_NOT_FOUND, "记忆卡片不存在")
         new_importance = importance if importance is not None else card.importance
-        await repo.add_version(card, content, max(0.0, min(1.0, new_importance)))
+        await repo.add_version(card, content, _clamp_importance(new_importance))
         await db.commit()
         return card
 
@@ -133,25 +134,14 @@ class MemoryService:
         return [serialize_longterm_version(v, card.title) for v in await MemoryRepository(db).list_versions(card.id)]
 
 
-def _content_to_text(content: Any) -> str:
-    """LLM content 规范化：str 直用；blocks 列表跳过 thinking 块（推理链），
-    保留 text 块与裸字符串块（DeepSeek v4-flash 会把最终输出放在末位裸 str 块）。"""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for b in content:
-            if isinstance(b, str):
-                parts.append(b)
-            elif isinstance(b, dict) and b.get("type") != "thinking":
-                parts.append(b.get("text", ""))
-        return "".join(parts)
-    return str(content)
+def _clamp_importance(value: float) -> float:
+    """importance 钳位到 [0,1]（四处共用，Simplify 收敛）。"""
+    return max(0.0, min(1.0, value))
 
 
 def _extract_json(text: Any) -> dict:
     """LLM 输出 → dict。剥 ```json 围栏，取首个 { 到末个 }（DeepSeek 推理模型会包 markdown）。"""
-    stripped = _content_to_text(text).strip()
+    stripped = message_text(text).strip()
     if stripped.startswith("```"):
         stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
         stripped = re.sub(r"\s*```$", "", stripped)
@@ -201,7 +191,7 @@ async def run_maintenance(db: AsyncSession, user_id: uuid.UUID, model: Any = Non
             if card is None:
                 continue
             importance = float(item.get("importance", card.importance))
-            await repo.add_version(card, item.get("content") or card.content, max(0.0, min(1.0, importance)))
+            await repo.add_version(card, item.get("content") or card.content, _clamp_importance(importance))
             updated += 1
         # create：新卡片（source=maintenance）
         for item in plan.get("create", []) or []:
@@ -210,7 +200,7 @@ async def run_maintenance(db: AsyncSession, user_id: uuid.UUID, model: Any = Non
                 user_id=user_id,
                 card_type=item.get("card_type", "note"),
                 content=item.get("content") or {},
-                importance=max(0.0, min(1.0, importance)),
+                importance=_clamp_importance(importance),
                 source="maintenance",
             )
             created += 1

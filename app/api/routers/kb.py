@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
 from app.api.schemas.kb import CreateCollectionRequest, KbSearchRequest, KbStatusRequest
-from app.core.errors import AppError
+from app.core.errors import ERR_DOCUMENT_TYPE_UNSUPPORTED, AppError
 from app.services.kb import KbService
 from app.services.serializers import kb_document_progress, serialize_kb_collection, serialize_kb_document
 from app.storage.models.user import User
@@ -22,7 +22,7 @@ def _decode_text(data: bytes) -> str:
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise AppError(40012, f"文件不是有效的 UTF-8 文本: {exc}") from exc
+        raise AppError(ERR_DOCUMENT_TYPE_UNSUPPORTED, f"文件不是有效的 UTF-8 文本: {exc}") from exc
 
 
 @router.get("/kb/collections")

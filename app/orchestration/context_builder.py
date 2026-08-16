@@ -10,12 +10,7 @@ from langchain_core.messages import BaseMessage, SystemMessage
 from app.core.config import get_settings
 from app.core.prefix import compute_prefix_hash  # noqa: F401  重导出供 seed/测试复用
 from app.orchestration.state_schema import AgentState
-from app.tools.registry import ToolSpec, acis, agent_can_use, get, get_by_name
-
-
-def static_prefix_aci() -> list[dict]:
-    """全部工具 ACI（静态前缀之②），按 id 排序。"""
-    return acis()
+from app.tools.registry import ToolSpec, agent_can_use, get, get_by_name
 
 
 def _authorized_specs(tool_ids: list[str], id_set: set[str]) -> list[ToolSpec]:

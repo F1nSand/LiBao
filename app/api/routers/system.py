@@ -12,8 +12,7 @@ from app.api.envelope import ok
 from app.api.schemas.common import paged
 from app.core.config import get_settings
 from app.core.cost import provider_for
-from app.services.serializers import serialize_run_log
-from app.storage.models.run_log import RunLog
+from app.services.serializers import serialize_run_log, serialize_trace_event
 from app.storage.models.user import User
 from app.storage.repositories.run_log import RunLogRepository
 
@@ -21,6 +20,10 @@ router = APIRouter()
 
 # 前端 level → run_log.status 映射（run_log 无 level 列，用 status 承载成功/失败语义）
 _LEVEL_TO_STATUS = {"INFO": "ok", "WARNING": "retried", "ERROR": "error"}
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
 
 
 @router.get("/system/health")
@@ -41,8 +44,8 @@ async def list_logs(
     db: AsyncSession = Depends(get_db),
 ):
     status = _LEVEL_TO_STATUS.get((level or "").upper())
-    start_dt = datetime.fromisoformat(start) if start else None
-    end_dt = datetime.fromisoformat(end) if end else None
+    start_dt = _parse_iso(start)
+    end_dt = _parse_iso(end)
     repo = RunLogRepository(db)
     items, total = await repo.list_paged(
         limit=page_size, offset=(page - 1) * page_size, trace_id=trace_id, status=status, start=start_dt, end=end_dt
@@ -59,8 +62,8 @@ async def get_cost(
     db: AsyncSession = Depends(get_db),
 ):
     """成本/调用量统计（docs 03 §5.8 CostStat）：token_usage.cost 聚合（2h）。"""
-    start_dt = datetime.fromisoformat(start) if start else None
-    end_dt = datetime.fromisoformat(end) if end else None
+    start_dt = _parse_iso(start)
+    end_dt = _parse_iso(end)
     logs = await RunLogRepository(db).list_llm_in_range(start=start_dt, end=end_dt)
     total_cost = 0.0
     calls = 0
@@ -99,18 +102,4 @@ async def get_trace(
 ):
     """单 trace 全链路时间线（TraceTimeline 消费）。"""
     logs = await RunLogRepository(db).list_by_trace_id(trace_id)
-    return ok({"trace_id": trace_id, "events": [_trace_event(lg) for lg in logs]})
-
-
-def _trace_event(log: RunLog) -> dict:
-    """RunLog → TraceEvent（docs 03 §5.8 / FrontEnd TraceEvent）。"""
-    return {
-        "node_type": log.type,  # llm/tool/retrieval/memory/node
-        "name": log.node,
-        "status": "success" if log.status == "ok" else "failed",
-        "token_usage": log.token_usage,
-        "duration_ms": log.duration_ms,
-        "input": log.input,
-        "output": log.output,
-        "ts": int(log.created_at.timestamp() * 1000) if log.created_at else 0,
-    }
+    return ok({"trace_id": trace_id, "events": [serialize_trace_event(lg) for lg in logs]})

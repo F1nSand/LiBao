@@ -5,8 +5,6 @@
 """
 from __future__ import annotations
 
-import asyncio
-import logging
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +14,8 @@ from app.core.errors import (
     ERR_COLLECTION_NAME_CONFLICT,
     ERR_COLLECTION_NOT_FOUND,
     ERR_DOCUMENT_NOT_FOUND,
+    ERR_DOCUMENT_TYPE_UNSUPPORTED,
+    ERR_FILE_TOO_LARGE,
     ERR_PARAM_MISSING,
     ERR_TASK_RUNNING,
     AppError,
@@ -23,8 +23,6 @@ from app.core.errors import (
 from app.storage.models.kb import KbCollection, KbDocument
 from app.storage.models.user import User
 from app.storage.repositories.kb import KbRepository
-
-logger = logging.getLogger(__name__)
 
 _ALLOWED_TYPES = {"text/plain", "text/markdown"}
 
@@ -88,9 +86,9 @@ class KbService:
         """上传（内容已由路由从 multipart 提取）；校验类型/大小 → uploaded → 触发后台链。"""
         coll = await self.get_collection(db, user, collection_id)
         if content_type not in _ALLOWED_TYPES:
-            raise AppError(40012, f"文档类型不支持: {content_type}（仅 txt/md）")
+            raise AppError(ERR_DOCUMENT_TYPE_UNSUPPORTED, f"文档类型不支持: {content_type}（仅 txt/md）")
         if size_bytes > get_settings().max_upload_mb * 1024 * 1024:
-            raise AppError(40011, f"文件超过 {get_settings().max_upload_mb}MB 限制")
+            raise AppError(ERR_FILE_TOO_LARGE, f"文件超过 {get_settings().max_upload_mb}MB 限制")
         if not content:
             raise AppError(ERR_PARAM_MISSING, "文档内容为空")  # S8：空内容属参数缺失，非超长
         doc = await KbRepository(db).create_document(
@@ -155,21 +153,9 @@ class KbService:
         return await KbRepository(db).hybrid_search(user.org_id, coll_ids, query, top_k, hybrid)
 
 
-def _log_task_failure(task: asyncio.Task) -> None:
-    """后台任务异常观测（C5）：create_task 丢弃引用，异常会静默——done_callback 兜底记录。"""
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.warning("后台任务失败: %s", exc)
-
-
 def _spawn_pipeline(document_id: uuid.UUID) -> None:
     """经 sessionmaker 桥触发后台处理链（桥未设时静默：状态停留 uploaded，轮询可见）。"""
+    from app.core.async_utils import spawn_background
     from app.services.kb_pipeline import process_document
-    from app.storage.db import get_sessionmaker
 
-    sessionmaker = get_sessionmaker()
-    if sessionmaker is not None:
-        t = asyncio.create_task(process_document(sessionmaker, document_id))
-        t.add_done_callback(_log_task_failure)
+    spawn_background(process_document, document_id)

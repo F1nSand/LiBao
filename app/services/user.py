@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ERR_USER_NOT_FOUND, AppError
+from app.core.errors import ERR_USER_NOT_FOUND, ERR_USERNAME_CONFLICT, AppError
 from app.core.security import hash_password, verify_password
 from app.services.serializers import serialize_user
 from app.storage.models.user import User
@@ -49,7 +49,7 @@ class UserService:
     ) -> User:
         repo = UserRepository(db)
         if await repo.get_by_username(username) is not None:
-            raise AppError(40001, f"用户名 {username} 已存在")
+            raise AppError(ERR_USERNAME_CONFLICT, f"用户名 {username} 已存在")
         row = await repo.create(
             username=username, password_hash=hash_password(password), name=name, role=role, org_id=org_id
         )
