@@ -41,7 +41,9 @@ async function onCancel(id: string) {
       <el-table-column prop="id" label="ID" width="110">
         <template #default="{ row }"><span class="mono">{{ row.id }}</span></template>
       </el-table-column>
-      <el-table-column prop="agent_id" label="Agent" width="100" />
+      <el-table-column label="Agent" width="100">
+        <template #default>通用 Agent</template>
+      </el-table-column>
       <el-table-column label="状态" width="110">
         <template #default="{ row }"><StatusTag :status="row.status" /></template>
       </el-table-column>

@@ -88,7 +88,7 @@ onMounted(() => sse.connect())
 
     <el-progress :percentage="task.progress ?? 0" class="task-progress" />
 
-    <div class="task-row"><span class="task-label">Agent</span><span>{{ task.agent_id }}</span></div>
+    <div class="task-row"><span class="task-label">Agent</span><span>通用 Agent</span></div>
     <div class="task-row"><span class="task-label">输入</span><JsonViewer :data="task.input" /></div>
     <div v-if="task.output !== undefined" class="task-row"><span class="task-label">输出</span><JsonViewer :data="task.output" /></div>
 

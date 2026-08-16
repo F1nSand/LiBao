@@ -77,16 +77,7 @@ export async function openSseStream(url: string, init: OpenSseInit, h: SseHandle
   h.onClose?.()
 }
 
-/** 对话流式：POST /api/v1/chat/stream */
-export async function streamChat(
-  req: ChatRequest,
-  h: SseHandlers,
-  signal?: AbortSignal,
-): Promise<void> {
-  return streamChatAt('/api/v1/chat/stream', req, h, signal)
-}
-
-/** 流式到指定 URL（默认 POST /chat/stream；可传任意 SSE 端点） */
+/** 对话流式：POST 到指定 SSE 端点（chat/stream / tasks/{id}/resume） */
 export async function streamChatAt(
   url: string,
   req: ChatRequest,

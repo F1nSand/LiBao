@@ -2,8 +2,6 @@
 
 export type Role = 'admin' | 'developer' | 'viewer'
 
-export type AgentStatus = 'idle' | 'running' | 'thinking' | 'waiting_confirm' | 'done' | 'failed'
-
 export type TaskStatus = 'pending' | 'running' | 'waiting_confirm' | 'cancelled' | 'done' | 'failed'
 
 export type ToolType = 'perception' | 'execution' | 'collaboration' | 'user_comms' | 'event' | 'agent_control'

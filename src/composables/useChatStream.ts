@@ -77,7 +77,7 @@ export interface UseChatStreamOptions {
 
 export interface UseChatStreamReturn {
   state: StreamState
-  start(req: ChatRequest, endpoint?: string): Promise<void>
+  start(req: ChatRequest): Promise<void>
   stop(): void
   confirmInterrupt(approved: boolean, extra?: Record<string, unknown>): Promise<void>
   reset(): void
@@ -305,12 +305,12 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     clearAllTimers()
   }
 
-  async function start(req: ChatRequest, endpoint?: string): Promise<void> {
+  async function start(req: ChatRequest): Promise<void> {
     reset()
     state.streaming = true
     controller = new AbortController()
     try {
-      await streamChatAt(endpoint ?? '/api/v1/chat/stream', req, { onEvent: applyEvent, onError }, controller.signal)
+      await streamChatAt('/api/v1/chat/stream', req, { onEvent: applyEvent, onError }, controller.signal)
     } finally {
       // 静默关流（无 done/error）兜底：避免 streaming 卡 true 导致输入框永久禁用
       if (!state.finished) state.streaming = false

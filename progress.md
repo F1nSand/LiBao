@@ -7,6 +7,21 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[done] 2026-08-17 · ←后端 | **通用助手实用工具包**（269 测试全绿 + verify 14/8/6）| 前端零改动（工具卡自动渲染）。
+      - 新增 4 个内置工具：`calculator`（安全算术，默认开）、`datetime_calc`（日期计算）、`unit_converter`（单位换算）、`weather`（wttr.in 天气，默认关需 allowlist 授权）。
+      - 聊天发「用计算器算 / 今天加 3 天 / 5 公里是多少米 / 北京天气」即可触发对应工具卡；/tools 管理页可管理启停。
+
+[done] 2026-08-17 · →后端 | **评估管理前端已接线**（EvalManage 组件 + 死代码 createEvalSet/addEvalCase/patchEvalCase/listEvalRuns 全激活）| 与你 M5 契约对接，真实后端验证通过。
+      实现：评估集 CRUD（新建/重命名/删除）、用例管理（列表/添加/layer/启用开关/删除）、运行历史列表 + 选中回看结果、配对比较（候选 vs 基线矩阵 + 汇总 W/L/T/Δ）。
+      types 对齐：EvalCase.layer、EvalRun.baseline_run_id、EvalCaseResult.latency_ms/cost、PairwiseDetail。
+      实测（:8000 真实后端）：smoke_eval/m5_core/契约验证集 渲染、smoke_eval 8 用例、82 条运行历史、配对「候选 88% vs 基线 75% Δ12.5% 矩阵 8 行」；0 评估接口错误。
+[done] 2026-08-17 · ←后端 | **M5 评估与观测完整化 + M6 前开放项**（后端全绿）| 前端 /system 评估页可增强（评估集管理/用例/配对视图），hooks 无需前端。
+      - **评估新端点**（docs 03 §5.8 + 06 §2.4）：`GET /system/evals/sets/{id}/cases`（用例列表，含 layer）、`PUT/DELETE /sets/{id}`、`DELETE /sets/{id}/cases/{case_id}`、`POST /system/evals/run` 带可选 `baseline_run_id`、**`GET /system/evals/runs/{run_id}/pairwise?baseline_run_id=X`**（配对比较：逐题胜负矩阵 + summary{wins/losses/ties/delta/pass_rates}）。
+      - **评估集 seed**：`smoke_eval`（8 条）+ `m5_core`（20 条 L1-L5 分层）已建；`EvalResult` 现在带 `latency_ms`/`cost`；`EvalCase` 带 `layer`。
+      - `scripts/verify_eval.sh`（评估回归 e2e，真实 LLM）+ CI `evaluation-regression` job（LLM_API_KEY secret 时跑）。
+      - **hooks/webhook**（docs 03 §5.10）：`POST /hooks/{tool_id}/register|GET /hooks|DELETE /hooks/{tool_id}`（JWT）+ 公开 `POST /hooks/{tool_id}`（x-hook-token + x-idempotency-key）。事件入队 → 对话下一轮模型看到（紧急事件置顶）。
+      - 前端可选增强：评估集管理 UI（建集/用例增删停用）、运行历史列表、配对矩阵视图（`createEvalSet/addEvalCase/patchEvalCase/listEvalRuns` 死代码正好接线）；hooks 管理页（可选）。
+
 [done] 2026-08-17 · ←后端 | **M4 完整版落地 + verify_subagent.sh 回归**（239 测试全绿 + ruff 全绿）| 前端占位卡逻辑已实现，预期零改动。
       - `scripts/verify_subagent.sh`：登录 → 无 agent_id 建会话 → 派发 research → 断言 2 条 agent_switch + done（8/8 全绿）。前端可运行验证。
       - **tool_result 现在可能带 `placeholder:true + job_ref`**（新内置 `initiate_demo` 工具：立即返回占位卡 → 后台约 N 秒 → 回填 `placeholder:false` 同 job_ref 真值卡）。你前端占位/TTL 卡逻辑已实现，无需改；契约见 docs 03 §3.5。
@@ -298,3 +313,18 @@
 - 测试：+7 markdown（4 splitStreaming + 3 renderStreaming）+ 3 MessageBubble（活动区在上、流式拆分、用户消息无活动区）；MarkdownRenderer.spec 改 streaming 断言；119 单测 PASS。
 - 验证：typecheck ✓ / lint 0err / **119 单测 PASS** / **21 e2e PASS** / DOM 手测（mock 非 fast）：流式中 `.msg-activity .tool-card` + markdown-body 渐进渲染；完成后活动区在气泡上方、重试按钮 0、stream-tail 残留 0；计算路径中断确认后同样无重试按钮；0 页面错误。
 - 不做（记录）：工具活动区折叠/收起（用户要求可见递进）；工具卡展开参数回放；中断弹窗/composer/SSE 层不动；后端 thinking 发射（另一 agent）。
+
+## 2026-08-17 批量推进（L2/L3 混合）：真实后端验证 + 前端清理 + M5 评估管理
+用户离开期间自主推进（P1→P4）：
+- **P1 真实后端验证对话显示优化**：:5174 发「帮我调研 SSE」→ 活动区 2 条 agent 切换 + dispatch_subagent 行 + 回复气泡完整 markdown 调研报告，0 错误。
+- **P2 前端遗留清理**：删 `useChatStream.start` 死 endpoint 参数 + `sse.ts` 死 `streamChat` 导出（含 spec mock 对齐）；删 `domain.ts` 未用 `AgentStatus`；TaskList/TaskDetail Agent 列改显「通用 Agent」（消 uuid 噪音）。
+- **P3 M5 评估管理前端补全**（后端 M5 已提交契约）：
+  - types 对齐：EvalCase.layer、EvalRun.baseline_run_id、EvalCaseResult.latency_ms/cost、新增 PairwiseMatrixRow/Summary/Detail
+  - api/system.ts：updateEvalSet/deleteEvalSet/listEvalCases/deleteEvalCase/getPairwise + runEval 带 baseline_run_id（激活原死代码 createEvalSet/addEvalCase/patchEvalCase/listEvalRuns）
+  - store：evalCases/pairwise 状态 + 集/用例 CRUD + loadEvalRuns + loadPairwise
+  - 新组件 `src/components/system/EvalManage.vue`：评估集 CRUD、用例管理（layer/启用/删除）、运行历史 + 回看、配对比较（矩阵 + W/L/T/Δ 汇总）；SystemView 评估 tab 改挂 EvalManage
+  - mock：补 PUT/DELETE set、GET/DELETE cases、pairwise 路由 + 模块级 mockEvalCases
+  - 验证：真实后端 smoke_eval/m5_core/契约验证集 渲染、8 用例、82 运行、配对矩阵 8 行，0 评估接口错误
+- **P4 gate**：typecheck ✓ / lint 0err / **120 单测 PASS** / **21 e2e PASS**；docs/02（/system 行、system store 行、组件表加 EvalManage）+ progress.md + 交接板同步。
+- 排障记录：EvalManage 真实后端验证时偶现 `/auth/login` 500——隔离复现不了（干净直达 /chat），发生在登录端点非评估调用，判为后端重启竞态的环境瞬态，非代码问题。
+- 不做（记录）：Provider 配置表单（后端无 Provider API，做=死表单，等补端点）；工作区内部设计（用户已定不做）；hooks/webhook 管理页（后端 M6 前开放项，本轮未做，留待后续）。

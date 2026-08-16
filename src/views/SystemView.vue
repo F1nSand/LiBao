@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
 import { useSystemStore } from '@/stores/system'
-import { runEval as apiRunEval } from '@/api/system'
-import { swallowNotImplemented } from '@/utils/http-envelope'
 import { formatDate } from '@/utils/format'
-import type { EvalCaseResult, SystemLog } from '@/types'
+import type { SystemLog } from '@/types'
 import TraceTimeline from '@/components/business/TraceTimeline.vue'
 import CostChart from '@/components/business/CostChart.vue'
+import EvalManage from '@/components/system/EvalManage.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
 /** 系统监控/日志（docs/02 §4 / docs/03 §5.8）：运行日志 + trace + 评估 + 成本 */
@@ -17,12 +15,9 @@ const tab = ref('logs')
 const logsFilter = reactive({ trace_id: '', level: '' })
 const traceDrawer = ref(false)
 const activeTraceId = ref<string | null>(null)
-const evalRunLoading = ref(false)
-const runResult = ref<{ run: { id: string }; results: EvalCaseResult[] } | null>(null)
 
 onMounted(() => {
   void store.listLogs()
-  void store.listEvals()
   void store.loadCost()
 })
 
@@ -36,40 +31,6 @@ async function searchLogs() {
 function openTrace(traceId: string) {
   activeTraceId.value = traceId
   traceDrawer.value = true
-}
-
-/** 评估运行轮询（docs/03 §5.8 后台链）：POST /run 即返回 running，结果后台逐 case 落库 → 轮询至终态 */
-const EVAL_POLL_INTERVAL_MS = 2500
-const EVAL_POLL_TIMEOUT_MS = 120_000
-const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
-
-async function onRunEval(evalSetId: string) {
-  evalRunLoading.value = true
-  try {
-    const run = await swallowNotImplemented(apiRunEval(evalSetId))
-    if (!run) {
-      ElMessage.warning('后端暂未实现评估运行接口')
-      return
-    }
-    const deadline = Date.now() + EVAL_POLL_TIMEOUT_MS
-    let detail = await swallowNotImplemented(store.evalRunDetail(run.id))
-    while (detail && detail.run.status !== 'done' && detail.run.status !== 'failed' && Date.now() < deadline) {
-      await delay(EVAL_POLL_INTERVAL_MS)
-      detail = await swallowNotImplemented(store.evalRunDetail(run.id))
-    }
-    if (!detail) {
-      ElMessage.warning('后端暂未实现评估结果接口')
-      return
-    }
-    runResult.value = detail
-    if (detail.run.status === 'failed') {
-      ElMessage.error('评估运行失败')
-    } else {
-      ElMessage.success(`评估运行完成 · 通过率 ${Math.round((detail.run.pass_rate ?? 0) * 100)}%`)
-    }
-  } finally {
-    evalRunLoading.value = false
-  }
 }
 
 function onRowClick(row: SystemLog) {
@@ -119,32 +80,10 @@ function onRowClick(row: SystemLog) {
         <EmptyState v-else text="后端暂未实现运行日志接口" />
       </el-tab-pane>
 
-      <!-- 评估 -->
+      <!-- 评估（docs/02 §6.2 / docs 06 §2.4）：评估集/用例/运行历史/配对比较 -->
       <el-tab-pane label="评估" name="evals">
         <template v-if="!store.evalsUnavailable">
-        <div v-for="set in store.evalSets" :key="set.id" class="eval-set app-card">
-          <div class="eval-set-head">
-            <div>
-              <div class="eval-name">{{ set.name }}</div>
-              <div class="eval-desc">{{ set.description }}</div>
-            </div>
-            <div class="eval-meta">{{ set.case_count ?? 0 }} 用例</div>
-            <el-button size="small" type="primary" :loading="evalRunLoading" @click="onRunEval(set.id)">运行评估</el-button>
-          </div>
-        </div>
-        <div v-if="runResult" class="eval-result app-card">
-          <div class="eval-result-title">运行结果</div>
-          <el-table :data="runResult.results" size="small">
-            <el-table-column prop="input" label="输入" min-width="140" />
-            <el-table-column prop="expected" label="期望" min-width="120" />
-            <el-table-column prop="actual" label="实际" min-width="120" />
-            <el-table-column label="通过" width="80">
-              <template #default="{ row }">
-                <el-tag size="small" :type="row.pass ? 'success' : 'danger'">{{ row.pass ? 'PASS' : 'FAIL' }}</el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
+        <EvalManage />
         </template>
         <EmptyState v-else text="后端暂未实现评估接口" />
       </el-tab-pane>
