@@ -39,11 +39,11 @@ async def test_list_paged_and_filters(log_fixture):
     sessionmaker, uid = log_fixture
     async with sessionmaker() as session:
         repo = RunLogRepository(session)
-        items, total = await repo.list_paged(limit=20, offset=0)
-        assert total == 3
+        _, total = await repo.list_paged(limit=20, offset=0)
+        assert total >= 3  # 共享 DB：其他测试残留 run_logs，只断言下限
         items2, total2 = await repo.list_paged(limit=20, offset=0, trace_id=f"tr_{uid}")
         assert total2 == 2
-        items3, total3 = await repo.list_paged(limit=20, offset=0, status="error")
+        items3, total3 = await repo.list_paged(limit=20, offset=0, trace_id=f"tr_{uid}", status="error")
         assert total3 == 1
         assert items3[0].node == "tool_execute"
 
@@ -52,8 +52,9 @@ async def test_serialize_run_log_maps_level(log_fixture):
     sessionmaker, uid = log_fixture
     async with sessionmaker() as session:
         repo = RunLogRepository(session)
-        items, _ = await repo.list_paged(limit=20, offset=0)
-        by_status = {lg.status: lg for lg in items}
+        tr_logs, _ = await repo.list_paged(limit=20, offset=0, trace_id=f"tr_{uid}")
+        other_logs, _ = await repo.list_paged(limit=20, offset=0, trace_id=f"other_{uid}")
+        by_status = {lg.status: lg for lg in tr_logs + other_logs}
         assert serialize_run_log(by_status["ok"])["level"] == "INFO"
         assert serialize_run_log(by_status["error"])["level"] == "ERROR"
         assert serialize_run_log(by_status["retried"])["level"] == "WARNING"

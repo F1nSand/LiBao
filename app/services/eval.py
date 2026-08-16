@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 _JUDGE_PROMPT = """你是评估裁判。判断助手回答是否达成预期（仅判断是否满足，不看风格）。
 输入: {input}
 预期: {expected}
-助手回答: {actual or '(空)'}
+助手回答: {actual}
 只输出 JSON：{{"pass": true 或 false, "score": 0 到 1 的小数}}"""
 
 

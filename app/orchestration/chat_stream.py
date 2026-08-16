@@ -104,6 +104,7 @@ async def chat_stream_events(
     user_msg = await msg_repo.create(
         conversation_id=conversation.id, role="user", content=content, attachments=att_refs, trace_id=trace_id
     )
+    await db.flush()  # uuid4 default 在 flush 应用——回填/轨迹需 user_msg.id（C8 单事务内不 commit）
     if att_refs:
         await _backfill_attachments(db, [a["attachment_id"] for a in att_refs], conversation.id, user_msg.id)
     await MemoryService().record_trace(
