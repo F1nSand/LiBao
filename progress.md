@@ -139,6 +139,30 @@ hybrid_search RRF 叠加/降级语义、_indexed_filter join、ContextVar 无泄
 
 **验证状态**：ruff 全绿 + 迁移 0005 已应用（notifications+eval 四表）+ 全量 **207/207 通过**（Docker db 真实执行；修复轮 3 处失败：eval 模板非法 format 字段、C8 单事务需 flush 取 id、共享 DB 残留断言）。
 
+## M4 最小闭环（2026-08-16，任务与多 Agent）
+
+**前置**：完整性审计发现 M3 及之前 4 处未文档化缺口（hooks §5.10 / 事件裁决器 RM-9 入 M4；fetch_url / analyze_image / evals 路径 / CI 本轮补）。用户决策：补小的 + 大的入 M4；M4 先做最小闭环。
+
+**Phase A — M3 收尾补齐**（commit a14...）：
+- fetch_url 内置感知工具：httpx 只读抓取 + 出站白名单（Settings.fetch_url_allowlist fail-closed）+ HTML 清洗 + 注册(enabled=False) + seed；8 测试
+- analyze_image 工具化：`_analyze_content` 下移 `storage/attachment_analysis.py`（五层约束）+ 内置工具（sessionmaker 桥）+ 注册 + seed；5 测试
+- `GET /system/evals` 契约别名（commit 54893bd 修复：APIRouter 空路径路由不生效，改 system.py 全路径）
+- `.github/workflows/ci.yml`（ruff + alembic + pytest，pgvector/redis service）
+- README M4+ 接缝表补 hooks/事件裁决器标注
+- 注册重构：builtin/__init__ 幂等守卫改逐工具 `_register`；修复 test_tool_search 与内置撞名
+
+**Phase B — M4 最小闭环**（commit 40c7...，228/228 + ruff 全绿 + verify_m3.sh 14/14 + 实测冒烟）：
+- B0 `storage/redis.py`：命名单一来源（task:queue / task:evt:{id} / notif:user:{id} / idem:{key}）+ init/get/close + enqueue/brpop/idem + `pubsub_bridge`；lifespan init/close + worker 生命周期；conftest `requires_redis`
+- B1 任务队列 Redis：`TaskQueueService.enqueue_submit/enqueue_resume` + `task_worker`（BRPOP 消费分派 + trace_id 恢复）+ tasks.py 入队（Redis 挂降级 create_task）；实测：提交→入队→worker 消费→真实 LLM 作答→done ✅
+- B2 live-tail Redis Pub/Sub：push_event/subscribe/unsubscribe 改 async + Redis 广播（终态 `__end__` 哨兵 + 断线重连）+ 进程内回退；notification 同构；~14 处 push_event 补 await
+- B3 幂等 Redis：executor `_cache_get/_cache_put` async + Redis（TTL 1h，非 JSON 可序列化跳过）+ 进程内回退；幂等单测加 `_no_redis` 防跨 run 污染
+- B4+B5 agent_switch + proposer-reviewer：state_schema 加 drafts/agent_switch；stream_core updates 分支发 agent_switch；`subgraphs/proposer_reviewer.py` 三段协作（上下文隔离）；graph.py 条件分流（graph_template）+ build_initial_state 传 template
+- 修复 trajectory 测试确定性（created_at 同秒并列排序不稳定 → 显式递增时间戳）
+
+**验收达标**：异步任务跑通（Redis 队列 + worker + live-tail）；两个 Agent 协作产出（proposer→reviewer→summarize + agent_switch 事件，前端可渲染）。
+
+**M4 后续（完整版，用户说做好最小闭环再做）**：MCP 会话复用+任务亲和、max_concurrency 信号量、hooks/事件裁决器、initiate_* 占位符、取消 in-flight。
+
 ---
 
 # M2.5 历史（已完成，勿重做）
