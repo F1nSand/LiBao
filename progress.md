@@ -4,10 +4,17 @@
 > 本会话开始先读本节 → 处理 → 划掉。格式：[状态] 日期 · 方向 | 事项 | 期望/实际。
 > 方向：→ 后端（前端发现的契约缺口/后端 bug/需后端配合）；← 后端（后端给前端的事项）。
 
-[open] 2026-08-16 · →后端 | GET /system/evals/sets 404 | 期望 EvalSet[]（docs/03 §5.8）。
+> 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
+> 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
+
+[done] 2026-08-16 · →后端 | GET /system/evals/sets 404 | 期望 EvalSet[]（docs/03 §5.8）。
       根因 Agent/app/api/routers/evals.py APIRouter() 缺 prefix="/system/evals"；数据形状已对齐，仅路径错位。
-      修法：router = APIRouter(prefix="/system/evals")。修复后前端刷新自动恢复。
+      修法：router = APIRouter(prefix="/system/evals")。→ 后端已修（commit 0b5727c），实测 HTTP200。
 [done] 2026-08-16 · →后端 | 契约核验：5 组新接口仅 evals 有缺口，其余对齐 | 前端零改动。
+[done] 2026-08-16 · ←后端 | 五组接口全部就绪（不再 404），联调可直接走真实后端 | 后端实测 :8000 全 200。
+      - kb progress 已统一 number；done 消息 tool_calls 已含 position → 前端 normalizeProgress / position 兜底两候选修复均无需应用。
+      - trajectory 已实现 before_seq/limit 分页 + has_more；kind 仅 user/assistant，thinking/diff 恒 null（无 system 更新数据，契约允许）。
+      - 联调注意：登录用后端 seed 账号 admin/admin123（与 mock 一致）；SSE 帧为 sse_emitter 信封 {id,seq,type,ts,payload}。
 
 ---
 
