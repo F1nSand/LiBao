@@ -1,0 +1,71 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--app-font-family);
+  font-size: var(--app-font-size);
+  color: var(--app-text-main);
+  background: var(--app-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d5d9e0;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c0c6cf;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 内容页统一容器 */
+.app-page {
+  padding: 20px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-card {
+  background: var(--app-content-bg);
+  border: 1px solid var(--app-border-light);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-card);
+}
+
+.app-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.app-page-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.app-page-subtitle {
+  font-size: var(--app-font-size-sm);
+  color: var(--app-text-secondary);
+  margin: 2px 0 0;
+}

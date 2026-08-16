@@ -1,0 +1,113 @@
+import type { RouteRecordRaw } from 'vue-router'
+import type { Role } from '@/types'
+
+export interface AppRouteMeta {
+  title: string
+  icon?: string
+  requiresAuth?: boolean
+  roles?: Role[]
+}
+
+export interface MenuItem {
+  path: string
+  title: string
+  icon: string
+  roles?: Role[]
+  children?: MenuItem[]
+}
+
+/** 菜单项配置（docs/02 §4）：侧栏菜单；设置项带 children（任务/工具/记忆/系统/设置 子栏） */
+export const menuItems: MenuItem[] = [
+  { path: '/chat', title: '对话', icon: 'ChatDotRound' },
+  { path: '/agents', title: 'Agents', icon: 'MagicStick', roles: ['admin', 'developer'] },
+  { path: '/kb', title: '知识库', icon: 'FolderOpened', roles: ['admin', 'developer'] },
+  {
+    path: '/settings',
+    title: '设置',
+    icon: 'Setting',
+    roles: ['admin'],
+    children: [
+      { path: '/settings', title: '设置', icon: 'Setting', roles: ['admin'] },
+      { path: '/tasks', title: '任务', icon: 'List' },
+      { path: '/tools', title: '工具', icon: 'Tools', roles: ['admin', 'developer'] },
+      { path: '/memory', title: '记忆', icon: 'Tickets' },
+      { path: '/system', title: '系统', icon: 'Odometer', roles: ['admin'] },
+    ],
+  },
+]
+
+/** 属于「设置」组的路由（子栏在这些页面显示） */
+export const SETTINGS_ROUTES = ['/tasks', '/tools', '/memory', '/system', '/settings']
+export const isSettingsRoute = (path: string): boolean => SETTINGS_ROUTES.includes(path)
+
+export const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { title: '登录', requiresAuth: false } satisfies AppRouteMeta,
+  },
+  {
+    path: '/',
+    redirect: '/chat',
+  },
+  {
+    path: '/chat',
+    name: 'chat',
+    component: () => import('@/views/ChatView.vue'),
+    meta: { title: '对话', icon: 'ChatDotRound', requiresAuth: true } satisfies AppRouteMeta,
+  },
+  {
+    // 对话轨迹（docs/02 §6.3）：按会话隔离的只读查看页，不进侧栏菜单
+    path: '/trajectory/:conversationId',
+    name: 'trajectory',
+    component: () => import('@/views/TrajectoryView.vue'),
+    meta: { title: '对话轨迹', requiresAuth: true } satisfies AppRouteMeta,
+  },
+  {
+    path: '/agents',
+    name: 'agents',
+    component: () => import('@/views/AgentsView.vue'),
+    meta: { title: 'Agents', icon: 'MagicStick', requiresAuth: true, roles: ['admin', 'developer'] } satisfies AppRouteMeta,
+  },
+  {
+    path: '/tasks',
+    name: 'tasks',
+    component: () => import('@/views/TasksView.vue'),
+    meta: { title: '任务', icon: 'List', requiresAuth: true } satisfies AppRouteMeta,
+  },
+  {
+    path: '/tools',
+    name: 'tools',
+    component: () => import('@/views/ToolsView.vue'),
+    meta: { title: '工具', icon: 'Tools', requiresAuth: true, roles: ['admin', 'developer'] } satisfies AppRouteMeta,
+  },
+  {
+    path: '/kb',
+    name: 'kb',
+    component: () => import('@/views/KbView.vue'),
+    meta: { title: '知识库', icon: 'FolderOpened', requiresAuth: true, roles: ['admin', 'developer'] } satisfies AppRouteMeta,
+  },
+  {
+    path: '/memory',
+    name: 'memory',
+    component: () => import('@/views/MemoryView.vue'),
+    meta: { title: '记忆', icon: 'Tickets', requiresAuth: true } satisfies AppRouteMeta,
+  },
+  {
+    path: '/system',
+    name: 'system',
+    component: () => import('@/views/SystemView.vue'),
+    meta: { title: '系统', icon: 'Odometer', requiresAuth: true, roles: ['admin'] } satisfies AppRouteMeta,
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@/views/SettingsView.vue'),
+    meta: { title: '设置', icon: 'Setting', requiresAuth: true, roles: ['admin'] } satisfies AppRouteMeta,
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/chat',
+  },
+]

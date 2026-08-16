@@ -1,0 +1,154 @@
+/* Markdown 渲染样式（docs/02 §5.4） */
+.markdown-body {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* 流式期裸文本：保留换行的打字机预览 */
+.markdown-body.streaming {
+  white-space: pre-wrap;
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body p {
+  margin: 0.5em 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin: 1em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.markdown-body h1 {
+  font-size: 1.4em;
+}
+.markdown-body h2 {
+  font-size: 1.25em;
+}
+.markdown-body h3 {
+  font-size: 1.12em;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.markdown-body li {
+  margin: 0.25em 0;
+}
+
+.markdown-body blockquote {
+  margin: 0.6em 0;
+  padding: 0.2em 0.9em;
+  border-left: 3px solid var(--el-color-primary-light-5);
+  color: var(--app-text-secondary);
+  background: var(--el-color-primary-light-9);
+  border-radius: 0 var(--app-radius-sm) var(--app-radius-sm) 0;
+}
+
+.markdown-body code {
+  font-family: var(--app-font-mono);
+  font-size: 0.9em;
+  background: #f2f3f7;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  color: #e05561;
+}
+
+.markdown-body pre {
+  position: relative;
+  background: #f6f8fa;
+  border: 1px solid var(--app-border-light);
+  border-radius: var(--app-radius);
+  padding: 12px 14px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: 0.88em;
+  display: block;
+  overflow-x: auto;
+}
+
+.markdown-body .code-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.markdown-body a {
+  color: var(--app-primary);
+  text-decoration: none;
+}
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  border-radius: var(--app-radius);
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--app-border);
+  padding: 6px 10px;
+}
+.markdown-body th {
+  background: #fafbfc;
+  font-weight: 600;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--app-border);
+  margin: 1em 0;
+}
+
+.markdown-body input[type='checkbox'] {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.markdown-body .copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.markdown-body .copy-btn:hover {
+  color: var(--app-primary);
+  border-color: var(--app-primary);
+}

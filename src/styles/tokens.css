@@ -1,0 +1,45 @@
+/* 设计令牌（docs/02 未定义 → 自定义深色侧栏管理台） */
+:root {
+  /* 侧栏（深色） */
+  --app-sidebar-bg: #1e1e2f;
+  --app-sidebar-border: #2a2a3d;
+  --app-sidebar-text: #a3a3c2;
+  --app-sidebar-text-active: #ffffff;
+  --app-sidebar-item-hover: rgba(255, 255, 255, 0.06);
+  --app-sidebar-item-active-bg: rgba(99, 102, 241, 0.22);
+  --app-sidebar-width: 232px;
+  --app-sidebar-logo-bg: #171728;
+  --app-sidebar-conv-bg: #26263a; /* 会话列表浅色框（侧边栏一深一浅） */
+
+  /* 内容区（浅色） */
+  --app-bg: #f5f6fa;
+  --app-content-bg: #ffffff;
+  --app-border: #e4e7ed;
+  --app-border-light: #eef0f5;
+
+  /* 主色 */
+  --app-primary: #6366f1;
+  --app-primary-dark: #4f52c4;
+
+  /* 文本 */
+  --app-text-main: #1f2329;
+  --app-text-secondary: #5f6b7a;
+  --app-text-muted: #8f9bad;
+
+  /* 布局 */
+  --app-topbar-height: 56px;
+
+  /* 圆角 / 阴影 */
+  --app-radius-sm: 4px;
+  --app-radius: 6px;
+  --app-radius-lg: 10px;
+  --app-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.04);
+
+  /* 字体 */
+  --app-font-size-xs: 12px;
+  --app-font-size-sm: 13px;
+  --app-font-size: 14px;
+  --app-font-size-lg: 16px;
+  --app-font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', -apple-system, 'Segoe UI', sans-serif;
+  --app-font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
