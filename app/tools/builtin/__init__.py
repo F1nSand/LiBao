@@ -1,15 +1,19 @@
-"""内置工具注册。M1：tl_time_now；M2：tl_demo_notify；M2.5：tl_tool_search；M3：tl_kb_search（知识库检索）。"""
+"""内置工具注册。M1 tl_time_now / M2 tl_demo_notify / M2.5 tl_tool_search / M3 tl_kb_search /
+M3.5 tl_fetch_url + tl_analyze_image（docs 07 RM-8 / docs 04 F4）。"""
 from __future__ import annotations
 
-from app.tools.builtin import demo_notify, kb_search, time_now, tool_search
+from app.tools.builtin import analyze_image, demo_notify, fetch_url, kb_search, time_now, tool_search
 from app.tools.registry import SandboxLevel, ToolSpec, ToolType, get, register
 
 
+def _register(spec: ToolSpec) -> None:
+    """幂等注册单个内置工具（重复调用不遮蔽，registry.register 本身仍拒同名覆盖）。"""
+    if get(spec.id) is None:
+        register(spec)
+
+
 def register_builtin_tools() -> None:
-    # 幂等引导：已注册则跳过（registry.register 本身仍拒绝覆盖同名工具，防遮蔽）
-    if get("tl_time_now") is not None:
-        return
-    register(
+    _register(
         ToolSpec(
             id="tl_time_now",
             name="time_now",
@@ -28,7 +32,7 @@ def register_builtin_tools() -> None:
             builtin=True,
         )
     )
-    register(
+    _register(
         ToolSpec(
             id="tl_demo_notify",
             name="demo_notify",
@@ -54,7 +58,7 @@ def register_builtin_tools() -> None:
             builtin=True,
         )
     )
-    register(
+    _register(
         ToolSpec(
             id="tl_tool_search",
             name="tool_search",
@@ -79,7 +83,7 @@ def register_builtin_tools() -> None:
             builtin=True,
         )
     )
-    register(
+    _register(
         ToolSpec(
             id="tl_kb_search",
             name="kb_search",
@@ -109,6 +113,57 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=30000,
             handler=kb_search.kb_search_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_fetch_url",
+            name="fetch_url",
+            description=(
+                "只读抓取网页内容（自动清洗正文）。需要访问外部 URL 获取信息时使用；"
+                "受出站白名单限制。反例：不要用它执行写入/下载文件/访问白名单外域名。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "要抓取的 http/https URL"},
+                    "max_chars": {"type": "integer", "description": "正文截断长度，默认 8000，上限 20000"},
+                },
+                "required": ["url"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=False,  # 默认关闭：管理员显式启用后才向 LLM 开放
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=15000,
+            handler=fetch_url.handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_analyze_image",
+            name="analyze_image",
+            description=(
+                "分析已上传的附件（按附件 id 返回分析结果：图片视觉降级文本 / 文本提取 / 文档元数据）。"
+                "需要对已上传附件做内容理解时使用。反例：不要凭空调用，必须先上传附件拿到 attachment_id。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "attachment_id": {"type": "string", "description": "已上传附件的 id（POST /uploads 返回）"},
+                },
+                "required": ["attachment_id"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=False,  # 默认关闭
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=10000,
+            handler=analyze_image.analyze_image_handler,
             builtin=True,
         )
     )

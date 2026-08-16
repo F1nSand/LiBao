@@ -35,13 +35,13 @@ def _spec(sid: str, name: str, desc: str, enabled: bool = True) -> ToolSpec:
 
 async def test_search_matches_name_and_description():
     register(_spec("t_test_a", "stock_query", "股票查询工具"))
-    register(_spec("t_test_b", "fetch_url", "抓取网页内容"))
+    register(_spec("t_test_c", "web_page", "抓取网页内容"))  # 避开内置 tl_fetch_url 撞名（I7 遮蔽拒绝）
     out = await tool_search_handler("股票")
     assert [m["name"] for m in out["matches"]] == ["stock_query"]
     out2 = await tool_search_handler("STOCK")  # 大小写不敏感
     assert [m["name"] for m in out2["matches"]] == ["stock_query"]
     out3 = await tool_search_handler("网页")
-    assert [m["name"] for m in out3["matches"]] == ["fetch_url"]
+    assert "web_page" in [m["name"] for m in out3["matches"]]  # 描述命中（目录含内置 fetch_url）
 
 
 async def test_search_empty_hint():

@@ -89,7 +89,7 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 | 接缝 | 现状 | 落地位置 |
 |---|---|---|
 | **MinIO 对象存储** | 本地磁盘 `{upload_dir}/{attachment_id}`（MVP） | `services/attachment.py` → M4 加 MinIO/预签名 |
-| **视觉模型（VLM）** | `analyze_image` 走 I2 降级文本（ready + reason=no_vision_model） | `services/attachment.py::_analyze_content` |
+| **视觉模型（VLM）** | `analyze_image` 走 I2 降级文本（ready + reason=no_vision_model） | `storage/attachment_analysis.py::analyze_content` |
 | **Cross-Encoder 重排序** | rerank_score 恒 null | `storage/repositories/kb.py::hybrid_search` |
 | **对话自动记忆提取** | 仅手动卡片 + maintenance；context_update 自动提取未做 | `orchestration/nodes/context_update.py` |
 | **PDF/Office 文本提取** | 仅 metadata（reason 标注） | `services/attachment.py`；引入 pypdf 即可 |
@@ -101,6 +101,8 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 | **max_concurrency** | 字段已流动，未强制 | `tools/executor.py` 信号量插入点已注释 |
 | **多确认** | 每节点每轮只确认第一个 require_confirm 工具 | `nodes/tool_execute.py` `confirmed_once` |
 | **任务取消 in-flight** | 取消置状态，后台运行结束时不覆盖 | `orchestration/task_run.py` |
+| **Webhook/事件触发（docs 03 §5.10）** | 4 端点（hooks CRUD + 事件接收）未实现 | `api/routers/hooks.py`（M4 事件子系统） |
+| **事件安全点/优先级裁决器（docs 07 RM-9）** | 外部事件入队 + 节点间隙消费 + 紧急/常规/轻量裁决未实现 | `core/events.py` + `orchestration/nodes/route.py`（M4 事件子系统） |
 | **M5 评估/日志** | `run_log` 扁平表已建（type 含 retrieval/memory） | `/system/evals` 在 docs 03 §5.8 |
 | **M6 RBAC/进化** | `user.role` 已存 | `api/deps.py` |
 

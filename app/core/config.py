@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     max_upload_mb: int = 20
 
+    # ---- fetch_url 内置工具（docs 07 RM-8）----
+    # 出站白名单（fail-closed）：["*"] 放通全部仅限开发；空列表 = 全拒
+    fetch_url_allowlist: list[str] = []
+    fetch_url_max_chars: int = 8000
+
     # ---- 跨域 ----
     cors_origins: list[str] = ["http://localhost:5173"]
 

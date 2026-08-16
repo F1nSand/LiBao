@@ -71,6 +71,7 @@ async def _get_or_create_tool(
     tool_type: str,
     require_confirm: bool,
     idempotent: bool,
+    enabled: bool = True,
     timeout_ms: int = 5000,
     max_concurrency: int = 10,
 ) -> ToolDefinition:
@@ -85,7 +86,7 @@ async def _get_or_create_tool(
             description=description,
             params_schema=params_schema,
             tool_type=tool_type,
-            enabled=True,
+            enabled=enabled,
             require_confirm=require_confirm,
             idempotent=idempotent,
             sandbox="none",
@@ -98,8 +99,8 @@ async def _get_or_create_tool(
         session.add(tool)
         await session.flush()
     else:
-        # 幂等：目标态 enabled=true
-        tool.enabled = True
+        # 幂等：目标态 enabled=显式传值
+        tool.enabled = enabled
     return tool
 
 
@@ -222,6 +223,44 @@ async def main() -> None:
             tool_type="perception",
             require_confirm=False,
             idempotent=False,
+        )
+        # M3.5 补齐：fetch_url / analyze_image 感知工具（docs 07 RM-8）——默认关闭，管理员显式启用
+        await _get_or_create_tool(
+            session,
+            org,
+            name="fetch_url",
+            description="只读抓取网页内容（自动清洗正文）。需要访问外部 URL 获取信息时使用；受出站白名单限制。",
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "要抓取的 http/https URL"},
+                    "max_chars": {"type": "integer", "description": "正文截断长度，默认 8000"},
+                },
+                "required": ["url"],
+            },
+            tool_type="perception",
+            require_confirm=False,
+            idempotent=False,
+            enabled=False,
+        )
+        await _get_or_create_tool(
+            session,
+            org,
+            name="analyze_image",
+            description=(
+                "分析已上传的附件（图片视觉降级文本 / 文本提取 / 文档元数据）。需要先上传附件拿到 attachment_id。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "attachment_id": {"type": "string", "description": "已上传附件的 id"},
+                },
+                "required": ["attachment_id"],
+            },
+            tool_type="perception",
+            require_confirm=False,
+            idempotent=False,
+            enabled=False,
         )
         # seed agent 同时挂 time_now + demo_notify：让中断→确认→resume 流在真实会话可触发（联调缺口修复）
         agent_tools = ["tl_time_now", "tl_demo_notify"]
