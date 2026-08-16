@@ -55,7 +55,6 @@ export interface StreamState {
   taskId: string | null
   messageId: string | null
   conversationId: string | null
-  agentId: string | null
   segments: StreamSegment[]
   partialText: string
   toolCalls: Record<string, ToolCallCardState>
@@ -96,7 +95,6 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     taskId: null,
     messageId: null,
     conversationId: null,
-    agentId: null,
     segments: [],
     partialText: '',
     toolCalls: {},
@@ -198,7 +196,6 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
         state.taskId = p.task_id ?? state.taskId
         state.messageId = p.message_id
         state.conversationId = p.conversation_id
-        state.agentId = p.agent_id
         state.segments = []
         state.partialText = ''
         state.status = 'running'
@@ -290,7 +287,6 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     state.taskId = null
     state.messageId = null
     state.conversationId = null
-    state.agentId = null
     state.segments = []
     state.partialText = ''
     state.toolCalls = {}

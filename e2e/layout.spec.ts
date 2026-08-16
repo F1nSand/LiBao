@@ -15,7 +15,7 @@ test.describe('响应式侧边栏', () => {
     await expect(page.locator('.conv-list')).toBeVisible()
 
     // 其它页窄屏自动收起、会话列表隐藏
-    await page.goto('/agents')
+    await page.goto('/kb')
     await page.setViewportSize({ width: 800, height: 800 })
     await expect(page.locator('.sidebar')).toHaveClass(/collapsed/)
     await expect(page.locator('.conv-list')).toBeHidden()

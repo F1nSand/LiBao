@@ -86,7 +86,7 @@ export async function streamChat(
   return streamChatAt('/api/v1/chat/stream', req, h, signal)
 }
 
-/** 流式到指定 URL（Agent 试跑复用协议：POST /agents/{id}/invoke） */
+/** 流式到指定 URL（默认 POST /chat/stream；可传任意 SSE 端点） */
 export async function streamChatAt(
   url: string,
   req: ChatRequest,

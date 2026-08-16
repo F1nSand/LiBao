@@ -7,9 +7,9 @@ test.describe('路由守卫', () => {
     await page.waitForURL('**/login**')
   })
 
-  test('viewer 访问 /agents（developer+）→ 重定向 /chat', async ({ page }) => {
+  test('viewer 访问 /tools（developer+）→ 重定向 /chat', async ({ page }) => {
     await login(page, 'viewer', 'viewer123')
-    await page.goto('/agents')
+    await page.goto('/tools')
     await page.waitForURL('**/chat')
   })
 

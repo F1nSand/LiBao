@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Agent, ChatRequest, KbCollection, ToolDefinition } from '@/types'
+import type { ChatRequest, KbCollection, ToolDefinition } from '@/types'
 import {
   users,
-  agents,
+  DEFAULT_AGENT_ID,
   tools,
   conversations,
   messages,
@@ -13,7 +13,6 @@ import {
   longtermMemories,
   notifications,
   systemLogs,
-  agentTemplate,
 } from './db'
 import { ok, fail, json, signMockToken, decodeMockToken, paginate, uid, randHex, isoDate, fast } from './util'
 import { buildChatScript, buildResumeScript, buildTaskEventsScript, toEnvelope } from './stream'
@@ -152,7 +151,7 @@ export const mockServer = {
         const nc = {
           id: uid('c'),
           user_id: user.id,
-          agent_id: chatReq.agent_id,
+          agent_id: DEFAULT_AGENT_ID,
           title: (chatReq.message?.content ?? '新会话').slice(0, 20),
           status: 'active',
           max_messages: 1000,
@@ -234,7 +233,7 @@ export const mockServer = {
     }
     if (method === 'POST' && pathname === '/conversations') {
       const b = body.json ?? {}
-      const nc = { id: uid('c'), user_id: user!.id, agent_id: b.agent_id, title: b.title ?? '新会话', status: 'active', max_messages: 1000, created_at: isoDate(0) }
+      const nc = { id: uid('c'), user_id: user!.id, agent_id: DEFAULT_AGENT_ID, title: b.title ?? '新会话', status: 'active', max_messages: 1000, created_at: isoDate(0) }
       conversations.unshift(nc)
       messages[nc.id] = []
       return void json(res, ok(nc))
@@ -278,7 +277,7 @@ export const mockServer = {
     }
     if (method === 'POST' && pathname === '/tasks') {
       const b = body.json ?? {}
-      const nt = { id: uid('task'), agent_id: b.agent_id, status: 'pending' as const, progress: 0, input: b.input, created_at: isoDate(0) }
+      const nt = { id: uid('task'), agent_id: DEFAULT_AGENT_ID, status: 'pending' as const, progress: 0, input: b.input, created_at: isoDate(0) }
       tasks.unshift(nt)
       return void json(res, ok({ task_id: nt.id }))
     }
@@ -314,61 +313,6 @@ export const mockServer = {
       }
       return void json(res, ok(null))
     }
-
-    /* ===== Agent ===== */
-    if (method === 'GET' && pathname === '/agents') {
-      const page = Number(query.get('page') ?? 1)
-      const size = Number(query.get('page_size') ?? 20)
-      return void json(res, ok(paginate(agents, page, size)))
-    }
-    if (method === 'POST' && pathname === '/agents') {
-      const na = { id: uid('ag'), ...(body.json ?? agentTemplate()), status: 'draft' as const, current_version: 1, created_at: isoDate(0) } as Agent
-      agents.unshift(na)
-      return void json(res, ok(na))
-    }
-    p = match(pathname, '/agents/:id/versions')
-    if (method === 'GET' && p) {
-      return void json(res, ok([]))
-    }
-    p = match(pathname, '/agents/:id/publish')
-    if (method === 'POST' && p) {
-      const a = agents.find((x) => x.id === p!.id)
-      if (a) {
-        a.status = 'published'
-        a.current_version += 1
-      }
-      return void json(res, ok(a))
-    }
-    p = match(pathname, '/agents/:id/unpublish')
-    if (method === 'POST' && p) {
-      const a = agents.find((x) => x.id === p!.id)
-      if (a) a.status = 'disabled'
-      return void json(res, ok(a))
-    }
-    p = match(pathname, '/agents/:id/invoke')
-    if (method === 'POST' && p) {
-      const msg =
-        (body.json?.message && typeof body.json.message === 'object'
-          ? body.json.message.content
-          : body.json?.message) ??
-        body.json?.input?.message ??
-        '试跑'
-      const chatReq: ChatRequest = { conversation_id: null, agent_id: p.id, message: { content: String(msg), role: 'user' }, stream: true }
-      return void sendSse(req, res, buildChatScript(chatReq))
-    }
-    p = match(pathname, '/agents/:id')
-    if (method === 'GET' && p) {
-      const a = agents.find((x) => x.id === p!.id)
-      if (!a) return void json(res, fail(40401, 'Agent 不存在'))
-      return void json(res, ok(a))
-    }
-    if (method === 'PUT' && p) {
-      const a = agents.find((x) => x.id === p!.id)
-      if (!a) return void json(res, fail(40401, 'Agent 不存在'))
-      Object.assign(a, body.json, { current_version: a.current_version + 1, updated_at: isoDate(0) })
-      return void json(res, ok(a))
-    }
-    if (method === 'DELETE' && p) return void json(res, ok(null))
 
     /* ===== 工具 ===== */
     if (method === 'GET' && pathname === '/tools') {

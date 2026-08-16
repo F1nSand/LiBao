@@ -38,7 +38,7 @@ const segments = computed<Seg[]>(() => {
   if (props.stream) {
     return props.stream.segments.map((s) => {
       if (s.kind === 'text') {
-        // 流式期裸文本；done 后（AgentTestRunner 等无持久化场景）切 markdown 渲染
+        // 流式期裸文本；done 后（无持久化场景）切 markdown 渲染
         return { kind: 'text', content: s.text, streaming: !props.stream!.finished }
       }
       if (s.kind === 'agent') {

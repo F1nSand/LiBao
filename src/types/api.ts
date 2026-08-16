@@ -1,8 +1,6 @@
 /** REST 契约类型（对齐 docs/03 §2/§5、docs/04 §3，字段 snake_case） */
 import type {
-  AgentConfigStatus,
   AttachmentStatus,
-  GraphTemplate,
   KbDocumentStatus,
   LogLevel,
   MessageRole,
@@ -144,14 +142,12 @@ export interface ChatMessageInput {
 
 export interface ChatRequest {
   conversation_id: string | null
-  agent_id: string
   message: ChatMessageInput
   stream: true
 }
 
 export interface CreateConversationRequest {
   title: string
-  agent_id: string
 }
 
 /** ---------- 任务 ---------- */
@@ -169,43 +165,8 @@ export interface Task {
 }
 
 export interface SubmitTaskRequest {
-  agent_id: string
   input: unknown
   params?: Record<string, unknown>
-}
-
-/** ---------- Agent ---------- */
-export interface Agent {
-  id: string
-  name: string
-  model: string
-  system_prompt?: string
-  graph_template: GraphTemplate
-  skills: string[]
-  tools: string[]
-  max_steps?: number
-  status: AgentConfigStatus
-  current_version: number
-  created_at: string
-  updated_at?: string
-}
-
-export interface AgentConfigInput {
-  name: string
-  model: string
-  system_prompt?: string
-  skills?: string[]
-  tools?: string[]
-  graph_template: GraphTemplate
-  max_steps?: number
-}
-
-export interface AgentVersion {
-  id: string
-  agent_id: string
-  version: number
-  config: AgentConfigInput
-  created_at: string
 }
 
 /** ---------- 工具 ---------- */

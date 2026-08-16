@@ -7,6 +7,23 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[done] 2026-08-16 · ←后端 | **后端已完成「单通用 Agent + Subagent 派发」重构，与你前端契约对齐**（228→227 测试全绿 + ruff 全绿）| 你无需改前端。
+      后端落点（与你已删的 /agents、agent_id、graph_template 完全一致）：
+      - `/agents*` 全端点删除（404）；`POST /conversations`、`/chat/stream`、`/tasks` 不再收 `agent_id`，服务端用默认「通用助手」（agent_configs.is_default=True，seed 幂等收敛）
+      - 删 proposer-reviewer 串流子图 + `graph_template` 列（迁移 0006 加 is_default）；单主图拓扑不变
+      - 新增内置 `tl_dispatch_subagent(subagent, task, context?)`：主 agent 按需派发，子 agent 嵌套 LLM 循环（独立 prompt+tools、上下文隔离只传任务+事实），结果回主 agent 收口
+      - `agent_switch` 事件（类型/载荷不变 `{from_agent,to_agent,reason}`）：派发时「通用助手→subagent」、完成时「subagent→通用助手」，各一条；task 路径也转发进任务事件（TaskDetail 回放可见）
+      - **内置 subagent 名**：`research` 资料调研 / `code_review` 代码评审 / `proposal_review` 方案评审 —— 你指示条会显示这些名
+      联调演示：发「帮我调研 XX / 审查这段代码 / 评审这个方案」→ 流式期应见 2 条 agent_switch 指示条 + 最终答案。
+      注：聊天固定「通用助手」，无 agent 身份展示；旧 Agents 入口 →「工作区」（后续项目，07 路线图已标注）。
+
+[done] 2026-08-17 · ←后端 | **派发链路真实后端联调验证通过**（:8000 + 前端 :5174 VITE_USE_MOCK=false）| 前后端契约对接全链路 OK。
+      演示「帮我调研 SSE」→ 流式期捕获 **2 条 agent_switch 指示条**（通用助手 → research 携带任务 / research → 通用助手 子任务完成）+ dispatch_subagent 工具卡「完成」+ 主 Agent 最终 Markdown 调研报告（基于 WHATWG/MDN 整理）。页面错误 0。
+      另实测：POST /conversations 不带 agent_id → 200，返回 agent_id=默认通用 Agent uuid（`9c1f9091…`），新契约生效。
+[done] 2026-08-16 · →后端 | **前端已对齐「单通用 Agent」契约**（M5 重构收敛：删 /agents API、请求去 agent_id、graph_template 废除）| 你 emits agent_switch（tl_dispatch_subagent 派发）前端即自动渲染。
+      实测：typecheck ✓ / lint 0err / 108 单测 PASS / 21 e2e PASS；chat 顶部无 agent 选择器、TasksView 无 agent 选择器、侧栏无 Agents 菜单。
+      说明：前端无任何 `/agents` 调用；若后续要「默认 Agent 配置页」，需后端补 `GET/PUT /agents/default` 端点（另立项）。
+
 [done] 2026-08-16 · ←后端 | **M3 正式闭环**（Gate1 Test 207/207 + Gate2 14 项 + Gate3 Simplify 应用 16/跳过 12）| 后端就绪，可联调。
       后端 :8000 已拉起验证过（admin/admin123）；五组接口 + 8 组既有全部可用。请前端列联调计划清单，我按清单逐项核验。联调后跑一次 `scripts/verify_m3.sh`（需后端运行）做全链回归。
 
@@ -16,6 +33,18 @@
       验证：实测 tools=['tl_demo_notify','tl_time_now']。前端联调可用 seed agent 对「发个通知/提醒我」触发中断→确认→resume。
 [done] 2026-08-16 · →后端 | **M4 前端 agent_switch 渲染完成**：useChatStream 状态机 + MessageBubble 指示条 + mock 演示（chat: ag_search→ag_review / task: ag_proposer→ag_reviewer）+ 任务事件端点 GET 修复 | 你 emit agent_switch 即自动生效，无需改前端。
       验证：108 单测 + 21 e2e 全绿；mock 非 fast 实测指示条流式期显示、done 后消失（仅流式期，Message 无持久化字段——如需 done 后仍显示，需后端在 message 数据模型加 agent_switch 字段，属协调项）。
+
+[done] 2026-08-16 · ←后端 | **M4 联调收口**：seed 已加「协作助手」（graph_template=proposer_reviewer，commit 后续）| 前端可直接演示，无需自建 agent。
+      实测 invoke：3 次 agent_switch（assistant→proposer→reviewer→assistant）+ 真实定稿输出 ✅
+      前端演示路径：登录后选择「协作助手」→ 发消息 → 流式期应见切换指示条（assistant→proposer→reviewer→assistant）→ 定稿气泡。
+
+[done] 2026-08-16 · ←后端 | **M4 最小闭环完成**（commit 44b0a30）| agent_switch 后端已发射，与你前端渲染直接对接。
+      - 任务队列 Redis：POST /tasks 入队（task:queue）→ 常驻 worker BRPOP 消费跑图（Redis 挂降级 create_task）；实测提交→worker→真实 LLM→done ✅
+      - live-tail Redis Pub/Sub：任务事件 / 通知 SSE 跨实例广播（终态哨兵 + 断线重连 + 进程内回退）
+      - 幂等持久化 Redis；proposer-reviewer 二段协作：agent graph_template="proposer_reviewer" 时后端发 3 次 agent_switch（assistant→proposer→reviewer→assistant）
+      - 联调验证：用 graph_template="proposer_reviewer" 的 agent 试跑，前端应看到切换指示条 + 定稿输出
+      - 另：fetch_url/analyze_image 内置工具已注册（默认关，管理页可启用）；GET /system/evals 契约路径已补
+      - 228/228 + verify_m3.sh 14/14 全绿
 [done] 2026-08-16 · →后端 | 中断修复已前端真实验证 | 「提醒我明天上午开会」→ 弹窗 → 确认 → resume 续流「通知已发送成功」+ demo_notify 完成卡 + composer 恢复。
 
 [done] 2026-08-16 · →后端 | GET /system/evals/sets 404 | 期望 EvalSet[]（docs/03 §5.8）。
@@ -204,3 +233,20 @@
 - Review 门：feature-dev:code-reviewer 无 CONFIRMED 正确性问题。
 - Simplify 门应用 4 项：复用 AgentSwitchPayload 类型（useChatStream/TaskDetail）；TaskDetail 事件项改 computed 一次性算（消 3 次 switchInfo 调用）；mock 事件路由改用 match() helper；msg-seg.is-agent 改裸词 agent。跳过（记录）：组件抽取/ mock helper（过度抽象）。
 - 已知限制：agent_switch 仅流式期显示、done/刷新后消失（Message 无持久化字段，契约预留）。
+
+## 2026-08-16 前端对齐「单通用 Agent」重构（L3，后端 M5 收敛）
+- 计划：C:\Users\Admin1\.claude\plans\sleepy-humming-sparrow.md（覆写 M4 计划）
+- 背景：后端 agent 发起架构重构（单通用 Agent 模型，迁移 0006_single_general_agent）：删 `/agents` REST API（含版本化）、`ChatRequest`/`CreateConversationRequest`/`SubmitTaskRequest` 去 `agent_id`、Agent 模型删 `graph_template`、新工具 `tl_dispatch_subagent`（tool_type=agent_control）替代 graph_template 多 Agent 串流；`agent_switch` SSE 事件仍在发（payload 不变）。用户决策：砍掉整个 Agents 页 + 走 L3 计划。
+- 改动：
+  - types：api.ts 删 3 请求 `agent_id` + 删 Agent/AgentConfigInput/AgentVersion + 删 GraphTemplate/AgentConfigStatus import；domain.ts 删 GraphTemplate/AgentConfigStatus、ToolType 加 `agent_control`；ToolsView TYPE_LABEL 加 `agent_control: Agent 控制`
+  - 删除：api/agent.ts、stores/agent.ts、AgentsView.vue、AgentConfigForm.vue、AgentTestRunner.vue、router /agents 路由+菜单
+  - chat store：删 currentAgentId/activeAgentId/setAgent；createConversation(title)
+  - ChatView：删 agent 选择器/onAgentChange/agentStore/agent_id；ConversationList createConversation('新会话')；TasksView 删 agent 选择器+校验，提交只带 input
+  - mock：db 删 agents/agentTemplate、DEFAULT_AGENT_ID='ag_default'、conversation/task agent_id 归一；server 删 /agents 路由块、3 处 agent_id→DEFAULT_AGENT_ID；stream agentId 固定 DEFAULT_AGENT_ID、ConfirmCtx 删 agentId、agent_switch 演示换真实 subagent 名（通用助手→research/proposal_review）
+  - 测试：guards.spec viewer /agents→/tools；layout.spec /agents→/kb；restructure.spec /agents→/tools（routes/guard/availability/useChatStream spec 无需改）
+  - 文档：docs/02 删 Agents 页/组件/store 引用 + 守卫清单；CLAUDE.md 补「单通用 Agent」要点
+- 验证：typecheck ✓ / lint 0err（3 既有 any 警告）/ **108 单测 PASS** / **21 e2e PASS** / build ✓ / DOM 手测（侧栏无 Agents、chat 工具栏无 agent 选择器、任务提交无 Agent 下拉）
+- Gate（L3 完整三道）：Test 全绿；Review 0 严重（2 死代码 + 1 UX 噪音）；Simplify 应用 4 项（SidebarNav pick 收窄单参、stream.ts 内联 DEFAULT_AGENT_ID、ChatView 过时注释、TasksView 单字段 ref）+ 删 StreamState.agentId（无消费者）+ MessageBubble 过时注释
+- 跳过（记录不改）：TaskList/TaskDetail 的 Agent 列恒为默认 id（UX 噪音，Task.agent_id 契约仍返回，属产品决策）；domain.ts AgentStatus（既有未用，docs 引用）；mock/server.ts 会话创建抽 helper（两处 title 派生略异，过度抽象）；useChatStream.start endpoint 参数已无真实调用方（AgentTestRunner 删除后遗留，后续清理）
+- 交接：后端已在交接板确认重构完成（`/agents*` 404、请求去 agent_id、tl_dispatch_subagent、agent_switch「通用助手→subagent→通用助手」），与前端收敛一致
+- 不做（记录）：后端默认 Agent 配置页（无端点，需后端补 /agents/default 另立项）；docs/03/04 契约文档更新归后端 agent

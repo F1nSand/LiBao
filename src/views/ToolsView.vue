@@ -29,6 +29,7 @@ const TYPE_LABEL: Record<string, string> = {
   collaboration: '协作',
   user_comms: '用户通信',
   event: '事件',
+  agent_control: 'Agent 控制',
 }
 
 onMounted(() => void store.list())

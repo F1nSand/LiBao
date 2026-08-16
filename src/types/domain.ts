@@ -6,15 +6,11 @@ export type AgentStatus = 'idle' | 'running' | 'thinking' | 'waiting_confirm' | 
 
 export type TaskStatus = 'pending' | 'running' | 'waiting_confirm' | 'cancelled' | 'done' | 'failed'
 
-export type ToolType = 'perception' | 'execution' | 'collaboration' | 'user_comms' | 'event'
+export type ToolType = 'perception' | 'execution' | 'collaboration' | 'user_comms' | 'event' | 'agent_control'
 
 export type AttachmentStatus = 'uploaded' | 'analyzing' | 'ready' | 'failed'
 
-export type GraphTemplate = 'single' | 'proposer_reviewer' | 'manager_worker'
-
 export type MessageRole = 'system' | 'user' | 'assistant' | 'tool'
-
-export type AgentConfigStatus = 'draft' | 'published' | 'disabled'
 
 export type KbDocumentStatus = 'uploaded' | 'chunking' | 'indexing' | 'indexed' | 'failed' | 'archived'
 

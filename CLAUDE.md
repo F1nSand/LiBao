@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目是什么
 
-Agent 平台（通用 Agent 运行时）的 **Web 前端工作台 / 管理控制台**：对话工作台、Agent/任务/工具/知识库/记忆/系统监控/设置 8 页 + 登录，RBAC 三角色。
+Agent 平台（通用 Agent 运行时）的 **Web 前端工作台 / 管理控制台**：对话工作台、任务/工具/知识库/记忆/系统监控/设置 7 页 + 登录，RBAC 三角色。
 
 **契约来源（必须遵守）**：父目录 `docs/02-frontend-design.md`（前端蓝本）、`docs/03-api-contract.md`（唯一协议依据）、`docs/04-data-model.md`（字段）。前后端完全分离，后端（FastAPI）尚未实现。
 
@@ -33,9 +33,11 @@ Mock 演示账号：`admin/admin123`（管理员）· `dev/dev123`（开发者�
 
 **Markdown 安全管线**（`src/utils/markdown.ts`）：`markdown-it(GFM, html:false, hljs 高亮) → DOMPurify 白名单净化 → 后处理`（链接加 target/rel、任务列表补 `type=checkbox`）。LLM 输出视为不可信。流式期 `renderTextBare` 裸文本，`done` 后一次性 `renderMarkdown`。
 
-**Store 边界**（`src/stores/`）：只存客户端状态，不复制服务端全量；列表从 API 查。Agent 列表单一数据源是 `agent` store（`chat` store 通过 `activeAgentId` getter 引用它，**不要**在 chat store 再存 agents）。
+**单通用 Agent（后端 M5 契约，前端已收敛）**：无 `/agents` API、无 Agents 页/菜单。chat/conversation/task 请求**均不带 `agent_id`**（固定用后端默认通用 Agent）；`Task.agent_id` / `Conversation.agent_id` 仍返回（= 默认 Agent id，仅展示）。subagent 由主 Agent 经内置工具 `tl_dispatch_subagent` 派发，前端渲染 `agent_switch` 事件即可（payload `{from_agent,to_agent,reason}` 不变）。`agent_control` 是 `ToolType` 合法值。
 
-**路由守卫**（`src/router/guard.ts`）：`beforeEach` 先 `await hydrate()`（刷新后 token 回填）；`canAccess` 里**无 roles 限制的路由必须先返回 true 再判 role 是否为空**（否则 user 未加载时守卫死循环）。`/agents /tools /kb` → developer+；`/system /settings` → admin。
+**Store 边界**（`src/stores/`）：只存客户端状态，不复制服务端全量；列表从 API 查。
+
+**路由守卫**（`src/router/guard.ts`）：`beforeEach` 先 `await hydrate()`（刷新后 token 回填）；`canAccess` 里**无 roles 限制的路由必须先返回 true 再判 role 是否为空**（否则 user 未加载时守卫死循环）。`/tools /kb` → developer+；`/system /settings` → admin。
 
 **类型**：`src/types/` 手工对齐 03/04，字段 **snake_case**；`SseEnvelope{id,seq,type,ts,payload}`。事件类型含监视器预留（`thinking` 等）与 mock 扩展 `notification`。
 

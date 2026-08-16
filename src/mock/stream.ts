@@ -1,6 +1,6 @@
 import type { ChatRequest, Message, SseEnvelope, SseEventType, ToolCallRecord } from '@/types'
 import { delay, randHex, uid } from './util'
-import { messages } from './db'
+import { DEFAULT_AGENT_ID, messages } from './db'
 
 export interface SseScriptItem {
   type: SseEventType
@@ -13,7 +13,6 @@ export interface ConfirmCtx {
   taskId: string
   toolCallId: string
   jobRef: string
-  agentId: string
   conversationId: string
   expression: string
   content: string
@@ -70,14 +69,14 @@ function calcExpression(expr: string): number {
 export function buildChatScript(req: ChatRequest): SseScriptItem[] {
   const content = req.message?.content ?? ''
   const conversationId = req.conversation_id ?? uid('c')
-  const agentId = req.agent_id
   const taskId = uid('task')
   const messageId = uid('msg')
 
   const base: SseScriptItem[] = [
     {
+      // 单通用 Agent：message_start 仍发 agent_id（契约字段），值为默认通用 Agent
       type: 'message_start',
-      payload: { message_id: messageId, agent_id: agentId, conversation_id: conversationId, task_id: taskId },
+      payload: { message_id: messageId, agent_id: DEFAULT_AGENT_ID, conversation_id: conversationId, task_id: taskId },
       delayMs: delay(80),
     },
   ]
@@ -88,7 +87,7 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
   if (isDanger || isCalc) {
     const toolCallId = uid('tc')
     const jobRef = uid('job')
-    setConfirmCtx({ taskId, toolCallId, jobRef, agentId, conversationId, expression: content, content })
+    setConfirmCtx({ taskId, toolCallId, jobRef, conversationId, expression: content, content })
     return [
       ...base,
       tok(isDanger ? '检测到需要人工确认的操作，正在请求工具…\n' : '我来计算一下，先调用计算器。\n'),
@@ -135,7 +134,7 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
     },
     {
       type: 'agent_switch',
-      payload: { from_agent: 'ag_search', to_agent: 'ag_review', reason: '检索结果需复核' },
+      payload: { from_agent: '通用助手', to_agent: 'research', reason: '检索结果需复核' },
       delayMs: delay(100),
     },
     tok('检索完成，整理结果中…\n'),
@@ -250,7 +249,7 @@ export function buildTaskEventsScript(taskId: string): SseScriptItem[] {
     { type: 'run_progress', payload: { stage: 'thinking', progress: 20 }, delayMs: delay(120) },
     {
       type: 'agent_switch',
-      payload: { from_agent: 'ag_proposer', to_agent: 'ag_reviewer', reason: '提案需审核' },
+      payload: { from_agent: '通用助手', to_agent: 'proposal_review', reason: '方案需评审' },
       delayMs: delay(140),
     },
     { type: 'status', payload: { status: 'running' }, delayMs: delay(160) },

@@ -1,6 +1,4 @@
 import type {
-  Agent,
-  AgentConfigInput,
   Conversation,
   KbCollection,
   KbDocument,
@@ -23,34 +21,8 @@ export const users: Array<User & { password: string }> = [
   { id: 'u_viewer', username: 'viewer', password: 'viewer123', name: '访客', role: 'viewer', org_id: 'org_1', enabled: true, created_at: isoDate(50) },
 ]
 
-export const agents: Agent[] = [
-  {
-    id: 'ag_calc',
-    name: '计算助手',
-    model: 'gpt-4o',
-    system_prompt: '你是计算助手，负责数学计算与推理。',
-    graph_template: 'single',
-    skills: ['math'],
-    tools: ['tl_calculator', 'tl_time_now'],
-    max_steps: 10,
-    status: 'published',
-    current_version: 3,
-    created_at: isoDate(120),
-  },
-  {
-    id: 'ag_search',
-    name: '信息检索助手',
-    model: 'gpt-4o',
-    system_prompt: '你是信息检索助手，负责搜索并整理信息。',
-    graph_template: 'single',
-    skills: [],
-    tools: ['tl_web_search', 'tl_time_now'],
-    max_steps: 15,
-    status: 'published',
-    current_version: 2,
-    created_at: isoDate(100),
-  },
-]
+// 单通用 Agent 模型：chat/conversation/task 固定用组织默认通用 Agent（无 /agents 端点）
+export const DEFAULT_AGENT_ID = 'ag_default'
 
 export const tools: ToolDefinition[] = [
   {
@@ -101,9 +73,9 @@ export const tools: ToolDefinition[] = [
 ]
 
 export const conversations: Conversation[] = [
-  { id: 'c_001', user_id: 'u_admin', agent_id: 'ag_calc', title: '计算 6*7', status: 'active', max_messages: 1000, last_message_at: isoDate(10), created_at: isoDate(60) },
-  { id: 'c_002', user_id: 'u_admin', agent_id: 'ag_search', title: '什么是 SSE', status: 'active', max_messages: 1000, last_message_at: isoDate(30), created_at: isoDate(90) },
-  { id: 'c_long', user_id: 'u_admin', agent_id: 'ag_search', title: '长会话（轨迹分页演示）', status: 'active', max_messages: 1000, last_message_at: isoDate(20), created_at: isoDate(180) },
+  { id: 'c_001', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '计算 6*7', status: 'active', max_messages: 1000, last_message_at: isoDate(10), created_at: isoDate(60) },
+  { id: 'c_002', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '什么是 SSE', status: 'active', max_messages: 1000, last_message_at: isoDate(30), created_at: isoDate(90) },
+  { id: 'c_long', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '长会话（轨迹分页演示）', status: 'active', max_messages: 1000, last_message_at: isoDate(20), created_at: isoDate(180) },
 ]
 
 export const messages: Record<string, Message[]> = {
@@ -155,7 +127,7 @@ export const messages: Record<string, Message[]> = {
 export const tasks: Task[] = [
   {
     id: 'task_done',
-    agent_id: 'ag_search',
+    agent_id: DEFAULT_AGENT_ID,
     status: 'done',
     progress: 100,
     input: { message: '整理资料' },
@@ -165,7 +137,7 @@ export const tasks: Task[] = [
   },
   {
     id: 'task_running',
-    agent_id: 'ag_calc',
+    agent_id: DEFAULT_AGENT_ID,
     status: 'running',
     progress: 60,
     input: { message: '批量计算' },
@@ -223,17 +195,4 @@ export const systemLogs: SystemLog[] = [
   { id: 'sl_003', trace_id: 'tr_abc', level: 'ERROR', event: 'llm.call', service: 'backend', message: 'LLM 调用超时', duration_ms: 30_010, created_at: isoDate(35) },
   { id: 'sl_004', trace_id: 'tr_abc', level: 'WARNING', event: 'task.retry', service: 'worker', message: '任务重试第 2 次', created_at: isoDate(35) },
 ]
-
-/** 新建 Agent 的默认工具（供 F1 编辑时选中） */
-export function agentTemplate(): AgentConfigInput {
-  return {
-    name: '新 Agent',
-    model: 'gpt-4o',
-    system_prompt: '你是一个通用助手。',
-    skills: [],
-    tools: ['tl_time_now'],
-    graph_template: 'single',
-    max_steps: 50,
-  }
-}
 

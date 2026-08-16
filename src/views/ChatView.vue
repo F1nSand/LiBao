@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
-import { useAgentStore } from '@/stores/agent'
 import { useChatStream } from '@/composables/useChatStream'
 import { TOKEN_LIMIT } from '@/types'
 import type { Message } from '@/types'
@@ -13,9 +12,8 @@ import AttachmentUploader from '@/components/business/AttachmentUploader.vue'
 import InterruptConfirmDialog from '@/components/business/InterruptConfirmDialog.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 
-/** 对话工作台（docs/02 §4 / §5）：消息流 + 流式渲染 + 工具卡 + 中断确认 + Agent 切换 + 会话|轨迹切换 */
+/** 对话工作台（docs/02 §4 / §5）：消息流 + 流式渲染 + 工具卡 + 中断确认 + 会话|轨迹切换（单通用 Agent，无切换） */
 const chat = useChatStore()
-const agentStore = useAgentStore()
 const stream = useChatStream({
   onPersistedMessage: (message) => {
     // 用流式状态兜底补齐 done 消息：真实后端 done 的 message 可能缺 content（内容未就绪），
@@ -49,10 +47,6 @@ watch(
     resetForNext()
   },
 )
-
-onMounted(async () => {
-  await agentStore.list()
-})
 
 /** 流式中 / 中断等待中禁用输入框（done/error/stop 后自动恢复） */
 const composerDisabled = computed(() => stream.state.streaming || !!stream.state.interrupted)
@@ -92,12 +86,11 @@ async function sendWith(content: string, attachments: string[] = []) {
   }
   // 若当前会话不存在则新建
   if (!chat.currentId) {
-    await chat.createConversation(truncate(content, 20), chat.activeAgentId)
+    await chat.createConversation(truncate(content, 20))
   }
   chat.appendUserMessage(content, [...attachments])
   const req = {
     conversation_id: chat.currentId,
-    agent_id: chat.activeAgentId,
     message: { content, role: 'user' as const, attachments: [...attachments] },
     stream: true as const,
   }
@@ -110,12 +103,6 @@ function onAttach(id: string) {
     return
   }
   pendingAttachments.push(id)
-}
-
-function onAgentChange(agentId: string) {
-  chat.setAgent(agentId)
-  stream.reset()
-  resetForNext()
 }
 
 // 中断 → 弹窗
@@ -145,15 +132,6 @@ function onKeydown(e: KeyboardEvent) {
           <el-radio-button value="chat">会话</el-radio-button>
           <el-radio-button value="trajectory" :disabled="!chat.currentId">轨迹</el-radio-button>
         </el-radio-group>
-        <el-select
-          :model-value="chat.currentAgentId"
-          class="agent-select"
-          size="small"
-          placeholder="选择 Agent"
-          @change="onAgentChange"
-        >
-          <el-option v-for="a in agentStore.agents" :key="a.id" :label="a.name" :value="a.id" />
-        </el-select>
         <StatusTag :status="stream.state.status ?? ''" />
       </div>
 
@@ -229,9 +207,6 @@ function onKeydown(e: KeyboardEvent) {
   padding: 8px 14px;
   background: var(--app-content-bg);
   border-bottom: 1px solid var(--app-border);
-}
-.agent-select {
-  width: 200px;
 }
 .composer {
   border-top: 1px solid var(--app-border);

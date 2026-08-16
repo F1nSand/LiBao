@@ -2,15 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
-import { useAgentStore } from '@/stores/agent'
 
 /** 会话列表（docs/02 §6.2）：并入主侧边栏「对话」下方；深色样式、自包含 store/router */
 const chat = useChatStore()
-const agentStore = useAgentStore()
 const router = useRouter()
 
 onMounted(() => {
-  void Promise.all([chat.loadConversations(), agentStore.list()])
+  void chat.loadConversations()
 })
 
 const keyword = ref('')
@@ -26,7 +24,7 @@ async function onSelect(id: string) {
 }
 
 async function onCreate() {
-  await chat.createConversation('新会话', chat.activeAgentId)
+  await chat.createConversation('新会话')
   if (router.currentRoute.value.path !== '/chat') void router.push('/chat')
 }
 

@@ -20,7 +20,7 @@ test.describe('布局重构', () => {
 
   test('侧栏新建会话 → 导航到 /chat', async ({ page }) => {
     await login(page)
-    await page.goto('/agents')
+    await page.goto('/tools')
     await page.locator('.conv-add').click()
     await page.waitForURL('**/chat')
   })

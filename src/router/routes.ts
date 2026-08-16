@@ -19,7 +19,6 @@ export interface MenuItem {
 /** 菜单项配置（docs/02 §4）：侧栏菜单；设置项带 children（任务/工具/记忆/系统/设置 子栏） */
 export const menuItems: MenuItem[] = [
   { path: '/chat', title: '对话', icon: 'ChatDotRound' },
-  { path: '/agents', title: 'Agents', icon: 'MagicStick', roles: ['admin', 'developer'] },
   { path: '/kb', title: '知识库', icon: 'FolderOpened', roles: ['admin', 'developer'] },
   {
     path: '/settings',
@@ -63,12 +62,6 @@ export const routes: RouteRecordRaw[] = [
     name: 'trajectory',
     component: () => import('@/views/TrajectoryView.vue'),
     meta: { title: '对话轨迹', requiresAuth: true } satisfies AppRouteMeta,
-  },
-  {
-    path: '/agents',
-    name: 'agents',
-    component: () => import('@/views/AgentsView.vue'),
-    meta: { title: 'Agents', icon: 'MagicStick', requiresAuth: true, roles: ['admin', 'developer'] } satisfies AppRouteMeta,
   },
   {
     path: '/tasks',
