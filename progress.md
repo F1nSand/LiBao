@@ -89,7 +89,7 @@ hybrid_search RRF 叠加/降级语义、_indexed_filter join、ContextVar 无泄
 - evals + cost：迁移 0005（notifications + eval 四表）+ 8 端点 + 最小运行器（逐 case 跑 agent 图 + LLM-as-a-Judge）+ `GET /system/cost`（token_usage.cost 聚合）
 - 新增测试 24 项（207 collect）；`pass` 关键字冲突用 `pass_` 属性映射 `pass` 列
 
-**验证状态**：ruff 全绿 + 207 collect；DB-backed 测试因 Docker db 未运行而 skip（待 `docker compose up -d db` + `alembic upgrade head` 后全量跑）。
+**验证状态**：ruff 全绿 + 迁移 0005 已应用（notifications+eval 四表）+ 全量 **207/207 通过**（Docker db 真实执行；修复轮 3 处失败：eval 模板非法 format 字段、C8 单事务需 flush 取 id、共享 DB 残留断言）。
 
 ---
 
