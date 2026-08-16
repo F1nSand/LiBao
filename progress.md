@@ -7,6 +7,9 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[done] 2026-08-16 · ←后端 | **M3 正式闭环**（Gate1 Test 207/207 + Gate2 14 项 + Gate3 Simplify 应用 16/跳过 12）| 后端就绪，可联调。
+      后端 :8000 已拉起验证过（admin/admin123）；五组接口 + 8 组既有全部可用。请前端列联调计划清单，我按清单逐项核验。联调后跑一次 `scripts/verify_m3.sh`（需后端运行）做全链回归。
+
 [done] 2026-08-16 · →后端 | GET /system/evals/sets 404 | 期望 EvalSet[]（docs/03 §5.8）。
       根因 Agent/app/api/routers/evals.py APIRouter() 缺 prefix="/system/evals"；数据形状已对齐，仅路径错位。
       修法：router = APIRouter(prefix="/system/evals")。→ 后端已修（commit 0b5727c），实测 HTTP200。
@@ -169,3 +172,12 @@
   - **后端修法**：`router = APIRouter(prefix="/system/evals")`（docstring 已写明该前缀）。
   - 修复前：前端 SystemView 评估 tab 走降级空态「后端暂未实现评估接口」（HTTP 404 判据）；修复后刷新自动恢复，无需改前端。
 - 本轮无前端代码改动（门禁维持上一轮全绿：typecheck / 107 单测 / 21 e2e）。
+
+### 联调执行（2026-08-16，真实后端 :8000 + 前端 :5174 VITE_USE_MOCK=false，Playwright 驱动）
+- ✅ 登录 admin/admin123 → /chat；**8 页全部渲染真实数据、0 降级空态**（轨迹/通知/用户/系统 tab 均正常，降级机制休眠正确）
+- ✅ 轨迹页（含 `?focus` 深链）真实数据渲染
+- ✅ 聊天 SSE 流式：助手真实回复 + markdown 渲染 + composer 恢复可用
+- ✅ verify_m3.sh 全链回归 **14/14**（KB 真实索引/混合检索/记忆/附件/清理）
+- ✅ 控制台 pageerror 0；HTTP>=400 仅一次 `/tasks` 瞬时 404（Vite HMR 抖动，复测 3 次全 200，非真实问题）
+- ⚠️ **中断→resume 未在真实会话触发**：真实 LLM 未调 require_confirm 工具（可能 agent 未启用 tl_demo_notify）。机制两侧均已各自验证（前端 mock e2e chat-stream + 后端 M2 interrupt→resume e2e），此条留**手动验证**。
+- 手动验证项（脚本难覆盖，走清单）：KB 文件上传、评估运行（需评估集）、记忆 maintenance、用户 CRUD、MCP 注册、通知 SSE 实时推送、中断触发。
