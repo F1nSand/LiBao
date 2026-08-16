@@ -31,6 +31,10 @@ AGENT_SYSTEM_PROMPT = (
     "基于工具结果回答。"
 )
 
+# M4 演示：协作助手（graph_template=proposer_reviewer，二段协作产出定稿 + agent_switch 事件）
+COLLAB_NAME = "协作助手"
+COLLAB_SYSTEM_PROMPT = "你是协作助手，面向用户输出最终定稿。协作过程自动执行：提案→评审→汇总。"
+
 
 async def _get_or_create_org(session: AsyncSession) -> Org:
     stmt = select(Org).where(Org.name == "默认组织", Org.deleted_at.is_(None))
@@ -104,19 +108,27 @@ async def _get_or_create_tool(
     return tool
 
 
-async def _get_or_create_agent(session: AsyncSession, org: Org, tool_ids: list[str]) -> AgentConfig:
+async def _get_or_create_agent(
+    session: AsyncSession,
+    org: Org,
+    *,
+    name: str,
+    prompt: str,
+    tool_ids: list[str],
+    graph_template: str = "single",
+) -> AgentConfig:
     stmt = select(AgentConfig).where(
-        AgentConfig.org_id == org.id, AgentConfig.name == AGENT_NAME, AgentConfig.deleted_at.is_(None)
+        AgentConfig.org_id == org.id, AgentConfig.name == name, AgentConfig.deleted_at.is_(None)
     )
     agent = (await session.execute(stmt)).scalar_one_or_none()
     settings = get_settings()
     if agent is None:
         agent = AgentConfig(
             org_id=org.id,
-            name=AGENT_NAME,
+            name=name,
             model=settings.llm_model,
-            system_prompt=AGENT_SYSTEM_PROMPT,
-            graph_template="single",
+            system_prompt=prompt,
+            graph_template=graph_template,
             skills=[],
             tools=list(tool_ids),
             max_steps=10,
@@ -128,7 +140,8 @@ async def _get_or_create_agent(session: AsyncSession, org: Org, tool_ids: list[s
     else:
         # 幂等：确保目标态（重跑可修正旧版本种子）；缺失工具追加到最前
         agent.status = "published"
-        agent.system_prompt = AGENT_SYSTEM_PROMPT
+        agent.system_prompt = prompt
+        agent.graph_template = graph_template
         missing = [t for t in tool_ids if t not in (agent.tools or [])]
         if missing:
             agent.tools = missing + list(agent.tools or [])
@@ -264,8 +277,17 @@ async def main() -> None:
         )
         # seed agent 同时挂 time_now + demo_notify：让中断→确认→resume 流在真实会话可触发（联调缺口修复）
         agent_tools = ["tl_time_now", "tl_demo_notify"]
-        agent = await _get_or_create_agent(session, org, agent_tools)
+        agent = await _get_or_create_agent(
+            session, org, name=AGENT_NAME, prompt=AGENT_SYSTEM_PROMPT, tool_ids=agent_tools, graph_template="single"
+        )
         await _get_or_create_version(session, agent, agent_tools)
+        # M4 演示：协作助手（proposer-reviewer，二段协作 + agent_switch；无工具，纯协作产稿）
+        collab_tools: list[str] = []
+        collab = await _get_or_create_agent(
+            session, org, name=COLLAB_NAME, prompt=COLLAB_SYSTEM_PROMPT, tool_ids=collab_tools,
+            graph_template="proposer_reviewer",
+        )
+        await _get_or_create_version(session, collab, collab_tools)
         await session.commit()
         print(
             f"seed ok: org={org.id} users={len(USERS)} "
