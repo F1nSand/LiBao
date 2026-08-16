@@ -41,3 +41,9 @@ def dispatch_emit() -> Callable[[str, dict[str, Any]], str] | None:
     ctx = _DISPATCH_CTX.get()
     return ctx.get("emit") if ctx else None
 
+
+def dispatch_thread_key() -> str:
+    """读当前线程 key（后台任务回填事件投递目标；无 → ""）。"""
+    ctx = _DISPATCH_CTX.get()
+    return str(ctx.get("thread_key", "")) if ctx else ""
+

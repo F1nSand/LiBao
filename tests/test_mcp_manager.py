@@ -103,17 +103,20 @@ async def test_manager_is_error_business_not_breaker_failure():
 
 
 async def test_manager_call_failure_counts_breaker():
-    # I2：调用期异常（stdio 流死亡等）→ record_failure，连续失败达阈值开闸
-    mgr = MCPManager(connection_factory=lambda server_id, cfg: FakeConn(fail_calls=1))
-    for _ in range(3):
-        ok, _ = await mgr.call("s1", _cfg(), "echo", {})
-        assert ok is False
-    ok, text = await mgr.call("s1", _cfg(), "echo", {})
-    assert ok is False and "熔断" in text
+    # I2：调用期异常（stdio 流死亡等）→ record_failure，持久连接持续失败达阈值开闸
+    mgr = MCPManager(connection_factory=lambda server_id, cfg: FakeConn(fail_calls=10**6))
+    try:
+        for _ in range(3):
+            ok, _ = await mgr.call("s1", _cfg(), "echo", {})
+            assert ok is False
+        ok, text = await mgr.call("s1", _cfg(), "echo", {})
+        assert ok is False and "熔断" in text
+    finally:
+        await mgr.close_all()
 
 
-async def test_manager_per_call_new_connection():
-    # 连接不跨任务驻留：每次 call 独立建连 + 用完即关
+async def test_manager_session_reuse_single_connection():
+    # M4 完整版：owner-task 池复用会话——多次 call 只建连一次，用完不关（close_all 才关）
     created: list[FakeConn] = []
 
     def factory(server_id, cfg):
@@ -122,22 +125,29 @@ async def test_manager_per_call_new_connection():
         return conn
 
     mgr = MCPManager(connection_factory=factory)
-    ok1, text1 = await mgr.call("s1", _cfg(), "echo", {})
-    ok2, text2 = await mgr.call("s1", _cfg(), "echo", {})
-    assert ok1 and ok2 and text1 == "ok" and text2 == "ok"
-    assert len(created) == 2  # 两次调用两个独立连接
-    assert all(c.closed for c in created)  # 用完即关
+    try:
+        ok1, text1 = await mgr.call("s1", _cfg(), "echo", {})
+        ok2, text2 = await mgr.call("s1", _cfg(), "echo", {})
+        assert ok1 and ok2 and text1 == "ok" and text2 == "ok"
+        assert len(created) == 1  # 会话复用：只建连一次
+        assert not created[0].closed  # 复用中，未用完即关
+    finally:
+        await mgr.close_all()
+    assert created[0].closed  # close_all 关闭池中连接
 
 
 async def test_manager_failure_opens_breaker():
-    # 每次调用独立新连接、首次调用即失败（阈值 3）→ 第 4 次直接熔断
-    mgr = MCPManager(connection_factory=lambda server_id, cfg: FakeConn(fail_calls=1))
-    for _ in range(3):
+    # 持久连接持续失败（每调用都抛）→ 连续失败达阈值开闸（阈值 3）→ 第 4 次直接熔断
+    mgr = MCPManager(connection_factory=lambda server_id, cfg: FakeConn(fail_calls=10**6))
+    try:
+        for _ in range(3):
+            ok, text = await mgr.call("s1", _cfg(), "echo", {})
+            assert ok is False and "boom" in text
         ok, text = await mgr.call("s1", _cfg(), "echo", {})
-        assert ok is False and "boom" in text
-    ok, text = await mgr.call("s1", _cfg(), "echo", {})
-    assert ok is False
-    assert "熔断" in text
+        assert ok is False
+        assert "熔断" in text
+    finally:
+        await mgr.close_all()
 
 
 async def test_manager_connect_failure_opens_breaker():
@@ -165,8 +175,8 @@ async def test_manager_close_all_clears_breakers():
     assert mgr._breakers == {}
 
 
-async def test_manager_concurrent_calls_independent_connections():
-    # 无共享会话：并发调用各自独立建连（跨任务安全），互不干扰
+async def test_manager_concurrent_calls_reuse_single_connection():
+    # 并发调同一 server → owner-task 队列串行 + 单连接复用（互不干扰）
     created: list[FakeConn] = []
 
     def factory(server_id, cfg):
@@ -175,9 +185,12 @@ async def test_manager_concurrent_calls_independent_connections():
         return conn
 
     mgr = MCPManager(connection_factory=factory)
-    results = await asyncio.gather(*[mgr.call("s1", _cfg(), "echo", {}) for _ in range(5)])
-    assert all(r[0] for r in results)
-    assert len(created) == 5
+    try:
+        results = await asyncio.gather(*[mgr.call("s1", _cfg(), "echo", {}) for _ in range(5)])
+        assert all(r[0] for r in results)
+        assert len(created) == 1  # 并发复用同一连接
+    finally:
+        await mgr.close_all()
 
 
 async def test_manager_validate_failure_raises():

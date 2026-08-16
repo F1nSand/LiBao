@@ -100,7 +100,8 @@ async def stream_graph_events(
     _main_name = "通用助手"
     if isinstance(initial, dict):
         _main_name = str((initial.get("agent_config", {}) or {}).get("name", _main_name))
-    set_dispatch_ctx({"push": _push, "main_name": _main_name})
+    _thread_key = str((graph_config.get("configurable") or {}).get("thread_id", ""))
+    set_dispatch_ctx({"push": _push, "main_name": _main_name, "thread_key": _thread_key})
 
     async def producer() -> None:
         try:
@@ -177,8 +178,9 @@ async def stream_graph_events(
                                     "ok": r.get("ok"),
                                     "summary": r.get("summary", ""),
                                     "structured": r.get("output"),
-                                    "placeholder": False,
-                                    "job_ref": None,
+                                    # M4 完整版：透出占位/回填真值（initiate_* 占位卡 → 回填真值卡）
+                                    "placeholder": bool(r.get("placeholder", False)),
+                                    "job_ref": r.get("job_ref"),
                                     "duration_ms": r.get("duration_ms", 0),
                                 },
                             )

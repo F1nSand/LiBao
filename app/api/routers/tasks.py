@@ -1,7 +1,6 @@
 """任务路由（docs 03 §5.3）。提交/列表/详情/取消/resume（双轨）/events（回放+live-tail）。"""
 from __future__ import annotations
 
-import asyncio
 import uuid
 from collections.abc import AsyncIterator
 
@@ -16,7 +15,7 @@ from app.core.errors import ERR_TASK_NOT_FOUND, AppError
 from app.core.events import sse_emitter
 from app.core.logging import get_trace_id
 from app.orchestration.chat_stream import resume_stream_events
-from app.orchestration.task_run import resume_task_graph, run_task_graph
+from app.orchestration.task_worker import running_task, spawn_run
 from app.services.agent import AgentService
 from app.services.serializers import serialize_task
 from app.services.task import TaskService, subscribe, unsubscribe
@@ -84,15 +83,13 @@ async def submit_task(
 ):
     agent = await AgentService().get_default(db, user.org_id)  # 单通用 Agent，不接收 agent_id
     task = await TaskService().submit(db, user, agent.id, req.input)
-    # M4：任务入队（worker 消费跑图）；Redis 不可用降级进程内 create_task（单实例/测试兜底）
+    # M4：任务入队（worker 消费跑图）；Redis 不可用降级进程内 spawn_run（单实例/测试兜底，注册进 _RUNNING 可取消）
     if not await TaskQueueService().enqueue_submit(task.id, get_trace_id()):
-        asyncio.create_task(
-            run_task_graph(
-                graph=request.app.state.graph,
-                sessionmaker=request.app.state.sessionmaker,
-                task_id=task.id,
-                trace_id=get_trace_id(),
-            )
+        spawn_run(
+            graph=request.app.state.graph,
+            sessionmaker=request.app.state.sessionmaker,
+            task_id=task.id,
+            trace_id=get_trace_id(),
         )
     return ok({"task_id": str(task.id)})
 
@@ -141,6 +138,10 @@ async def cancel_task(
 ):
     task = await TaskService().get_owned(db, task_id, user.id)
     await TaskService().cancel(db, task)
+    # M4 完整版：真正中断 in-flight 图（CancelledError 沿 graph.astream / LLM ainvoke 传播中止）
+    fut = running_task(str(task.id))
+    if fut is not None and not fut.done():
+        fut.cancel()
     return ok()
 
 
@@ -171,15 +172,13 @@ async def resume_task(
             media_type="text/event-stream",
             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
         )
-    # JSON 轨：后台续跑（TaskDetail 非流式）；M4 入队（Redis 挂降级 create_task）
+    # JSON 轨：后台续跑（TaskDetail 非流式）；M4 入队（Redis 挂降级 spawn_run，注册进 _RUNNING 可取消）
     if not await TaskQueueService().enqueue_resume(task.id, approved, trace_id):
-        asyncio.create_task(
-            resume_task_graph(
-                graph=graph,
-                sessionmaker=request.app.state.sessionmaker,
-                task_id=task.id,
-                approved=approved,
-                trace_id=trace_id,
-            )
+        spawn_run(
+            graph=graph,
+            sessionmaker=request.app.state.sessionmaker,
+            task_id=task.id,
+            approved=approved,
+            trace_id=trace_id,
         )
     return ok()

@@ -7,6 +7,7 @@ from app.tools.builtin import (
     demo_notify,
     dispatch_subagent,
     fetch_url,
+    initiate_demo,
     kb_search,
     time_now,
     tool_search,
@@ -172,6 +173,32 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=10000,
             handler=analyze_image.analyze_image_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_initiate_demo",
+            name="initiate_demo",
+            description=(
+                "发起一个演示后台任务并立即返回占位（placeholder:true + job_ref，前端显示「处理中」），"
+                "delay 秒后完成后台任务，回填真值 + 事件备注。适合演示工具级异步占位/回填流程。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "delay": {"type": "integer", "description": "后台任务延迟秒数，默认 3"},
+                    "note": {"type": "string", "description": "任务备注（回填时展示）"},
+                },
+                "required": [],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=True,
+            require_confirm=False,
+            idempotent=False,  # 后台任务有副作用不可去重
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=5000,  # 立即返回占位，不阻塞
+            handler=initiate_demo.initiate_demo_handler,
             builtin=True,
         )
     )

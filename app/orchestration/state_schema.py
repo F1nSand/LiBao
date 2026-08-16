@@ -33,3 +33,8 @@ class AgentState(TypedDict, total=False):
     run_logs: list[dict[str, Any]]
     # finalize 产出的最终消息 dict（对齐 done 事件 / message 持久化）
     final_message: dict[str, Any]
+    # M4 完整版：轮边界排空的安全点事件（route 裁决后待渲染给模型，context_update 消费）
+    pending_events: list[dict[str, Any]]
+    # M4 完整版：本会话在途的占位任务（{job_ref, tool_call_id, tool_name, created_at}，initiate_* 写入、
+    # 回填命中后移除）——回填 tool_result 的 job_ref 匹配依据
+    placeholder_jobs: list[dict[str, Any]]

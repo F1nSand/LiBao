@@ -11,7 +11,7 @@ import hashlib
 import json
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from jsonschema import ValidationError, validate
@@ -27,6 +27,18 @@ _MAX_IDEMPOTENCY_ENTRIES = 1024
 
 # 幂等去重缓存（进程内回退；M4 Redis 持久化，见 README）——{key: (expire_monotonic, ToolResult)}
 _idem_cache: dict[str, tuple[float, ToolResult]] = {}
+
+# M4 完整版：工具级并发信号量（ToolSpec.max_concurrency 执行落点）——{spec.id: Semaphore(max_concurrency)}
+_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
+
+
+def _semaphore(spec: ToolSpec) -> asyncio.Semaphore:
+    """取/建工具级信号量（懒创建；进程内限流，单实例足够，多实例需 Redis 计数为接缝）。"""
+    sem = _SEMAPHORES.get(spec.id)
+    if sem is None:
+        sem = asyncio.Semaphore(max(1, spec.max_concurrency))
+        _SEMAPHORES[spec.id] = sem
+    return sem
 
 
 @dataclass
@@ -133,7 +145,15 @@ async def execute(spec: ToolSpec, input: dict[str, Any]) -> ToolResult:
     if idem_key is not None and (cached := await _cache_get(idem_key)) is not None:
         return cached  # ToolResult 只读，直接返回缓存实例
 
-    # ④ 重试循环（仅 handler 普通异常可重试；超时直接返回）
+    # ④ 并发限流（ToolSpec.max_concurrency；幂等缓存命中不计入并发）
+    async with _semaphore(spec):
+        return await _execute_with_retries(spec, input, idem_key, start)
+
+
+async def _execute_with_retries(
+    spec: ToolSpec, input: dict[str, Any], idem_key: str | None, start: float
+) -> ToolResult:
+    """重试循环（仅 handler 普通异常可重试；超时直接返回）。"""
     timeout_sec = spec.timeout_ms / 1000
     last_error: Exception | None = None
     for attempt in range(spec.max_retries + 1):
@@ -143,6 +163,15 @@ async def execute(spec: ToolSpec, input: dict[str, Any]) -> ToolResult:
             result = ToolResult(
                 ok=True, output=output, summary=_summarize(output), duration_ms=duration, retries=attempt
             )
+            # M4 完整版：handler 返回 {"placeholder":true, "job_ref":...} 的占位契约 → 透出到 ToolResult
+            # （initiate_* 异步工具：立即返回占位，后台回填真值，docs 01 §5.5）
+            if isinstance(output, dict) and output.get("job_ref"):
+                result = replace(
+                    result,
+                    placeholder=bool(output.get("placeholder")),
+                    job_ref=str(output["job_ref"]),
+                    summary=str(output.get("summary") or result.summary),
+                )
             if idem_key is not None:
                 await _cache_put(idem_key, result)
             return result

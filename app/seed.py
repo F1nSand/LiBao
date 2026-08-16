@@ -276,7 +276,7 @@ async def main() -> None:
             idempotent=False,
             enabled=False,
         )
-        # 单通用 Agent：挂齐感知 + 派发工具（fetch_url/analyze_image 全局默认关，启用后即对通用助手开放）
+        # 单通用 Agent：挂齐感知 + 派发 + 异步占位演示工具（fetch_url/analyze_image 全局默认关，启用后即对通用助手开放）
         agent_tools = [
             "tl_time_now",
             "tl_demo_notify",
@@ -285,6 +285,7 @@ async def main() -> None:
             "tl_fetch_url",
             "tl_analyze_image",
             "tl_dispatch_subagent",
+            "tl_initiate_demo",
         ]
         agent = await _get_or_create_agent(
             session, org, name=AGENT_NAME, prompt=AGENT_SYSTEM_PROMPT, tool_ids=agent_tools, is_default=True

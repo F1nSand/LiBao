@@ -16,6 +16,51 @@ from app.storage.redis import brpop_task
 
 logger = logging.getLogger(__name__)
 
+# M4 完整版：in-flight 任务注册表（task_id → asyncio.Task）。
+# worker 消费与 Redis 降级路径（tasks.py create_task）共用，供 POST /tasks/{id}/cancel 真正中断运行中的图。
+_RUNNING: dict[str, asyncio.Task] = {}
+
+
+def running_task(task_id: str) -> asyncio.Task | None:
+    """取运行中任务的 asyncio.Task（无/已结束 → None）。"""
+    return _RUNNING.get(task_id)
+
+
+def spawn_run(
+    *,
+    graph: Any,
+    sessionmaker: Any,
+    task_id: uuid.UUID,
+    trace_id: str,
+    approved: bool | None = None,
+    model_override: Any = None,
+) -> asyncio.Task:
+    """以独立 asyncio.Task 跑 run_task_graph / resume_task_graph，并注册进 _RUNNING。
+
+    - approved is None → run_task_graph（提交）；approved 是 bool → resume_task_graph（resume 双轨）。
+    - 结束（含被取消）自动注销，防止注册表泄漏。
+    """
+    key = str(task_id)
+
+    async def _runner() -> None:
+        try:
+            if approved is not None:
+                await resume_task_graph(
+                    graph=graph, sessionmaker=sessionmaker, task_id=task_id,
+                    approved=approved, trace_id=trace_id, model_override=model_override,
+                )
+            else:
+                await run_task_graph(
+                    graph=graph, sessionmaker=sessionmaker, task_id=task_id,
+                    trace_id=trace_id, model_override=model_override,
+                )
+        finally:
+            _RUNNING.pop(key, None)
+
+    fut = asyncio.create_task(_runner())
+    _RUNNING[key] = fut
+    return fut
+
 
 async def process_one(graph: Any, sessionmaker: Any) -> bool:
     """brpop 一个任务并分派；无任务返回 False。trace_id 经 Redis 传输后必须恢复（run_log 断裂）。"""
@@ -24,15 +69,18 @@ async def process_one(graph: Any, sessionmaker: Any) -> bool:
         return False
     trace_id = payload.get("trace_id") or ""
     set_trace_id(trace_id)
+    task_id = uuid.UUID(payload["task_id"])
+    fut = spawn_run(
+        graph=graph,
+        sessionmaker=sessionmaker,
+        task_id=task_id,
+        trace_id=trace_id,
+        approved=bool(payload.get("approved")) if payload.get("kind") == "resume" else None,
+    )
     try:
-        task_id = uuid.UUID(payload["task_id"])
-        if payload.get("kind") == "resume":
-            await resume_task_graph(
-                graph=graph, sessionmaker=sessionmaker, task_id=task_id, approved=bool(payload.get("approved")),
-                trace_id=trace_id,
-            )
-        else:
-            await run_task_graph(graph=graph, sessionmaker=sessionmaker, task_id=task_id, trace_id=trace_id)
+        await fut
+    except asyncio.CancelledError:
+        logger.info("task %s cancelled in-flight", task_id)
     except Exception as exc:  # noqa: BLE001  单任务分派失败不退出 worker
         logger.warning("task worker dispatch failed: %s", exc)
     return True

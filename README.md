@@ -94,15 +94,18 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 | **对话自动记忆提取** | 仅手动卡片 + maintenance；context_update 自动提取未做 | `orchestration/nodes/context_update.py` |
 | **PDF/Office 文本提取** | 仅 metadata（reason 标注） | `services/attachment.py`；引入 pypdf 即可 |
 | **Docker 沙盒** | executor 对 `sandbox != none` 返回"暂未实现" | `tools/sandbox.py`（SandboxLevel 已备） |
-| **MCP 会话复用** | mcp 2.0 ClientSession cancel scope 绑定任务，跨 ASGI 请求复用会死（实测）→ 每次调用独立建连/用完即关（stdio 每次起子进程 ~1s） | `tools/mcp_manager.py`；优化需任务亲和调度（M4） |
+| **MCP 会话复用** ✅ M4 完整版 | owner-task 池（连接 cancel scope 常驻 owner 任务，规避跨请求复用报错）+ 请求队列串行；stdio 免每次起子进程 | `tools/mcp_manager.py` |
 | **MCP 资源/提示原语** | 只映射工具（E2） | 资源→RAG 数据源、提示→Skill 库（M6） |
 | **幂等持久化** | 进程内缓存（TTL 1h/1024 条），重启丢失 | `tools/executor.py` `_idem_cache` → M4 换 Redis |
 | **live-tail 多实例** | 单进程订阅表 | `services/task.py` `_tails` → M4 Redis 广播 |
-| **max_concurrency** | 字段已流动，未强制 | `tools/executor.py` 信号量插入点已注释 |
+| **max_concurrency** ✅ M4 完整版 | 进程内 per-spec Semaphore 已强制（executor 幂等后包重试循环；默认 10） | `tools/executor.py` `_semaphore` |
 | **多确认** | 每节点每轮只确认第一个 require_confirm 工具 | `nodes/tool_execute.py` `confirmed_once` |
-| **任务取消 in-flight** | 取消置状态，后台运行结束时不覆盖 | `orchestration/task_run.py` |
-| **Webhook/事件触发（docs 03 §5.10）** | 4 端点（hooks CRUD + 事件接收）未实现 | `api/routers/hooks.py`（M4 事件子系统） |
-| **事件安全点/优先级裁决器（docs 07 RM-9）** | 外部事件入队 + 节点间隙消费 + 紧急/常规/轻量裁决未实现 | `core/events.py` + `orchestration/nodes/route.py`（M4 事件子系统） |
+| **任务取消 in-flight** ✅ M4 完整版 | `task_worker._RUNNING` 注册表 + `POST /tasks/{id}/cancel` `fut.cancel()` 真正中断运行中的图 | `orchestration/task_worker.py` |
+| **Webhook/事件触发（docs 03 §5.10）** | 4 端点（hooks CRUD + 事件接收）未实现 | `api/routers/hooks.py`（后续） |
+| **事件安全点/裁决器** ✅ M4 完整版最小闭环 | 进程内收件箱 + route 轮边界排空 + 规则裁决（regular 进 context；urgent/light 预留）；`initiate_demo` 占位→回填工具已落地 | `services/events.py` + `nodes/route.py` + `builtin/initiate_demo.py` |
+| **任务亲和调度** | 单实例 MVP 下 worker 天然单消费者（BRPOP）；多实例需实例 id + task:claim + per-instance 队列 | 本轮不做，接缝标注（docs 05） |
+| **agent_switch 持久化** | 纯流式事件，Message 无持久化字段 | 协调项（前端 done 后指示条消失）；需则加 message JSONB 列 |
+| **占位 TTL 看门狗** | `initiate_*` 占位→回填已落地，TTL 超时置失败未做 | `placeholder_events`（task 表）+ 定时器（后续） |
 | **M5 评估/日志** | `run_log` 扁平表已建（type 含 retrieval/memory） | `/system/evals` 在 docs 03 §5.8 |
 | **M6 RBAC/进化** | `user.role` 已存 | `api/deps.py` |
 

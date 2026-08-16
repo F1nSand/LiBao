@@ -21,7 +21,16 @@ from app.tools.registry import agent_can_use, get, get_by_name
 
 
 def _result(
-    tc: dict, position: int, *, status: str, ok: bool, output: Any, summary: str = "", duration_ms: int = 0
+    tc: dict,
+    position: int,
+    *,
+    status: str,
+    ok: bool,
+    output: Any,
+    summary: str = "",
+    duration_ms: int = 0,
+    placeholder: bool = False,
+    job_ref: str | None = None,
 ) -> dict:
     """工具结果条目（docs 04 §3.2 message.tool_calls shape，三个分支共用）。"""
     return {
@@ -34,6 +43,9 @@ def _result(
         "status": status,
         **({"summary": summary} if summary else {}),
         "duration_ms": duration_ms,
+        # M4 完整版：占位/回填透出（initiate_* → stream_core → SSE）
+        "placeholder": placeholder,
+        "job_ref": job_ref,
     }
 
 
@@ -45,6 +57,8 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
     run_logs: list[dict[str, Any]] = []
     confirmed_once = False
     state_selected: list[str] | None = None  # M2.5：本轮 tool_search 选中（None = 未触发，保留旧值）
+    # M4 完整版：本轮新发起的占位任务（initiate_* 返回 placeholder+job_ref）→ 追加进 placeholder_jobs
+    placeholder_jobs = list(state.get("placeholder_jobs", []))
 
     # 授权谓词与 acis_for_tools 共用 agent_can_use（单一不变量）。
     # I7：spec.meta 平台元工具（tool_search，无害只读发现），超限模式强制注入其 ACI，
@@ -112,8 +126,22 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                 output=result.output,
                 summary=result.summary,
                 duration_ms=result.duration_ms,
+                placeholder=result.placeholder,
+                job_ref=result.job_ref,
             )
         )
+        # M4 完整版：占位任务登记（route 节点据 job_ref 回填）
+        if result.placeholder and result.job_ref:
+            from datetime import UTC, datetime
+
+            placeholder_jobs.append(
+                {
+                    "job_ref": result.job_ref,
+                    "tool_call_id": tc["id"],
+                    "tool_name": spec.name,
+                    "created_at": datetime.now(UTC).isoformat(),
+                }
+            )
         content = result.summary if result.ok else f"错误: {result.error}"
         tool_msgs.append(ToolMessage(content=content, tool_call_id=tc["id"]))
         run_logs.append(
@@ -135,4 +163,5 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
         "run_logs": (state.get("run_logs") or []) + run_logs,
         # LastValue：本轮有 tool_search 结果才更新，否则保留旧选中
         "selected_tool_names": state_selected if state_selected is not None else state.get("selected_tool_names", []),
+        "placeholder_jobs": placeholder_jobs,
     }
