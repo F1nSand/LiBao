@@ -24,6 +24,10 @@
       联调演示：发「帮我调研 XX / 审查这段代码 / 评审这个方案」→ 流式期应见 2 条 agent_switch 指示条 + 最终答案。
       注：聊天固定「通用助手」，无 agent 身份展示；旧 Agents 入口 →「工作区」（后续项目，07 路线图已标注）。
 
+[done] 2026-08-17 · →后端 | **M5 评估运行前端缺口已修**（后台异步评估适配）| 你无需改，POST /run 异步后台链符合 docs/03 §5.8。
+      发现：POST /system/evals/run 用 asyncio.create_task 后台跑，立即返回 running；前端 onRunEval 只取一次 detail → 空结果表。
+      修法：SystemView.onRunEval 轮询 evalRunDetail 至 done/failed（2.5s 间隔 / 120s 超时）再展示。
+      实测：点「运行评估」→ 轮询 → 结果表「1+1 | 期望2 | 实际'1+1 = 2。' | PASS」。评估/成本 tab 真实数据渲染，0 降级。
 [done] 2026-08-17 · ←后端 | **派发链路真实后端联调验证通过**（:8000 + 前端 :5174 VITE_USE_MOCK=false）| 前后端契约对接全链路 OK。
       演示「帮我调研 SSE」→ 流式期捕获 **2 条 agent_switch 指示条**（通用助手 → research 携带任务 / research → 通用助手 子任务完成）+ dispatch_subagent 工具卡「完成」+ 主 Agent 最终 Markdown 调研报告（基于 WHATWG/MDN 整理）。页面错误 0。
       另实测：POST /conversations 不带 agent_id → 200，返回 agent_id=默认通用 Agent uuid（`9c1f9091…`），新契约生效。
@@ -269,3 +273,14 @@
 - 验证：typecheck ✓ / lint 0err / **109 单测 PASS**（+1）/ **21 e2e PASS**
 - 排障：e2e 首轮 20 失败 = 5173 残留 dev server 被 playwright reuseExistingServer 复用（非 mock e2e 模式）→ 清端口后全绿，非代码回归。
 - 不做（记录）：工作区内部设计（用户自建 agent 取消，用途待定）；角色限制（无角色，所有登录可见）。
+
+## 2026-08-17 真实后端联调：M4 完整版新特性验证 + M5 评估联调（L2）
+- 前置：后端 :8000（M4 完整版 c785b7f 已提交并重启）；前端 :5174（VITE_USE_MOCK=false）。
+- M4 完整版验证（交接板邀请项）：
+  - **initiate_demo 占位→回填**（chat UI）：发「用 initiate_demo 发起一个 3 秒任务」→ t≈1.8s 工具卡「initiate_demo 处理中」（占位）→ t≈6.8s 回填「完成」+ 助手提及结果 ✅（SSE 探针亦确认 placeholder/job_ref 事件）
+  - **任务取消 in-flight**（API）：提交长生成任务 → progress 0.5 时 POST /tasks/{id}/cancel → status=cancelled ✅（initiate_demo 任务是占位语义、图本身很快 done，故用长 LLM 生成任务验证真实中断）
+- M5 评估与观测：
+  - 评估/成本 tab 真实数据渲染：评估集「契约验证集」（1 用例）+ 运行评估按钮；成本 ¥0.01 / 802 次 / 2 Provider + CostChart；0 空态 0 页面错误 ✅
+  - **发现缺口并修复**：POST /system/evals/run 后台异步（asyncio.create_task），前端 onRunEval 立即取 detail → 空结果表。修法：SystemView 加轮询至终态（2.5s / 120s 超时）。实测结果表「1+1 PASS」✅
+- 验证：typecheck ✓ / lint 0err（3 既有 any）/ **109 单测 PASS** / **21 e2e PASS**。
+- 不做（记录）：评估运行历史列表展示（当前只显示单次运行结果；runs 列表接口已有，前端未接）；评估集创建/用例管理（SystemView 只读展示，创建走后端 seed/手动）。

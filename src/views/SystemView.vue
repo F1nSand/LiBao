@@ -38,6 +38,11 @@ function openTrace(traceId: string) {
   traceDrawer.value = true
 }
 
+/** 评估运行轮询（docs/03 §5.8 后台链）：POST /run 即返回 running，结果后台逐 case 落库 → 轮询至终态 */
+const EVAL_POLL_INTERVAL_MS = 2500
+const EVAL_POLL_TIMEOUT_MS = 120_000
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
 async function onRunEval(evalSetId: string) {
   evalRunLoading.value = true
   try {
@@ -46,13 +51,22 @@ async function onRunEval(evalSetId: string) {
       ElMessage.warning('后端暂未实现评估运行接口')
       return
     }
-    const detail = await swallowNotImplemented(store.evalRunDetail(run.id))
+    const deadline = Date.now() + EVAL_POLL_TIMEOUT_MS
+    let detail = await swallowNotImplemented(store.evalRunDetail(run.id))
+    while (detail && detail.run.status !== 'done' && detail.run.status !== 'failed' && Date.now() < deadline) {
+      await delay(EVAL_POLL_INTERVAL_MS)
+      detail = await swallowNotImplemented(store.evalRunDetail(run.id))
+    }
     if (!detail) {
       ElMessage.warning('后端暂未实现评估结果接口')
       return
     }
     runResult.value = detail
-    ElMessage.success('评估运行完成')
+    if (detail.run.status === 'failed') {
+      ElMessage.error('评估运行失败')
+    } else {
+      ElMessage.success(`评估运行完成 · 通过率 ${Math.round((detail.run.pass_rate ?? 0) * 100)}%`)
+    }
   } finally {
     evalRunLoading.value = false
   }
