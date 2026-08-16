@@ -1,10 +1,13 @@
-"""通知领域服务（docs 03 §5.11）。落库 + 按 user_id 进程内 SSE 广播（镜像 task.py live-tail）。
+"""通知领域服务（docs 03 §5.11）。落库 + 按 user_id SSE 广播（M4：Redis Pub/Sub + 进程内回退）。
 
 产生源：任务事件（set_done/set_failed）+ demo_notify 工具确认执行后。
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
+import logging
 import uuid
 from typing import Any
 
@@ -13,27 +16,58 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ERR_NOTIFICATION_NOT_FOUND, AppError
 from app.services.serializers import serialize_notification
 from app.storage.models.notification import Notification
+from app.storage.redis import get_redis, notif_channel, pubsub_bridge
 from app.storage.repositories.notification import NotificationRepository
 
-# 进程内订阅表（单进程接缝，多实例为 M4 Redis 广播）
+logger = logging.getLogger(__name__)
+
+# 通知 live-tail（M4：Redis Pub/Sub + 进程内回退）
 _notif_tails: dict[str, list[asyncio.Queue]] = {}
+_notif_bridges: dict[int, tuple[Any, asyncio.Task]] = {}  # id(queue) → (pubsub, bridge_task)
 
 
-def push_notification(user_id: str, notif: dict[str, Any]) -> None:
-    """推通知给该用户全部订阅者（SSE 帧 payload）。"""
-    queues = _notif_tails.get(user_id)
-    if queues:
-        for q in queues:
-            q.put_nowait(("notification", notif))
+async def push_notification(user_id: str, notif: dict[str, Any]) -> None:
+    """推通知：Redis 可用 → 广播 channel；否则进程内直投。通知流永久（无终态哨兵）。"""
+    r = get_redis()
+    if r is None:
+        queues = _notif_tails.get(user_id)
+        if queues:
+            for q in queues:
+                q.put_nowait(("notification", notif))
+        return
+    try:
+        await r.publish(notif_channel(user_id), json.dumps({"type": "notification", "payload": notif}))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("redis notify publish failed: %s", exc)
 
 
-def subscribe_notifications(user_id: str) -> asyncio.Queue:
+async def subscribe_notifications(user_id: str) -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue()
-    _notif_tails.setdefault(user_id, []).append(q)
+    r = get_redis()
+    if r is None:
+        _notif_tails.setdefault(user_id, []).append(q)
+        return q
+    try:
+        pubsub = r.pubsub()
+        channel = notif_channel(user_id)
+        await pubsub.subscribe(channel)
+        t = asyncio.create_task(pubsub_bridge(pubsub, channel, q, terminal=False))
+        _notif_bridges[id(q)] = (pubsub, t)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("redis notify subscribe failed, fallback: %s", exc)
+        _notif_tails.setdefault(user_id, []).append(q)
     return q
 
 
-def unsubscribe_notifications(user_id: str, q: asyncio.Queue) -> None:
+async def unsubscribe_notifications(user_id: str, q: asyncio.Queue) -> None:
+    b = _notif_bridges.pop(id(q), None)
+    if b is not None:
+        pubsub, t = b
+        t.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await t
+        with contextlib.suppress(Exception):
+            await pubsub.unsubscribe(notif_channel(user_id))
     queues = _notif_tails.get(user_id)
     if queues and q in queues:
         queues.remove(q)
@@ -49,7 +83,7 @@ class NotificationService:
         row = await NotificationRepository(db).create(user_id=user_id, title=title, body=body, level=level)
         await db.commit()
         await db.refresh(row)
-        push_notification(str(user_id), serialize_notification(row))
+        await push_notification(str(user_id), serialize_notification(row))
         return row
 
     async def list_paged(self, db: AsyncSession, user_id: uuid.UUID, page: int, page_size: int) -> dict[str, Any]:

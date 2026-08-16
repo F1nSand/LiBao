@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -35,8 +36,11 @@ async def traj_fixture():
         session.add(conv)
         await session.flush()
         repo = MessageRepository(session)
-        await repo.create(conversation_id=conv.id, role="user", content="第一条", trace_id="t1")
-        await repo.create(
+        # 显式递增 created_at（同 commit 的 server_default now() 会并列，排序不稳定——确定性修复）
+        base = datetime(2026, 1, 1, tzinfo=UTC)
+        m1 = await repo.create(conversation_id=conv.id, role="user", content="第一条", trace_id="t1")
+        m1.created_at = base
+        m2 = await repo.create(
             conversation_id=conv.id,
             role="assistant",
             content="回复",
@@ -54,7 +58,9 @@ async def traj_fixture():
             token_usage={"total_tokens": 10},
             trace_id="t2",
         )
-        await repo.create(conversation_id=conv.id, role="user", content="第二条", trace_id="t3")
+        m2.created_at = base + timedelta(seconds=1)
+        m3 = await repo.create(conversation_id=conv.id, role="user", content="第二条", trace_id="t3")
+        m3.created_at = base + timedelta(seconds=2)
         await session.commit()
     yield sessionmaker, user, conv
     await engine.dispose()

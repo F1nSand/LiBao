@@ -21,7 +21,16 @@ def db_reachable() -> bool:
         return False
 
 
+def redis_reachable() -> bool:
+    try:
+        with socket.create_connection(("localhost", 6379), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
 requires_db = pytest.mark.skipif(not db_reachable(), reason="Docker db 未运行")
+requires_redis = pytest.mark.skipif(not redis_reachable(), reason="Docker redis 未运行")
 
 
 @pytest.fixture

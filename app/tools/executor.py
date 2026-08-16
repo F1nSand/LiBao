@@ -16,6 +16,7 @@ from typing import Any
 
 from jsonschema import ValidationError, validate
 
+from app.storage.redis import get_redis, idem_get, idem_set
 from app.tools.registry import ToolSpec
 from app.tools.sandbox import SandboxLevel
 
@@ -24,7 +25,7 @@ _BACKOFF_BASE_MS = 300  # 指数退避基数（抖动上限同此值）
 _IDEMPOTENCY_TTL_S = 3600
 _MAX_IDEMPOTENCY_ENTRIES = 1024
 
-# 幂等去重缓存（进程内；M4 换 Redis 的接缝，见 README）——{key: (expire_monotonic, ToolResult)}
+# 幂等去重缓存（进程内回退；M4 Redis 持久化，见 README）——{key: (expire_monotonic, ToolResult)}
 _idem_cache: dict[str, tuple[float, ToolResult]] = {}
 
 
@@ -51,7 +52,42 @@ def _fingerprint(spec: ToolSpec, input: dict[str, Any]) -> str:
     return f"{spec.id}:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
-def _cache_get(key: str) -> ToolResult | None:
+def _serialize_result(result: ToolResult) -> str | None:
+    """ToolResult → JSON；output 非 JSON 可序列化 → None（跳过 Redis，回退进程内）。"""
+    try:
+        return json.dumps(
+            {
+                "ok": result.ok,
+                "output": result.output,
+                "summary": result.summary,
+                "duration_ms": result.duration_ms,
+                "error": result.error,
+                "placeholder": result.placeholder,
+                "job_ref": result.job_ref,
+                "retries": result.retries,
+            },
+            ensure_ascii=False,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _deserialize_result(raw: str) -> ToolResult | None:
+    try:
+        data = json.loads(raw)
+        return ToolResult(**data)
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+async def _cache_get(key: str) -> ToolResult | None:
+    r = get_redis()
+    if r is not None:
+        raw = await idem_get(key)
+        if raw is not None:
+            result = _deserialize_result(raw)
+            if result is not None:
+                return result
     entry = _idem_cache.get(key)
     if entry is None:
         return None
@@ -62,7 +98,14 @@ def _cache_get(key: str) -> ToolResult | None:
     return result
 
 
-def _cache_put(key: str, result: ToolResult) -> None:
+async def _cache_put(key: str, result: ToolResult) -> None:
+    r = get_redis()
+    if r is not None:
+        raw = _serialize_result(result)
+        if raw is not None:
+            await idem_set(key, raw)
+            return
+    # 进程内回退（Redis 不可用或结果不可 JSON 序列化）
     if len(_idem_cache) >= _MAX_IDEMPOTENCY_ENTRIES:
         _idem_cache.clear()  # 上限淘汰：整体清空（最简单正确）
     _idem_cache[key] = (time.monotonic() + _IDEMPOTENCY_TTL_S, result)
@@ -87,7 +130,7 @@ async def execute(spec: ToolSpec, input: dict[str, Any]) -> ToolResult:
 
     # ③ 幂等去重（执行前查，成功才写）
     idem_key = _fingerprint(spec, input) if spec.idempotent else None
-    if idem_key is not None and (cached := _cache_get(idem_key)) is not None:
+    if idem_key is not None and (cached := await _cache_get(idem_key)) is not None:
         return cached  # ToolResult 只读，直接返回缓存实例
 
     # ④ 重试循环（仅 handler 普通异常可重试；超时直接返回）
@@ -101,7 +144,7 @@ async def execute(spec: ToolSpec, input: dict[str, Any]) -> ToolResult:
                 ok=True, output=output, summary=_summarize(output), duration_ms=duration, retries=attempt
             )
             if idem_key is not None:
-                _cache_put(idem_key, result)
+                await _cache_put(idem_key, result)
             return result
         except TimeoutError:
             duration = int((time.perf_counter() - start) * 1000)

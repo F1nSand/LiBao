@@ -1,6 +1,7 @@
 """2d notifications 测试（DB-backed）：落库/分页/已读/SSE 广播 + 产生源（任务 done、demo_notify）。"""
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import pytest
@@ -64,17 +65,17 @@ async def test_mark_read(notif_fixture):
 
 
 async def test_sse_push_delivers_to_subscriber(notif_fixture):
-    """SSE 广播：订阅后 create 推送帧（镜像 task live-tail）。"""
+    """SSE 广播：订阅后 create 推送帧（Redis Pub/Sub 或进程内回退）。"""
     sessionmaker, user, agent = notif_fixture
-    q = subscribe_notifications(str(user.id))
+    q = await subscribe_notifications(str(user.id))
     try:
         async with sessionmaker() as session:
             await NotificationService().create(session, user.id, "推送")
-        event_type, payload = q.get_nowait()
+        event_type, payload = await asyncio.wait_for(q.get(), timeout=2)  # 桥接异步投递，不能 get_nowait
         assert event_type == "notification"
         assert payload["title"] == "推送"
     finally:
-        unsubscribe_notifications(str(user.id), q)
+        await unsubscribe_notifications(str(user.id), q)
 
 
 async def test_task_done_creates_notification(notif_fixture):

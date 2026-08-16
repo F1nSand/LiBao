@@ -60,6 +60,7 @@ def build_initial_state(
             "tools": agent.tools or [],
             "max_steps": agent.max_steps,
             "org_id": org_id or str(getattr(agent, "org_id", "") or ""),
+            "graph_template": getattr(agent, "graph_template", "single"),
         },
         "user_id": user_id,
         # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs
@@ -164,6 +165,11 @@ async def stream_graph_events(
                                     "duration_ms": r.get("duration_ms", 0),
                                 },
                             )
+                    elif node in ("proposer", "reviewer", "summarize"):
+                        # M4：多 Agent 协作节点 → agent_switch 事件（前端渲染切换标记）
+                        sw = update.get("agent_switch")
+                        if sw:
+                            yield emit("agent_switch", sw)
                     elif node == "context_update":
                         yield emit("status", {"status": "finalizing", "context_metrics": None})
                     elif node == "__interrupt__":

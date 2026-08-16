@@ -20,6 +20,7 @@ from app.orchestration.task_run import resume_task_graph, run_task_graph
 from app.services.agent import AgentService
 from app.services.serializers import serialize_task
 from app.services.task import TaskService, subscribe, unsubscribe
+from app.services.task_queue import TaskQueueService
 from app.storage.models.task import Task
 from app.storage.models.user import User
 
@@ -60,7 +61,7 @@ async def _task_event_stream(db: AsyncSession, task: Task) -> AsyncIterator[str]
     # ---- live-tail ----
     # F3：先订阅再查终态——避免 push_event 在「终态检查」与「订阅」之间已推送并弹出队列，
     # 导致新队列永远收不到终态哨兵而挂死；终态订阅后立即退订。
-    q = subscribe(str(task.id))
+    q = await subscribe(str(task.id))
     try:
         if task.status in ("done", "failed", "cancelled"):
             return
@@ -71,7 +72,7 @@ async def _task_event_stream(db: AsyncSession, task: Task) -> AsyncIterator[str]
             event_type, payload = item
             yield emit(event_type, payload)
     finally:
-        unsubscribe(str(task.id), q)
+        await unsubscribe(str(task.id), q)
 
 
 @router.post("/tasks")
@@ -83,15 +84,16 @@ async def submit_task(
 ):
     await AgentService().get_published(db, req.agent_id, user.org_id)  # 校验 published + 同 org
     task = await TaskService().submit(db, user, req.agent_id, req.input)
-    # 后台执行（M2 最小实现；完整任务队列为 M4）
-    asyncio.create_task(
-        run_task_graph(
-            graph=request.app.state.graph,
-            sessionmaker=request.app.state.sessionmaker,
-            task_id=task.id,
-            trace_id=get_trace_id(),
+    # M4：任务入队（worker 消费跑图）；Redis 不可用降级进程内 create_task（单实例/测试兜底）
+    if not await TaskQueueService().enqueue_submit(task.id, get_trace_id()):
+        asyncio.create_task(
+            run_task_graph(
+                graph=request.app.state.graph,
+                sessionmaker=request.app.state.sessionmaker,
+                task_id=task.id,
+                trace_id=get_trace_id(),
+            )
         )
-    )
     return ok({"task_id": str(task.id)})
 
 
@@ -169,14 +171,15 @@ async def resume_task(
             media_type="text/event-stream",
             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
         )
-    # JSON 轨：后台续跑（TaskDetail 非流式）
-    asyncio.create_task(
-        resume_task_graph(
-            graph=graph,
-            sessionmaker=request.app.state.sessionmaker,
-            task_id=task.id,
-            approved=approved,
-            trace_id=trace_id,
+    # JSON 轨：后台续跑（TaskDetail 非流式）；M4 入队（Redis 挂降级 create_task）
+    if not await TaskQueueService().enqueue_resume(task.id, approved, trace_id):
+        asyncio.create_task(
+            resume_task_graph(
+                graph=graph,
+                sessionmaker=request.app.state.sessionmaker,
+                task_id=task.id,
+                approved=approved,
+                trace_id=trace_id,
+            )
         )
-    )
     return ok()

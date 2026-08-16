@@ -63,7 +63,7 @@ async def _run_graph_common(
             payload["created_at"] = datetime.now(UTC).isoformat()
             await TaskRepository(db).set_pending_confirm(updated, payload)
             await db.commit()
-            push_event(
+            await push_event(
                 str(task_id),
                 "interrupt",
                 {
@@ -90,7 +90,7 @@ async def _run_graph_common(
                 # 2d：demo_notify 确认执行后落通知（工具结果产生源）
                 if updated.user_id is not None:
                     await maybe_notify_from_tool_results(db, updated.user_id, final_state)
-                push_event(
+                await push_event(
                     str(task_id),
                     "done",
                     {
@@ -109,7 +109,7 @@ async def _run_graph_common(
                 return None
             if updated.status == "running":
                 await svc.set_failed(db, updated, str(exc))
-                push_event(str(task_id), "error", {"code": 60001, "message": str(exc), "retryable": True})
+                await push_event(str(task_id), "error", {"code": 60001, "message": str(exc), "retryable": True})
             return None
 
         async for _ in stream_graph_events(
@@ -131,7 +131,7 @@ async def _mark_failed(sessionmaker: Any, task_id: uuid.UUID, exc: Exception, lo
         task = await TaskRepository(db).get_by_id(task_id)
         if task is not None:
             await TaskService().set_failed(db, task, str(exc))
-            push_event(str(task_id), "error", {"code": 50001, "message": str(exc), "retryable": True})
+            await push_event(str(task_id), "error", {"code": 50001, "message": str(exc), "retryable": True})
 
 
 async def run_task_graph(
@@ -149,7 +149,7 @@ async def run_task_graph(
             agent = await AgentRepository(db).get_published(task.agent_id)
             if agent is None:
                 await TaskService().set_failed(db, task, "Agent 不存在或未发布")
-                push_event(
+                await push_event(
                     str(task_id),
                     "error",
                     {"code": 40404, "message": "Agent 不存在或未发布", "retryable": False},
@@ -180,7 +180,7 @@ async def resume_task_graph(
                 return
             if not approved:
                 await TaskService().set_cancelled(db, task)
-                push_event(str(task_id), "cancelled", {"status": "cancelled"})
+                await push_event(str(task_id), "cancelled", {"status": "cancelled"})
                 return
             await TaskService().set_running(db, task)
         await _run_graph_common(

@@ -45,7 +45,7 @@ async def notification_stream(
 ):
     """SSE 实时通知（按 user_id 订阅，镜像 task live-tail；前端 useSSE 直连）。"""
     emit = sse_emitter()
-    q = subscribe_notifications(str(user.id))
+    q = await subscribe_notifications(str(user.id))
 
     async def gen():
         try:
@@ -58,7 +58,7 @@ async def notification_stream(
                 if event_type == "notification":
                     yield emit("notification", payload)
         finally:
-            unsubscribe_notifications(str(user.id), q)
+            await unsubscribe_notifications(str(user.id), q)
 
     return StreamingResponse(
         gen(),

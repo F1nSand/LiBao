@@ -72,8 +72,11 @@ async def lifespan(app: FastAPI):
 
     # M3：sessionmaker 桥（kb_search 工具/记忆注入在五层约束下直连存储层）
     from app.storage.db import set_sessionmaker
+    from app.storage.redis import init_redis
 
     set_sessionmaker(sessionmaker)
+    # M4：Redis 存储层（任务队列/事件广播/幂等缓存）；连接失败不影响启动（调用方降级）
+    app.state.redis = init_redis(settings)
     async with sessionmaker() as session:
         from sqlalchemy import select
 
@@ -89,8 +92,23 @@ async def lifespan(app: FastAPI):
     async with PostgresCheckpointer(settings.sync_checkpoint_dsn) as saver:
         app.state.checkpointer = saver
         app.state.graph = build_graph(saver)
-        logger.info("lifespan ready: graph compiled, checkpointer up")
+        # M4：任务 worker（常驻 BRPOP 消费队列；停止顺序 = set stop → cancel → close redis）
+        from app.orchestration.task_worker import task_worker
+
+        stop_event = asyncio.Event()
+        app.state.task_worker_stop = stop_event
+        app.state.task_worker = asyncio.create_task(task_worker(app.state.graph, sessionmaker, stop_event))
+        logger.info("lifespan ready: graph compiled, checkpointer up, task worker up")
         yield
+        stop_event.set()
+        app.state.task_worker.cancel()
+        try:
+            await app.state.task_worker
+        except asyncio.CancelledError:
+            pass
+    from app.storage.redis import close_redis
+
+    await close_redis()
     await engine.dispose()
 
 

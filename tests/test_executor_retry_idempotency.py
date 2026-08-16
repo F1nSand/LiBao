@@ -1,11 +1,22 @@
-"""T4 执行器测试：重试（指数退避）、幂等去重、沙盒守卫、校验/超时不重试。纯单元，无 DB。"""
+"""T4 执行器测试：重试（指数退避）、幂等去重、沙盒守卫、校验/超时不重试。纯单元，无 DB。
+
+_no_redis autouse：幂等单测强制走进程内缓存（Redis 持久化会跨 run 污染固定指纹的断言；
+Redis 集成由 test_idempotency_redis.py 单独覆盖）。
+"""
 from __future__ import annotations
 
 import time
 
+import pytest
+
 from app.tools import executor
 from app.tools.registry import ToolSpec
 from app.tools.sandbox import SandboxLevel
+
+
+@pytest.fixture(autouse=True)
+def _no_redis(monkeypatch):
+    monkeypatch.setattr("app.tools.executor.get_redis", lambda: None)
 
 
 def _spec(**kw) -> ToolSpec:

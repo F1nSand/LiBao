@@ -263,13 +263,13 @@ async def resume_stream_events(
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status != "cancelled":
             await task_service.set_done(db, updated, final_message=fm)  # set_done 内部 commit（含消息持久化）
-            push_event(
+            await push_event(
                 str(task.id),
                 "done",
                 {"message_id": str(assistant_msg_id), "token_usage": fm.get("token_usage") or totals, "message": fm},
             )
         elif updated is not None:
-            push_event(str(task.id), "cancelled", {"status": "cancelled"})
+            await push_event(str(task.id), "cancelled", {"status": "cancelled"})
             await db.commit()  # 拒绝分支无 set_done：此处落消息持久化（E5）
         # 2d：demo_notify 确认执行后落通知（工具结果产生源）
         await maybe_notify_from_tool_results(db, user.id, final_state)
@@ -286,7 +286,7 @@ async def resume_stream_events(
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status == "running":
             await task_service.set_failed(db, updated, str(exc))
-            push_event(str(task.id), "error", {"code": 60001, "message": str(exc), "retryable": True})
+            await push_event(str(task.id), "error", {"code": 60001, "message": str(exc), "retryable": True})
 
     async for frame in stream_graph_events(
         graph=graph,
