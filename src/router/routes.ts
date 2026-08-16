@@ -18,6 +18,8 @@ export interface MenuItem {
 
 /** 菜单项配置（docs/02 §4）：侧栏菜单；设置项带 children（任务/工具/记忆/系统/设置 子栏） */
 export const menuItems: MenuItem[] = [
+  // 工作区（单通用 Agent 后置项目，docs/07）：入口在对话上方，内部设计待定
+  { path: '/workspace', title: '工作区', icon: 'Grid' },
   { path: '/chat', title: '对话', icon: 'ChatDotRound' },
   { path: '/kb', title: '知识库', icon: 'FolderOpened', roles: ['admin', 'developer'] },
   {
@@ -49,6 +51,12 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/',
     redirect: '/chat',
+  },
+  {
+    path: '/workspace',
+    name: 'workspace',
+    component: () => import('@/views/WorkspaceView.vue'),
+    meta: { title: '工作区', icon: 'Grid', requiresAuth: true } satisfies AppRouteMeta,
   },
   {
     path: '/chat',

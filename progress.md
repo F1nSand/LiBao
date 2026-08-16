@@ -7,6 +7,13 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[done] 2026-08-17 · ←后端 | **M4 完整版落地 + verify_subagent.sh 回归**（239 测试全绿 + ruff 全绿）| 前端占位卡逻辑已实现，预期零改动。
+      - `scripts/verify_subagent.sh`：登录 → 无 agent_id 建会话 → 派发 research → 断言 2 条 agent_switch + done（8/8 全绿）。前端可运行验证。
+      - **tool_result 现在可能带 `placeholder:true + job_ref`**（新内置 `initiate_demo` 工具：立即返回占位卡 → 后台约 N 秒 → 回填 `placeholder:false` 同 job_ref 真值卡）。你前端占位/TTL 卡逻辑已实现，无需改；契约见 docs 03 §3.5。
+      - 取消 in-flight 已实现：`POST /tasks/{id}/cancel` 现在会真正中断运行中的图（不再烧 token 跑完）。
+      - 演示 initiate 占位：发「用 initiate_demo 发起一个 3 秒任务」→ 占位卡 → 约 3s 后回填 + 模型下一轮提到结果。
+      - 任务亲和调度本轮不做（单实例非必要，多实例接缝标注）；agent_switch 持久化仍为协调项。
+
 [done] 2026-08-16 · ←后端 | **后端已完成「单通用 Agent + Subagent 派发」重构，与你前端契约对齐**（228→227 测试全绿 + ruff 全绿）| 你无需改前端。
       后端落点（与你已删的 /agents、agent_id、graph_template 完全一致）：
       - `/agents*` 全端点删除（404）；`POST /conversations`、`/chat/stream`、`/tasks` 不再收 `agent_id`，服务端用默认「通用助手」（agent_configs.is_default=True，seed 幂等收敛）
@@ -250,3 +257,15 @@
 - 跳过（记录不改）：TaskList/TaskDetail 的 Agent 列恒为默认 id（UX 噪音，Task.agent_id 契约仍返回，属产品决策）；domain.ts AgentStatus（既有未用，docs 引用）；mock/server.ts 会话创建抽 helper（两处 title 派生略异，过度抽象）；useChatStream.start endpoint 参数已无真实调用方（AgentTestRunner 删除后遗留，后续清理）
 - 交接：后端已在交接板确认重构完成（`/agents*` 404、请求去 agent_id、tl_dispatch_subagent、agent_switch「通用助手→subagent→通用助手」），与前端收敛一致
 - 不做（记录）：后端默认 Agent 配置页（无端点，需后端补 /agents/default 另立项）；docs/03/04 契约文档更新归后端 agent
+
+## 2026-08-17 工作区壳页（L2）：入口在对话上方，内部设计待定
+- 用户指令：完成工作区页面搭建（用户自建 agent 功能已取消）；按钮放对话上方；内部设计先不做。
+- 改动：
+  - routes.ts：menuItems 顶部加 `/workspace`（Grid，无角色限制）+ 路由 → WorkspaceView
+  - SidebarNav：`pick(paths)` 恢复多路径；topItems = `['/workspace', '/chat']`（工作区在对话上方）
+  - 新建 `src/views/WorkspaceView.vue`：壳页（app-page 头 + el-empty「工作区规划中」）
+  - routes.spec +1：菜单顶部顺序 = /workspace → /chat
+  - docs/02：页面表 + 布局图 + 侧栏描述补工作区；CLAUDE.md 页面清单 8 页
+- 验证：typecheck ✓ / lint 0err / **109 单测 PASS**（+1）/ **21 e2e PASS**
+- 排障：e2e 首轮 20 失败 = 5173 残留 dev server 被 playwright reuseExistingServer 复用（非 mock e2e 模式）→ 清端口后全绿，非代码回归。
+- 不做（记录）：工作区内部设计（用户自建 agent 取消，用途待定）；角色限制（无角色，所有登录可见）。

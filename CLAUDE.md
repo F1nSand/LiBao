@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目是什么
 
-Agent 平台（通用 Agent 运行时）的 **Web 前端工作台 / 管理控制台**：对话工作台、任务/工具/知识库/记忆/系统监控/设置 7 页 + 登录，RBAC 三角色。
+Agent 平台（通用 Agent 运行时）的 **Web 前端工作台 / 管理控制台**：工作区/对话工作台、任务/工具/知识库/记忆/系统监控/设置 8 页 + 登录，RBAC 三角色。
 
 **契约来源（必须遵守）**：父目录 `docs/02-frontend-design.md`（前端蓝本）、`docs/03-api-contract.md`（唯一协议依据）、`docs/04-data-model.md`（字段）。前后端完全分离，后端（FastAPI）尚未实现。
 
