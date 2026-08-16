@@ -23,11 +23,12 @@ USERS = [
     ("viewer", "viewer123", "访客", "viewer"),
 ]
 
-# LLM 侧函数名为 time_now（registry id 是 tl_time_now）——提示词里写模型实际见到的名字
+# LLM 侧函数名为 time_now/demo_notify（registry id 是 tl_ 前缀）——提示词里写模型实际见到的名字
 AGENT_NAME = "时间助手"
 AGENT_SYSTEM_PROMPT = (
-    "你是时间助手，只回答与时间相关的问题。"
-    "需要知道当前时间时使用 time_now 工具，再基于工具结果回答。"
+    "你是时间助手。需要知道当前时间时使用 time_now 工具；"
+    "用户要求发送通知/提醒时使用 demo_notify 工具（该工具为演示人工确认流程：会先请求确认，确认后才真正发送）。"
+    "基于工具结果回答。"
 )
 
 
@@ -102,7 +103,7 @@ async def _get_or_create_tool(
     return tool
 
 
-async def _get_or_create_agent(session: AsyncSession, org: Org, tool_id: str) -> AgentConfig:
+async def _get_or_create_agent(session: AsyncSession, org: Org, tool_ids: list[str]) -> AgentConfig:
     stmt = select(AgentConfig).where(
         AgentConfig.org_id == org.id, AgentConfig.name == AGENT_NAME, AgentConfig.deleted_at.is_(None)
     )
@@ -116,7 +117,7 @@ async def _get_or_create_agent(session: AsyncSession, org: Org, tool_id: str) ->
             system_prompt=AGENT_SYSTEM_PROMPT,
             graph_template="single",
             skills=[],
-            tools=[tool_id],
+            tools=list(tool_ids),
             max_steps=10,
             status="published",
             current_version=0,
@@ -124,15 +125,16 @@ async def _get_or_create_agent(session: AsyncSession, org: Org, tool_id: str) ->
         session.add(agent)
         await session.flush()
     else:
-        # 幂等：确保目标态（重跑可修正旧版本种子）
+        # 幂等：确保目标态（重跑可修正旧版本种子）；缺失工具追加到最前
         agent.status = "published"
         agent.system_prompt = AGENT_SYSTEM_PROMPT
-        if tool_id not in (agent.tools or []):
-            agent.tools = [tool_id] + list(agent.tools or [])
+        missing = [t for t in tool_ids if t not in (agent.tools or [])]
+        if missing:
+            agent.tools = missing + list(agent.tools or [])
     return agent
 
 
-async def _get_or_create_version(session: AsyncSession, agent: AgentConfig, tool_id: str) -> AgentVersion:
+async def _get_or_create_version(session: AsyncSession, agent: AgentConfig, tool_ids: list[str]) -> AgentVersion:
     stmt = select(AgentVersion).where(
         AgentVersion.agent_id == agent.id, AgentVersion.version == 1, AgentVersion.deleted_at.is_(None)
     )
@@ -143,8 +145,8 @@ async def _get_or_create_version(session: AsyncSession, agent: AgentConfig, tool
     # 幂等：种子引导数据非真实发布版本，每次重跑刷新快照保持一致（赋值只写一次）
     ver.system_prompt = agent.system_prompt
     ver.model = agent.model
-    ver.tools = [tool_id]
-    ver.prefix_hash = compute_prefix_hash(agent.model, agent.system_prompt, [tool_id])
+    ver.tools = list(tool_ids)
+    ver.prefix_hash = compute_prefix_hash(agent.model, agent.system_prompt, tool_ids)
     if agent.current_version < 1:
         agent.current_version = 1
     return ver
@@ -221,8 +223,10 @@ async def main() -> None:
             require_confirm=False,
             idempotent=False,
         )
-        agent = await _get_or_create_agent(session, org, "tl_time_now")
-        await _get_or_create_version(session, agent, "tl_time_now")
+        # seed agent 同时挂 time_now + demo_notify：让中断→确认→resume 流在真实会话可触发（联调缺口修复）
+        agent_tools = ["tl_time_now", "tl_demo_notify"]
+        agent = await _get_or_create_agent(session, org, agent_tools)
+        await _get_or_create_version(session, agent, agent_tools)
         await session.commit()
         print(
             f"seed ok: org={org.id} users={len(USERS)} "
