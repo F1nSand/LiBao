@@ -19,7 +19,6 @@ from fastapi.responses import JSONResponse
 
 from app.api.envelope import fail
 from app.api.routers import (
-    agents,
     attachments,
     auth,
     chat,
@@ -150,7 +149,6 @@ def create_app() -> FastAPI:
     for router in (
         auth.router,
         conversations.router,
-        agents.router,
         chat.router,
         tools.router,
         tasks.router,

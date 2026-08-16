@@ -34,7 +34,7 @@ async def create_conversation(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    agent = await AgentService().get_published(db, req.agent_id, user.org_id)
+    agent = await AgentService().get_default(db, user.org_id)
     conv = await ConversationService().create(db, user, agent, req.title)
     return ok(serialize_conversation(conv))
 

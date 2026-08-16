@@ -6,6 +6,7 @@ M2 最小实现：asyncio.create_task 后台执行（完整任务队列为 M4）
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -30,10 +31,6 @@ def _task_input_text(input: Any) -> str:
             return msg
         return str(input)
     return str(input or {})
-
-
-def _noop_emit(event_type: str, payload: dict[str, Any]) -> str:
-    return ""
 
 
 async def _run_graph_common(
@@ -112,11 +109,18 @@ async def _run_graph_common(
                 await push_event(str(task_id), "error", {"code": 60001, "message": str(exc), "retryable": True})
             return None
 
+        def task_emit(event_type: str, payload: dict[str, Any]) -> str:
+            """任务路径 emit：无 SSE 客户端；agent_switch 转发进任务事件（TaskDetail 回放 subagent 切换），
+            其余事件（token/tool_call 等）丢弃。转发用 create_task 不阻塞图执行（best-effort）。"""
+            if event_type == "agent_switch":
+                asyncio.create_task(push_event(str(task_id), "agent_switch", payload))
+            return ""
+
         async for _ in stream_graph_events(
             graph=graph,
             initial=initial,
             graph_config=graph_config,
-            emit=_noop_emit,
+            emit=task_emit,
             on_interrupt=on_interrupt,
             on_final=on_final,
             on_error=on_error,
@@ -146,7 +150,7 @@ async def run_task_graph(
             # F4：提交与 runner 启动之间可能被取消 → 非 pending 直接放弃（不翻回 running）
             if task.status != "pending":
                 return
-            agent = await AgentRepository(db).get_published(task.agent_id)
+            agent = await AgentRepository(db).get_by_id(task.agent_id)
             if agent is None:
                 await TaskService().set_failed(db, task, "Agent 不存在或未发布")
                 await push_event(

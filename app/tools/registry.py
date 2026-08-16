@@ -20,6 +20,7 @@ class ToolType(enum.StrEnum):
     COLLABORATION = "collaboration"
     USER_COMMS = "user_comms"
     EVENT = "event"
+    AGENT_CONTROL = "agent_control"  # 主 Agent 派发 subagent（tl_dispatch_subagent）
 
 
 @dataclass(frozen=True)

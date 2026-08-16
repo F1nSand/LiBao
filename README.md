@@ -25,7 +25,7 @@ docker compose up -d db redis && docker compose ps          # 双 healthy
 # 2. 依赖 + 迁移 + 种子（幂等）
 uv sync
 uv run alembic upgrade head
-uv run python -m app.seed                                     # org + admin/dev/viewer + time_now + 时间助手
+uv run python -m app.seed                                     # org + admin/dev/viewer + 内置工具 + 通用助手(单)
 
 # 3. LLM 配置
 cp .env.example .env        # 填 LLM_API_KEY（DeepSeek）；LLM_MODEL 需带提供方前缀，如 deepseek/deepseek-chat
@@ -36,7 +36,7 @@ curl localhost:8000/api/v1/system/health                     # {code:0,...}
 
 # 5. 前端闭环（mock 关闭走真实后端）
 cd ../FrontEnd && VITE_USE_MOCK=false npm run dev            # http://localhost:5173
-# admin/admin123 登录 → 选「时间助手」→ 发「现在几点？」→ 流式输出 + time_now 工具卡 → 刷新页面消息回放
+# admin/admin123 登录 → 发「现在几点？」→ 流式输出 + time_now 工具卡 → 刷新页面消息回放（单通用助手，无需选 Agent）
 ```
 
 **前后端连接**：前端 vite dev（`VITE_USE_MOCK=false`）把 `/api` 代理到 `http://localhost:8000`；后端 CORS 已放行 `http://localhost:5173`。浏览器只开 `http://localhost:5173`。
@@ -51,7 +51,7 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 
 | 层 | 目录 | 关键文件 |
 |---|---|---|
-| API | `app/api/` | `main.py`(create_app+lifespan+中间件+异常信封)、`routers/`(auth/conversations/agents/chat/system) |
+| API | `app/api/` | `main.py`(create_app+lifespan+中间件+异常信封)、`routers/`(auth/conversations/chat/system) |
 | 编排 | `app/orchestration/` | `graph.py`(单主图)、`chat_stream.py`(★ SSE 桥)、`nodes/`、`checkpointer.py`、`context_builder.py` |
 | 服务 | `app/services/` | `user.py`/`conversation.py`/`agent.py` + `serializers.py` |
 | 工具 | `app/tools/` | `registry.py`(ToolSpec+aci)、`executor.py`、`sandbox.py`、`builtin/time_now.py` |
@@ -72,7 +72,7 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 - 中断/恢复：`require_confirm` 工具 → `interrupt()` → Task 行（waiting_confirm + pending_confirm）→ SSE `interrupt` 事件（带 task_id）→ `POST /tasks/{id}/resume`（`Accept: text/event-stream` 续流 / JSON 后台续跑）→ done/cancelled；拒绝分支卡片状态 `cancelled`
 - 任务：`POST/GET /tasks`、`GET /tasks/{id}`、`POST cancel`（40902）、`GET /tasks/{id}/events`（回放+live-tail）；后台运行（asyncio.create_task，完整队列为 M4）
 - 执行策略：失败静默重试（指数退避+抖动，`ToolSpec.max_retries`）+ 幂等去重（进程内缓存）+ 沙盒守卫
-- Agent 版本化：`POST/PUT/DELETE /agents`、`publish/unpublish`、`POST /agents/{id}/invoke`（试跑）；PUT=新版本，publish=发布快照（prefix_hash）
+- 单通用 Agent + Subagent 派发：所有会话/任务固定「通用助手」（不再有 /agents 管理端点）；内置 `tl_dispatch_subagent` 工具派发 subagent（research/code_review/proposal_review，嵌套 LLM 循环 + 上下文隔离 + agent_switch 事件）
 
 ### M2.5 核心闭环（本轮完成）
 - **MCP client**：`POST /tools/mcp/register {name?, url_or_command, headers?, enable}`（stdio 命令 / http(s) URL 双传输，验证即注册）、`GET /tools/mcp`、`DELETE /tools/mcp/{server_id}`；远程工具 → `tool_definition` 行（`mcp_source="mcp:{server_id}"` + `mcp_tool_name` 原始名）+ registry spec（`mc_<server>_<tool>`），生命周期与内置工具完全一致（默认关闭/agent 勾选/confirm/幂等/超时复用）；同名遮蔽拒绝 40903（I7）；启动同步自动重建 spec

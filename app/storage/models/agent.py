@@ -1,13 +1,14 @@
 """Agent 配置与其版本快照（docs 04 §3.4）。
 
 agent_version 保存每次发布快照（append-only），prefix_hash 为静态前缀缓存键（docs 01 §4.1）。
-graph_template: single / proposer_reviewer / manager_worker（多 Agent 为 M4，M1 只用 single）。
+单通用 Agent 模型（docs 01 §3.5）：每组织一条 is_default=True 的通用 Agent，不再配置多 Agent/自选；
+subagent 由主 Agent 经 tl_dispatch_subagent 自主派发（内置注册表，非 agent_configs 行）。
 """
 from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,7 +24,7 @@ class AgentConfig(BaseModel, Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     model: Mapped[str] = mapped_column(String(255), nullable=False)
     system_prompt: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    graph_template: Mapped[str] = mapped_column(String(32), default="single", nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     skills: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     tools: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     max_steps: Mapped[int] = mapped_column(Integer, default=50, nullable=False)

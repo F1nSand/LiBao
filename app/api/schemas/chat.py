@@ -27,6 +27,5 @@ class ChatMessageInput(BaseModel):
 
 class ChatRequest(BaseModel):
     conversation_id: uuid.UUID | None = None
-    agent_id: uuid.UUID
     message: ChatMessageInput
     stream: bool = True

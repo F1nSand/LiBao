@@ -82,8 +82,8 @@ async def submit_task(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await AgentService().get_published(db, req.agent_id, user.org_id)  # 校验 published + 同 org
-    task = await TaskService().submit(db, user, req.agent_id, req.input)
+    agent = await AgentService().get_default(db, user.org_id)  # 单通用 Agent，不接收 agent_id
+    task = await TaskService().submit(db, user, agent.id, req.input)
     # M4：任务入队（worker 消费跑图）；Redis 不可用降级进程内 create_task（单实例/测试兜底）
     if not await TaskQueueService().enqueue_submit(task.id, get_trace_id()):
         asyncio.create_task(

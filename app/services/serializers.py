@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.storage.models.agent import AgentConfig, AgentVersion
 from app.storage.models.attachment import Attachment
 from app.storage.models.conversation import Conversation
 from app.storage.models.eval import EvalCase, EvalResult, EvalRun, EvalSet
@@ -86,23 +85,6 @@ def serialize_trajectory_node(m: Message, seq: int) -> dict[str, Any]:
         "token_usage": m.token_usage,
         "trace_id": m.trace_id,
         "tool_calls": tool_calls,
-    }
-
-
-def serialize_agent(agent: AgentConfig) -> dict[str, Any]:
-    return {
-        "id": str(agent.id),
-        "name": agent.name,
-        "model": agent.model,
-        "system_prompt": agent.system_prompt,
-        "graph_template": agent.graph_template,
-        "skills": agent.skills or [],
-        "tools": agent.tools or [],
-        "max_steps": agent.max_steps,
-        "status": agent.status,
-        "current_version": agent.current_version,
-        "created_at": _dt(agent.created_at),
-        "updated_at": _dt(agent.updated_at),
     }
 
 
@@ -334,24 +316,3 @@ def serialize_task(t: Task) -> dict[str, Any]:
     }
 
 
-def serialize_agent_version(
-    ver: AgentVersion, name: str = "", graph_template: str = "single", max_steps: int = 50
-) -> dict[str, Any]:
-    """版本序列化（docs 03 §5.4）。版本快照不含 graph_template/max_steps（04 §3.4），
-    用当前 agent 的真实值填充（F9：避免硬编码误导）。"""
-    return {
-        "id": str(ver.id),
-        "agent_id": str(ver.agent_id),
-        "version": ver.version,
-        "config": {
-            "name": name,
-            "model": ver.model,
-            "system_prompt": ver.system_prompt,
-            "skills": ver.skills or [],
-            "tools": ver.tools or [],
-            "graph_template": graph_template,
-            "max_steps": max_steps,
-        },
-        "prefix_hash": ver.prefix_hash,
-        "created_at": _dt(ver.created_at),
-    }

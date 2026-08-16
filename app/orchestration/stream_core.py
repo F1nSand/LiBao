@@ -16,6 +16,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from app.core.errors import ERR_LLM_FAILURE
+from app.tools.context import set_dispatch_ctx
 from app.tools.registry import get, get_by_name
 
 logger = logging.getLogger(__name__)
@@ -55,12 +56,12 @@ def build_initial_state(
     return {
         "messages": [HumanMessage(content=content)],
         "agent_config": {
+            "name": agent.name,
             "model": agent.model,
             "system_prompt": agent.system_prompt,
             "tools": agent.tools or [],
             "max_steps": agent.max_steps,
             "org_id": org_id or str(getattr(agent, "org_id", "") or ""),
-            "graph_template": getattr(agent, "graph_template", "single"),
         },
         "user_id": user_id,
         # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs
@@ -88,6 +89,18 @@ async def stream_graph_events(
     - on_error(exc)：图级异常回调（后台运行器用它把任务置 failed）。
     """
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+    # M4.5：subagent 派发事件汇（tl_dispatch_subagent 在 producer 内跑嵌套循环时，
+    # 经 push 把 emit 帧投进本队列，由主循环 yield 出去——chat 转 SSE / task 转事件）。
+    def _push(event_type: str, payload: dict[str, Any]) -> str:
+        queue.put_nowait(("frame", emit(event_type, payload)))
+        return ""
+
+    # resume 路径 initial 是 Command(resume=...) 对象（非 dict）——只从 dict 读取主 agent 名
+    _main_name = "通用助手"
+    if isinstance(initial, dict):
+        _main_name = str((initial.get("agent_config", {}) or {}).get("name", _main_name))
+    set_dispatch_ctx({"push": _push, "main_name": _main_name})
 
     async def producer() -> None:
         try:
@@ -117,6 +130,10 @@ async def stream_graph_events(
             kind, payload = await queue.get()
             if kind == "keepalive":
                 yield ": keepalive\n\n"
+                continue
+            if kind == "frame":
+                # subagent 派发事件帧（dispatch_subagent push 进队列）
+                yield payload
                 continue
             if kind == "eof":
                 break
@@ -165,11 +182,6 @@ async def stream_graph_events(
                                     "duration_ms": r.get("duration_ms", 0),
                                 },
                             )
-                    elif node in ("proposer", "reviewer", "summarize"):
-                        # M4：多 Agent 协作节点 → agent_switch 事件（前端渲染切换标记）
-                        sw = update.get("agent_switch")
-                        if sw:
-                            yield emit("agent_switch", sw)
                     elif node == "context_update":
                         yield emit("status", {"status": "finalizing", "context_metrics": None})
                     elif node == "__interrupt__":
@@ -182,6 +194,7 @@ async def stream_graph_events(
             elif mode == "values":
                 final_state = item
     finally:
+        set_dispatch_ctx(None)  # 清事件汇（task-local，防串）
         producer_task.cancel()
         keepalive_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

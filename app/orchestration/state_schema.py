@@ -33,7 +33,3 @@ class AgentState(TypedDict, total=False):
     run_logs: list[dict[str, Any]]
     # finalize 产出的最终消息 dict（对齐 done 事件 / message 持久化）
     final_message: dict[str, Any]
-    # M4：多 Agent 协作中间产物（proposer/reviewer 的草案与评审）
-    drafts: dict[str, Any]
-    # M4：agent_switch 事件载荷（{from_agent, to_agent, reason}，stream_core 转 SSE）
-    agent_switch: dict[str, Any]

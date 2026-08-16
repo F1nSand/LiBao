@@ -23,17 +23,18 @@ USERS = [
     ("viewer", "viewer123", "访客", "viewer"),
 ]
 
-# LLM 侧函数名为 time_now/demo_notify（registry id 是 tl_ 前缀）——提示词里写模型实际见到的名字
-AGENT_NAME = "时间助手"
+# 单通用 Agent（docs 01 §3.5）：所有会话/任务固定用这一个，不能更换；subagent 由主 agent 自主派发。
+# LLM 侧函数名为 time_now/demo_notify/dispatch_subagent（registry id 是 tl_ 前缀）——提示词里写模型实际见到的名字
+AGENT_NAME = "通用助手"
 AGENT_SYSTEM_PROMPT = (
-    "你是时间助手。需要知道当前时间时使用 time_now 工具；"
+    "你是通用助手，面向用户的通用 AI 助手。\n"
+    "需要专业子任务时，用 dispatch_subagent 工具派发专家 subagent（subagent 只做该子任务，结论回传你收口）：\n"
+    "- 需要检索知识库 / 抓取网页汇总资料时 → 派发「资料调研」research；\n"
+    "- 需要审查代码、找缺陷或改进点时 → 派发「代码评审」code_review；\n"
+    "- 需要评审方案 / 计划（可行性、风险、遗漏、更优解）时 → 派发「方案评审」proposal_review。\n"
+    "派发后基于 subagent 结论继续回答用户，用中文回答。\n"
     "用户要求发送通知/提醒时使用 demo_notify 工具（该工具为演示人工确认流程：会先请求确认，确认后才真正发送）。"
-    "基于工具结果回答。"
 )
-
-# M4 演示：协作助手（graph_template=proposer_reviewer，二段协作产出定稿 + agent_switch 事件）
-COLLAB_NAME = "协作助手"
-COLLAB_SYSTEM_PROMPT = "你是协作助手，面向用户输出最终定稿。协作过程自动执行：提案→评审→汇总。"
 
 
 async def _get_or_create_org(session: AsyncSession) -> Org:
@@ -115,7 +116,7 @@ async def _get_or_create_agent(
     name: str,
     prompt: str,
     tool_ids: list[str],
-    graph_template: str = "single",
+    is_default: bool = False,
 ) -> AgentConfig:
     stmt = select(AgentConfig).where(
         AgentConfig.org_id == org.id, AgentConfig.name == name, AgentConfig.deleted_at.is_(None)
@@ -128,7 +129,7 @@ async def _get_or_create_agent(
             name=name,
             model=settings.llm_model,
             system_prompt=prompt,
-            graph_template=graph_template,
+            is_default=is_default,
             skills=[],
             tools=list(tool_ids),
             max_steps=10,
@@ -141,7 +142,7 @@ async def _get_or_create_agent(
         # 幂等：确保目标态（重跑可修正旧版本种子）；缺失工具追加到最前
         agent.status = "published"
         agent.system_prompt = prompt
-        agent.graph_template = graph_template
+        agent.is_default = is_default
         missing = [t for t in tool_ids if t not in (agent.tools or [])]
         if missing:
             agent.tools = missing + list(agent.tools or [])
@@ -275,23 +276,37 @@ async def main() -> None:
             idempotent=False,
             enabled=False,
         )
-        # seed agent 同时挂 time_now + demo_notify：让中断→确认→resume 流在真实会话可触发（联调缺口修复）
-        agent_tools = ["tl_time_now", "tl_demo_notify"]
+        # 单通用 Agent：挂齐感知 + 派发工具（fetch_url/analyze_image 全局默认关，启用后即对通用助手开放）
+        agent_tools = [
+            "tl_time_now",
+            "tl_demo_notify",
+            "tl_tool_search",
+            "tl_kb_search",
+            "tl_fetch_url",
+            "tl_analyze_image",
+            "tl_dispatch_subagent",
+        ]
         agent = await _get_or_create_agent(
-            session, org, name=AGENT_NAME, prompt=AGENT_SYSTEM_PROMPT, tool_ids=agent_tools, graph_template="single"
+            session, org, name=AGENT_NAME, prompt=AGENT_SYSTEM_PROMPT, tool_ids=agent_tools, is_default=True
         )
         await _get_or_create_version(session, agent, agent_tools)
-        # M4 演示：协作助手（proposer-reviewer，二段协作 + agent_switch；无工具，纯协作产稿）
-        collab_tools: list[str] = []
-        collab = await _get_or_create_agent(
-            session, org, name=COLLAB_NAME, prompt=COLLAB_SYSTEM_PROMPT, tool_ids=collab_tools,
-            graph_template="proposer_reviewer",
-        )
-        await _get_or_create_version(session, collab, collab_tools)
+        # 存量收敛：旧「时间助手/协作助手」（多 Agent 模式遗留）禁用，避免与通用助手并存歧义
+        for legacy_name in ("时间助手", "协作助手"):
+            legacy = (
+                await session.execute(
+                    select(AgentConfig).where(
+                        AgentConfig.org_id == org.id,
+                        AgentConfig.name == legacy_name,
+                        AgentConfig.deleted_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if legacy is not None:
+                legacy.status = "disabled"
         await session.commit()
         print(
             f"seed ok: org={org.id} users={len(USERS)} "
-            f"agent={agent.name}(v{agent.current_version}, status={agent.status})"
+            f"agent={agent.name}(v{agent.current_version}, status={agent.status}, is_default={agent.is_default})"
         )
     await engine.dispose()
 

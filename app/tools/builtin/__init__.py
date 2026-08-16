@@ -1,8 +1,16 @@
 """内置工具注册。M1 tl_time_now / M2 tl_demo_notify / M2.5 tl_tool_search / M3 tl_kb_search /
-M3.5 tl_fetch_url + tl_analyze_image（docs 07 RM-8 / docs 04 F4）。"""
+M3.5 tl_fetch_url + tl_analyze_image（docs 07 RM-8 / docs 04 F4）/ M4.5 tl_dispatch_subagent（单主 Agent 派发）。"""
 from __future__ import annotations
 
-from app.tools.builtin import analyze_image, demo_notify, fetch_url, kb_search, time_now, tool_search
+from app.tools.builtin import (
+    analyze_image,
+    demo_notify,
+    dispatch_subagent,
+    fetch_url,
+    kb_search,
+    time_now,
+    tool_search,
+)
 from app.tools.registry import SandboxLevel, ToolSpec, ToolType, get, register
 
 
@@ -164,6 +172,45 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=10000,
             handler=analyze_image.analyze_image_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_dispatch_subagent",
+            name="dispatch_subagent",
+            description=(
+                "派发专家 subagent 完成专业子任务（subagent 有独立提示词与工具，只做该子任务，结论回传）。"
+                "可选 subagent：资料调研 research（检索知识库/抓取网页汇总）、代码评审 code_review（审查代码）、"
+                "方案评审 proposal_review（批判性评审方案）。需要专业分工时使用；派发后基于其结论继续回答。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "subagent": {
+                        "type": "string",
+                        "enum": ["research", "code_review", "proposal_review"],
+                        "description": "要派发的 subagent 名称",
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "子任务描述（含足够上下文，subagent 上下文隔离只收此任务）",
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "可选：补充事实/文件路径等（默认任务文本已含则省略）",
+                    },
+                },
+                "required": ["subagent", "task"],
+            },
+            tool_type=ToolType.AGENT_CONTROL,
+            enabled=True,
+            require_confirm=False,
+            idempotent=False,  # 子任务执行有副作用不可去重
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=180000,  # 嵌套 LLM 循环需放大（默认 30s 会掐断子循环）
+            max_concurrency=2,
+            handler=dispatch_subagent.dispatch_subagent_handler,
             builtin=True,
         )
     )

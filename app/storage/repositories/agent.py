@@ -1,4 +1,4 @@
-"""Agent 配置数据访问（docs 04 §3.4）。对话侧只暴露 published 的 agent；版本为只读快照。"""
+"""Agent 配置数据访问（docs 04 §3.4）。单通用 Agent 模型：每组织一条 is_default=True 的通用 Agent。"""
 from __future__ import annotations
 
 import uuid
@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.storage.models.agent import AgentConfig, AgentVersion
+from app.storage.models.agent import AgentConfig
 
 
 class AgentRepository:
@@ -16,18 +16,22 @@ class AgentRepository:
     async def get_by_id(self, agent_id: uuid.UUID) -> AgentConfig | None:
         return await self.session.get(AgentConfig, agent_id)
 
-    async def get_published(self, agent_id: uuid.UUID) -> AgentConfig | None:
-        """取已发布 agent；非 published/已软删返回 None（上层映射 40404）。"""
-        stmt = select(AgentConfig).where(
-            AgentConfig.id == agent_id,
-            AgentConfig.status == "published",
-            AgentConfig.deleted_at.is_(None),
+    async def get_default(self, org_id: uuid.UUID) -> AgentConfig | None:
+        """取组织的默认通用 Agent（is_default=True 且 published 未软删）；
+        回退：无 is_default 标记的旧数据 → 首个 published（存量兼容）。"""
+        stmt = (
+            select(AgentConfig)
+            .where(
+                AgentConfig.org_id == org_id,
+                AgentConfig.is_default.is_(True),
+                AgentConfig.status == "published",
+                AgentConfig.deleted_at.is_(None),
+            )
+            .order_by(AgentConfig.created_at.desc())
         )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
-
-    async def list_published(
-        self, org_id: uuid.UUID, *, limit: int = 50, offset: int = 0
-    ) -> list[AgentConfig]:
+        agent = (await self.session.execute(stmt)).scalars().first()
+        if agent is not None:
+            return agent
         stmt = (
             select(AgentConfig)
             .where(
@@ -36,38 +40,5 @@ class AgentRepository:
                 AgentConfig.deleted_at.is_(None),
             )
             .order_by(AgentConfig.created_at.desc())
-            .limit(limit)
-            .offset(offset)
         )
-        return list((await self.session.execute(stmt)).scalars())
-
-    async def list_for_org(
-        self, org_id: uuid.UUID, *, limit: int = 50, offset: int = 0
-    ) -> list[AgentConfig]:
-        """管理页列表：published 优先，其余按创建倒序。"""
-        stmt = (
-            select(AgentConfig)
-            .where(AgentConfig.org_id == org_id, AgentConfig.deleted_at.is_(None))
-            .order_by(AgentConfig.status != "published", AgentConfig.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        return list((await self.session.execute(stmt)).scalars())
-
-    async def count_for_org(self, org_id: uuid.UUID) -> int:
-        from sqlalchemy import func
-
-        stmt = (
-            select(func.count())
-            .select_from(AgentConfig)
-            .where(AgentConfig.org_id == org_id, AgentConfig.deleted_at.is_(None))
-        )
-        return int((await self.session.execute(stmt)).scalar_one())
-
-    async def list_versions(self, agent_id: uuid.UUID) -> list[AgentVersion]:
-        stmt = (
-            select(AgentVersion)
-            .where(AgentVersion.agent_id == agent_id, AgentVersion.deleted_at.is_(None))
-            .order_by(AgentVersion.version.desc())
-        )
-        return list((await self.session.execute(stmt)).scalars())
+        return (await self.session.execute(stmt)).scalars().first()
