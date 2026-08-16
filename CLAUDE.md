@@ -48,6 +48,8 @@ Mock 演示账号：`admin/admin123`（管理员）· `dev/dev123`（开发者�
 - **e2e 依赖 mock 确定性**：playwright `webServer` 用 `--mode e2e`（`VITE_MOCK_FAST=1` 零延迟）；不要用 `reuseExistingServer` 复用普通 dev server。
 - **文本×工具卡混排**：流式期用 `StreamState.segments`（文本段唯一且置顶，工具卡在后）；刷新后从持久化 `Message.tool_calls[].position` 分组渲染（FD-12'，字符级插入点无法还原）。流式期与持久化布局一致（content 在前、tools 在后），done 后无跳位。
 - 消息持久化在 mock 的 `doneEvent` 里 push 到 `messages[conv]`；新会话（conversation_id=null）由 mock server 先注册 conversation。
+- **mock 任务事件端点是 GET**（`/tasks/{id}/events`，契约 docs/03 §5.3 / 真实后端 / `TaskDetail.vue` 都是 GET）——改 mock 路由时不要只留 POST。
+- **`agent_switch` 仅流式期显示**：`MessageBubble` 的 `.agent-switch` 指示条挂在 `showStreamBubble`（`!finished`）的流式气泡里，done 后被持久化消息替换即消失（`Message` 无持久化字段）。不要写依赖 done 后仍可见该指示条的 e2e 断言（mock-fast 下是竞态）。
 
 ## 工作流约定（本机全局）
 

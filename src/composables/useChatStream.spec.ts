@@ -70,6 +70,21 @@ describe('useChatStream 状态机', () => {
     expect(cs.state.segments[1]).toMatchObject({ kind: 'tool', cardId: 'tc1' })
   })
 
+  it('agent_switch → segments 追加 agent 段（from/to/reason）', async () => {
+    const cs = useChatStream()
+    await cs.start(chatReq as never)
+    chatHandlers!.onEvent(ev('message_start', 1, { message_id: 'm1', agent_id: 'a', conversation_id: 'c', task_id: 't1' }))
+    chatHandlers!.onEvent(ev('agent_switch', 2, { from_agent: 'ag_proposer', to_agent: 'ag_reviewer', reason: '提案需审核' }))
+    expect(cs.state.segments).toHaveLength(1)
+    expect(cs.state.segments[0]).toMatchObject({
+      kind: 'agent',
+      from: 'ag_proposer',
+      to: 'ag_reviewer',
+      reason: '提案需审核',
+    })
+    expect(cs.state.streaming).toBe(true) // 切换事件不改变流式状态
+  })
+
   it('tool_call → 建卡；占位→回填 done', async () => {
     const cs = useChatStream()
     await cs.start(chatReq as never)

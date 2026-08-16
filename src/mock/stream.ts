@@ -133,6 +133,11 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
       payload: { tool_call_id: toolCallId, tool_name: 'web_search', ok: true, summary: '处理中…', placeholder: true, job_ref: jobRef },
       delayMs: delay(120),
     },
+    {
+      type: 'agent_switch',
+      payload: { from_agent: 'ag_search', to_agent: 'ag_review', reason: '检索结果需复核' },
+      delayMs: delay(100),
+    },
     tok('检索完成，整理结果中…\n'),
     {
       type: 'tool_result',
@@ -243,6 +248,11 @@ export function buildTaskEventsScript(taskId: string): SseScriptItem[] {
   return [
     { type: 'status', payload: { status: 'running' }, delayMs: delay(60) },
     { type: 'run_progress', payload: { stage: 'thinking', progress: 20 }, delayMs: delay(120) },
+    {
+      type: 'agent_switch',
+      payload: { from_agent: 'ag_proposer', to_agent: 'ag_reviewer', reason: '提案需审核' },
+      delayMs: delay(140),
+    },
     { type: 'status', payload: { status: 'running' }, delayMs: delay(160) },
     { type: 'run_progress', payload: { stage: 'executing', progress: 80 }, delayMs: delay(200) },
     {

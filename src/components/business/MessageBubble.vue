@@ -17,7 +17,10 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ retry: [] }>()
 
-type Seg = { kind: 'text'; content: string; streaming: boolean } | { kind: 'tool'; card: ToolCallCardState }
+type Seg =
+  | { kind: 'text'; content: string; streaming: boolean }
+  | { kind: 'tool'; card: ToolCallCardState }
+  | { kind: 'agent'; from: string; to: string; reason?: string }
 
 function fromRecord(c: ToolCallRecord): ToolCallCardState {
   return {
@@ -37,6 +40,9 @@ const segments = computed<Seg[]>(() => {
       if (s.kind === 'text') {
         // 流式期裸文本；done 后（AgentTestRunner 等无持久化场景）切 markdown 渲染
         return { kind: 'text', content: s.text, streaming: !props.stream!.finished }
+      }
+      if (s.kind === 'agent') {
+        return { kind: 'agent', from: s.from, to: s.to, reason: s.reason }
       }
       return { kind: 'tool', card: props.stream!.toolCalls[s.cardId] }
     })
@@ -71,15 +77,20 @@ const role = computed(() => props.stream ? 'assistant' : props.message?.role ?? 
       <!-- 助手消息：段落混排 -->
       <template v-else>
         <div v-if="!segments.length && !stream" class="msg-empty">…</div>
-        <div v-for="(seg, i) in segments" :key="i" class="msg-seg">
+        <div v-for="(seg, i) in segments" :key="i" class="msg-seg" :class="{ agent: seg.kind === 'agent' }">
           <MarkdownRenderer v-if="seg.kind === 'text'" :raw="seg.content" :streaming="seg.streaming" />
           <ToolCallCard
-            v-else
+            v-else-if="seg.kind === 'tool'"
             :tool-name="seg.card.tool_name"
             :status="seg.card.status"
             :error="seg.card.error"
             @retry="emit('retry')"
           />
+          <div v-else class="agent-switch">
+            <el-icon :size="13"><Switch /></el-icon>
+            <span class="agent-switch-label"><b>{{ seg.from }}</b> → <b>{{ seg.to }}</b></span>
+            <span v-if="seg.reason" class="agent-switch-reason">{{ seg.reason }}</span>
+          </div>
         </div>
       </template>
     </div>
@@ -136,6 +147,26 @@ const role = computed(() => props.stream ? 'assistant' : props.message?.role ?? 
 }
 .msg-seg + .msg-seg {
   margin-top: 6px;
+}
+/* agent 切换指示条：弱化视觉，不套气泡框 */
+.msg-seg.agent {
+  background: transparent;
+  border: none;
+  padding: 2px 14px;
+}
+.agent-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+.agent-switch-label b {
+  font-weight: 600;
+  color: var(--app-primary);
+}
+.agent-switch-reason {
+  color: var(--app-text-muted);
 }
 .msg-empty {
   color: var(--app-text-muted);

@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 import { streamChatAt, streamTaskResume } from '@/api/sse'
 import type { ChatRequest, SseEnvelope, TokenUsage } from '@/types'
-import type { ToolResultPayload } from '@/types'
+import type { AgentSwitchPayload, ToolResultPayload } from '@/types'
 import { flushNow, throttleByRaf } from '@/utils/rAF'
 
 /**
@@ -13,6 +13,7 @@ import { flushNow, throttleByRaf } from '@/utils/rAF'
 export type StreamSegment =
   | { kind: 'text'; id: string; text: string }
   | { kind: 'tool'; id: string; cardId: string }
+  | { kind: 'agent'; id: string; from: string; to: string; reason?: string }
 
 export type ToolCardStatus =
   | 'pending'
@@ -247,7 +248,9 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
         break
       }
       case 'agent_switch': {
-        // 预留：多 Agent 切换（M4+）
+        // 多 Agent 切换（docs/03 §3.3）：以独立段混排进事件序（文本/工具/切换按序）
+        const { from_agent: from, to_agent: to, reason } = p as AgentSwitchPayload
+        state.segments.push({ kind: 'agent', id: segId(), from, to, reason })
         break
       }
       case 'done': {

@@ -288,9 +288,10 @@ export const mockServer = {
       if (!t) return void json(res, fail(40402, '任务不存在'))
       return void json(res, ok(t))
     }
-    if (method === 'POST' && pathname.match(/^\/tasks\/[^/]+\/events$/)) {
-      const taskId = pathname.split('/')[2]
-      return void sendSse(req, res, buildTaskEventsScript(taskId))
+    p = match(pathname, '/tasks/:id/events')
+    if ((method === 'GET' || method === 'POST') && p) {
+      // 契约/真实后端/TaskDetail 均为 GET（docs/03 §5.3）；POST 兼容保留
+      return void sendSse(req, res, buildTaskEventsScript(p.id))
     }
     p = match(pathname, '/tasks/:id/cancel')
     if (method === 'POST' && p) {

@@ -10,6 +10,14 @@
 [done] 2026-08-16 · ←后端 | **M3 正式闭环**（Gate1 Test 207/207 + Gate2 14 项 + Gate3 Simplify 应用 16/跳过 12）| 后端就绪，可联调。
       后端 :8000 已拉起验证过（admin/admin123）；五组接口 + 8 组既有全部可用。请前端列联调计划清单，我按清单逐项核验。联调后跑一次 `scripts/verify_m3.sh`（需后端运行）做全链回归。
 
+[done] 2026-08-16 · ←后端 | **联调缺口修复**：中断→resume 无法在真实会话触发（seed agent 无 require_confirm 工具）| 已修（commit fe7538b）。
+      根因：seed agent「时间助手」tools 只有 tl_time_now + 提示词限定时间问题，demo_notify 虽注册启用但 agent 不可用。
+      修法：seed agent 挂 tl_demo_notify + 提示词补引导；重跑 `uv run python -m app.seed` 幂等更新。
+      验证：实测 tools=['tl_demo_notify','tl_time_now']。前端联调可用 seed agent 对「发个通知/提醒我」触发中断→确认→resume。
+[done] 2026-08-16 · →后端 | **M4 前端 agent_switch 渲染完成**：useChatStream 状态机 + MessageBubble 指示条 + mock 演示（chat: ag_search→ag_review / task: ag_proposer→ag_reviewer）+ 任务事件端点 GET 修复 | 你 emit agent_switch 即自动生效，无需改前端。
+      验证：108 单测 + 21 e2e 全绿；mock 非 fast 实测指示条流式期显示、done 后消失（仅流式期，Message 无持久化字段——如需 done 后仍显示，需后端在 message 数据模型加 agent_switch 字段，属协调项）。
+[done] 2026-08-16 · →后端 | 中断修复已前端真实验证 | 「提醒我明天上午开会」→ 弹窗 → 确认 → resume 续流「通知已发送成功」+ demo_notify 完成卡 + composer 恢复。
+
 [done] 2026-08-16 · →后端 | GET /system/evals/sets 404 | 期望 EvalSet[]（docs/03 §5.8）。
       根因 Agent/app/api/routers/evals.py APIRouter() 缺 prefix="/system/evals"；数据形状已对齐，仅路径错位。
       修法：router = APIRouter(prefix="/system/evals")。→ 后端已修（commit 0b5727c），实测 HTTP200。
@@ -181,3 +189,18 @@
 - ✅ 控制台 pageerror 0；HTTP>=400 仅一次 `/tasks` 瞬时 404（Vite HMR 抖动，复测 3 次全 200，非真实问题）
 - ⚠️ **中断→resume 未在真实会话触发**：真实 LLM 未调 require_confirm 工具（可能 agent 未启用 tl_demo_notify）。机制两侧均已各自验证（前端 mock e2e chat-stream + 后端 M2 interrupt→resume e2e），此条留**手动验证**。
 - 手动验证项（脚本难覆盖，走清单）：KB 文件上传、评估运行（需评估集）、记忆 maintenance、用户 CRUD、MCP 注册、通知 SSE 实时推送、中断触发。
+
+## 2026-08-16 M4 前端：agent_switch 事件渲染 + mock 演示（L2）
+- 计划：C:\Users\Admin1\.claude\plans\sleepy-humming-sparrow.md
+- Step 0 ✅ 后端中断修复验证：真实后端「提醒我明天上午开会」触发 tl_demo_notify → 中断弹窗 → 确认 → resume 续流（工具卡 demo_notify 完成 + 文本「通知已发送成功」+ composer 恢复）。后端 commit fe7538b 生效。
+- Step 1 ✅ useChatStream：StreamSegment 加 `{kind:'agent';id;from;to;reason?}` + applyEvent `agent_switch` case（事件序混排 push）。
+- Step 2 ✅ MessageBubble：Seg 联合加 agent 变体 + `.agent-switch` 指示条（`is-agent` 去气泡框弱化视觉）。
+- Step 3 ✅ mock server 任务事件端点接受 GET（对齐契约/TaskDetail/真实后端，POST 保留兼容）。
+- Step 4 ✅ mock 流插入 agent_switch 演示：buildChatScript 默认分支（ag_search→ag_review 检索结果复核）+ buildTaskEventsScript（ag_proposer→ag_reviewer 提案需审核）。
+- Step 5 ✅ TaskDetail 事件回放 agent_switch 渲染 chip（from→to + reason），其余事件原样。
+- Step 6 ✅ 单测 +1（agent_switch → segments agent 段 from/to/reason，streaming 不变）。
+- Step 7 ⚠️ e2e agent 指示条断言**撤销**：指示条仅流式期显示（showStreamBubble=!finished），mock-fast 零延迟 done 后即消失 → 固有竞态。改 mock 非 fast 手动验证：流式期 `.agent-switch` 显示「ag_search → ag_review检索结果需复核」，done 后数量=0 ✓。状态机由单测覆盖。
+- 验证：typecheck ✓ / lint 0err / 108 单测 PASS（+1）/ 21 e2e PASS。
+- Review 门：feature-dev:code-reviewer 无 CONFIRMED 正确性问题。
+- Simplify 门应用 4 项：复用 AgentSwitchPayload 类型（useChatStream/TaskDetail）；TaskDetail 事件项改 computed 一次性算（消 3 次 switchInfo 调用）；mock 事件路由改用 match() helper；msg-seg.is-agent 改裸词 agent。跳过（记录）：组件抽取/ mock helper（过度抽象）。
+- 已知限制：agent_switch 仅流式期显示、done/刷新后消失（Message 无持久化字段，契约预留）。

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useTaskStore } from '@/stores/task'
 import { useSSE } from '@/composables/useSSE'
 import { getToken } from '@/utils/token'
-import type { SseEnvelope, Task } from '@/types'
+import type { AgentSwitchPayload, SseEnvelope, Task } from '@/types'
 import StatusTag from '@/components/common/StatusTag.vue'
 import JsonViewer from '@/components/common/JsonViewer.vue'
 
@@ -27,6 +27,30 @@ const sse = useSSE(
   {
     onEvent: (ev) => events.value.push(ev),
   },
+)
+
+/** agent_switch 事件的可读化（多 Agent 切换，docs/03 §3.3） */
+function agentSwitchInfo(p: AgentSwitchPayload): { from?: string; to?: string; reason?: string } {
+  return { from: p.from_agent, to: p.to_agent, reason: p.reason }
+}
+
+interface EventItem {
+  id: string
+  seq: number
+  type: SseEnvelope['type']
+  payload: unknown
+  info?: { from?: string; to?: string; reason?: string }
+}
+
+/** 事件回放展示项：agent_switch 额外归一化出 info，其余原样 */
+const eventItems = computed<EventItem[]>(() =>
+  events.value.map((e) => ({
+    id: e.id,
+    seq: e.seq,
+    type: e.type,
+    payload: e.payload,
+    info: e.type === 'agent_switch' ? agentSwitchInfo(e.payload as AgentSwitchPayload) : undefined,
+  })),
 )
 
 async function load() {
@@ -88,10 +112,20 @@ onMounted(() => sse.connect())
 
     <div class="event-log">
       <div class="event-log-title">事件回放（SSE）</div>
-      <div v-for="e in events" :key="e.id" class="event-item">
-        <span class="event-type mono">{{ e.type }}</span>
-        <span class="event-seq">seq={{ e.seq }}</span>
-        <JsonViewer :data="e.payload" />
+      <div v-for="e in eventItems" :key="e.id" class="event-item">
+        <template v-if="e.info">
+          <span class="event-type mono">agent_switch</span>
+          <span class="event-seq">seq={{ e.seq }}</span>
+          <span class="agent-switch-chip">
+            <b>{{ e.info.from }}</b> → <b>{{ e.info.to }}</b>
+            <span v-if="e.info.reason" class="agent-switch-reason">{{ e.info.reason }}</span>
+          </span>
+        </template>
+        <template v-else>
+          <span class="event-type mono">{{ e.type }}</span>
+          <span class="event-seq">seq={{ e.seq }}</span>
+          <JsonViewer :data="e.payload" />
+        </template>
       </div>
       <div v-if="events.length === 0" class="event-empty">等待事件…</div>
     </div>
@@ -155,6 +189,19 @@ onMounted(() => sse.connect())
 .event-type {
   color: var(--app-primary);
   font-weight: 600;
+}
+.agent-switch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+.agent-switch-chip b {
+  color: var(--app-primary);
+}
+.agent-switch-reason {
+  color: var(--app-text-muted);
 }
 .event-seq {
   color: var(--app-text-muted);
