@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Message } from '@/types'
 import type { StreamState } from '@/composables/useChatStream'
 import MessageBubble from './MessageBubble.vue'
@@ -7,7 +7,8 @@ import MessageBubble from './MessageBubble.vue'
 /**
  * 消息流（docs/02 §6.2）：直接渲染全部消息（每页 ≤50，无需虚拟滚动；
  * 曾因虚拟滚动"实测高度→平均高度→startIndex"反馈循环导致长列表上滚抽搐）。
- * 吸底策略：用户上翻时不强制滚。流式消息置底部：stream.segments 非空且未 finished 时追加一个流式气泡。
+ * 吸底策略：**贴底跟随**——滚动在最下方时新内容自动追随；滚走则不强制拉回（内容照常生成在下方）。
+ * 用滚动事件记录 pinned（真正最下方才贴底），内容变化时 pinned 才跟随——避免内容增长后误判"不在底部"。
  */
 const props = defineProps<{ messages: Message[]; stream?: StreamState | null }>()
 
@@ -19,14 +20,28 @@ const containerRef = ref<HTMLElement | null>(null)
  */
 const showStreamBubble = computed(() => !!props.stream && props.stream.segments.length > 0 && !props.stream.finished)
 
+/** 贴底跟随：滚动在最下方（±32px）视为 pinned；用户滚走即失效 */
+const FOLLOW_TOLERANCE = 32
+const pinned = ref(true)
+
+function updatePinned(): void {
+  const el = containerRef.value
+  if (!el) return
+  pinned.value = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_TOLERANCE
+}
+
+onMounted(() => {
+  containerRef.value?.addEventListener('scroll', updatePinned, { passive: true })
+})
+onBeforeUnmount(() => {
+  containerRef.value?.removeEventListener('scroll', updatePinned)
+})
+
+// 内容变化（流式/新消息/完成）：仅当贴底时跟随（保持吸底），滚走则不动
 watch(
   () => [props.messages.length, props.stream?.partialText, props.stream?.finished, props.stream?.interrupted],
   () => {
-    const el = containerRef.value
-    if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 140
-    // 吸底跟随：近底时也走双 rAF（content-visibility 估算高度 → 拉到真实底）
-    if (nearBottom) forceScrollBottom()
+    if (pinned.value) forceScrollBottom()
   },
 )
 

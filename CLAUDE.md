@@ -51,7 +51,7 @@ Mock 演示账号：`admin/admin123`（管理员）· `dev/dev123`（开发者�
 - **助手消息 = 活动区 + 回复气泡**（docs/02 §5.4.3）：工具调用/agent 切换/思考进 `.msg-activity`（紧凑行非气泡，回复气泡**上方**往下递进），文本进 `.msg-text` 气泡。流式段按事件序拆分两区；持久化 `Message.tool_calls[].position` 分组。**工具失败无重试按钮**——重试由 agent/用户以语言发起，`ToolCallCard` 只保留错误文案。
 - **流式 markdown 渐进渲染**（docs/02 §5.4.1）：`MarkdownRenderer` streaming 走 `renderStreamingMarkdown`（`splitStreamingText` 按换行切分：stable 渲染 + 末行 `.stream-tail` 纯文本）；done 全量。`stable` 仅在换行跨越时变化 → 解析天然节流。
 - **逐轮消息封口**（docs/02 §5.4.3 / docs/03 §3）：`message` SSE 事件 = 一轮思考完成（追加 `onPersistedMessage` + `sealRound()` 复位段，**保留** taskId/conversationId/messageId 跨轮续用）；`done` = 最后一条。一轮 = 一条独立消息气泡。真实后端未实现该事件前仍是单气泡（无回归）。
-- **会话滚动到底**（MessageList）：`messages` **引用变化**（会话加载/切换/重选）触发强制滚动；`.msg-row` 用 `content-visibility` 延迟渲染 → `scrollHeight` 是估算值，需 `nextTick` + **双 rAF** + `setTimeout` 拉到真实底部；吸底跟随 watch 同样走 `forceScrollBottom()`。
+- **会话滚动到底 + 贴底跟随**（MessageList）：`messages` **引用变化**（会话加载/切换/重选）强制滚动到底（`.msg-row` 用 `content-visibility` → `scrollHeight` 估算，需 `nextTick` + **双 rAF** + `setTimeout`）。**贴底跟随**：`scroll` 事件记录 `pinned`（±32px 内才算贴底），内容变化时**仅 pinned 才跟随**（`forceScrollBottom()`）——滚动在最下方自动追随新内容，滚走则不强制拉回（内容照常生成在下方）。
 - **轨迹实时同步**（TrajectoryPanel）：`live` prop（= 会话流式活跃）→ 每 2.5s 轮询 `store.load`（不重置选中/搜索/折叠）；依赖后端按轮即时落库（否则轮询无新数据）。
 - **工具轮占位 + thinking 折叠**：`toolCallSummary(name, input)`（`utils/format.ts`）为无文本工具轮生成「调用 [工具]：入参」占位；`MessageBubble.partsFromMessage` 读 `Message.thinking` 加活动区 thinking 行（`isThinkingLong` → line-clamp 收起 + 展开/收起按钮）。`ChatView.onPersistedMessage` 须透传 `m.thinking`（否则持久化丢推理）。
 - 消息持久化在 mock 的 `doneEvent`（最后一条）与 `sealEvent`（中间轮）里 push 到 `messages[conv]`；新会话（conversation_id=null）由 mock server 先注册 conversation。

@@ -7,14 +7,11 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
-[open] 2026-08-17 · →后端 | **thinking 推理需发射 + 持久化**（前端展示已就绪：活动区折叠行 + Message.thinking 读取）| 当前后端不发射 thinking 事件、持久化剥 thinking：
-      - **SSE**：每轮 agent_execute 的 thinking blocks 处**发射 `thinking` 事件**（payload `{text, ts}`，前端 `useChatStream` 已累积到一轮一条）；token/message 仍剥 thinking。
-      - **持久化**：`serialize_message` 带 `thinking`（Message 加 thinking 文本列或 JSONB，按轮随 message 落库）；`serialize_trajectory_node` 的 `thinking` 从恒 None 改读该字段（轨迹 message 单元格附 thinking）。
-      - 前端 `Message.thinking` 字段 + 活动区折叠显示已备，mock 已演示；落地后真实后端即显示。
-[open] 2026-08-17 · →后端 | **逐轮消息需按轮即时落库**（多轮任务中轨迹实时同步 + 切换会话不丢）| 当前 `on_final` 才批量落库，任务中 DB 无轮次：
-      - 现状：`chat_stream.py` 用 `round_sink` 收集 → `on_final` `for round_msg in round_sink: msg_repo.create(...)` 一次性落库；流式 `message` 事件已发射但 DB 滞后 → 轨迹读 DB 为空、切换会话重读丢失，任务完成再进入才全。
-      - 修法：在 `message` 事件发射处（`stream_core` 该轮工具结果齐后）**同步落库该轮 Message**；`on_final` 只补最后一条（或跳过已落库轮次）。
-      - 效果：任务中 DB 已有已完成轮次 → 前端轨迹轮询（2.5s，已实现）实时更新；切换会话回来聊天/轨迹读 DB 即现。前端零改动。
+[done] 2026-08-17 · ←后端 | **thinking 发射 + 持久化 + 逐轮即时落库已实现**（277 测试全绿 + ruff）| 与你契约一致，前端零改动。
+      - **thinking 事件**：SSE 每轮 agent_execute 的 reasoning_content 增量发射（payload `{text, ts}`，前端累积到一轮一条）；token/message 仍剥 thinking。
+      - **thinking 持久化**：`Message.thinking` 列（迁移 0010）；`serialize_message`/`serialize_trajectory_node` 带 thinking（轨迹单元格附思考）。
+      - **逐轮即时落库**：`message` 事件发射处（stream_core on_round_message 回调）同步落库该轮 Message（id 一致）；`on_final` 只补最终轮——任务中 DB 已有已完成轮次，轨迹轮询/切会话即见。
+      - 实测（:8000 真实 DeepSeek）：「用计算器算 (3+4)*2」→ 32 个 thinking 事件 + 1 个 message 事件（round1 工具）；GET messages = [user, assistant(round1 工具+thinking), assistant(round2 最终+thinking)]。
 [done] 2026-08-17 · →后端 | **逐轮消息前端已对接真实后端验证通过** | 多消息 + 轨迹多轮全链路 OK，前端零改动。
       实测（:8000 + :5174）：
       - 「用计算器算 (3+4)*2-1」→ 2 气泡（轮1 calculator 工具卡 + 轮2 最终答案 `(3+4)*2-1 = 13 ✅`），刷新后重选会话仍 2 条。
@@ -388,3 +385,12 @@
 - **C 后端契约**（交接板 `[open]`）：发射 `thinking` 事件（每轮 thinking blocks）+ 按轮持久化 thinking + `serialize_message`/`serialize_trajectory_node` 带 thinking。
 - 验证：typecheck ✓ / lint 0err / **123 单测 PASS**（+toolCallSummary + MessageBubble 占位 + 轨迹占位 + thinking 累积）/ **21 e2e PASS** / DOM 手测（真实后端：calculator 轮消息「调用 calculator：(3+4)*2-1」+ 轨迹 message 单元格；mock：thinking 行 line-clamp 收起→展开→收起）。
 - 说明：thinking 在真实后端待后端发射/持久化契约落地（前端就绪、mock 演示）；未落地前无 thinking 数据（无回归）。
+
+## 2026-08-17 对话贴底跟随（L1）：滚动在最下方自动追随新内容，滚走不强制拉回
+- 用户：对话窗口滚动在最下方时新内容自动追随；不在最下方时文本照常生成但不被强制拉到底。
+- 实现（MessageList）：
+  - 原 `nearBottom`（内容变化时算，140px 阈值）→ 内容增长后误判"不在底部"不跟随 / 阈值太宽稍微滚走也强拉。
+  - 改为 `scroll` 事件记录 `pinned`（`scrollHeight - scrollTop - clientHeight < 32px` 才算贴底）；内容变化（messages/partialText/finished/interrupted）时**仅 pinned 才 `forceScrollBottom()`**——滚动在最下方自动追随，滚走不拉回。
+  - 会话加载/切换仍强制滚动到底（messages 引用变化 watch）。
+- 验证：typecheck ✓ / lint 0err / 123 单测 PASS / 21 e2e PASS / DOM 手测（贴底发消息自动跟随 top 滚到新底；滚走 top=0 发消息未拉回、内容增长 h 1749）。
+- 排障：首轮 e2e 大面积失败 = 5173 残留 dev server 被 playwright reuseExistingServer 复用（登录超时），清端口后 21 全绿，非代码问题。
