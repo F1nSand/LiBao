@@ -437,3 +437,37 @@ export interface Notification {
   read: boolean
   created_at: string
 }
+
+/** ---------- Webhook（docs/03 §5.10） ---------- */
+export interface WebhookConfig {
+  id: string
+  tool_id: string
+  conversation_id?: string | null
+  enabled?: boolean
+  created_at?: string
+}
+
+export interface RegisterHookRequest {
+  token: string
+  conversation_id?: string
+}
+
+/** ---------- Provider 配置（前端定义契约，后端待实现 /settings/providers） ---------- */
+export interface ProviderConfig {
+  id: string
+  name: string
+  base_url?: string
+  model?: string
+  enabled: boolean
+  /** api_key 是否已配置（后端不回传明文） */
+  has_key: boolean
+  created_at?: string
+}
+
+export interface SaveProviderRequest {
+  name: string
+  base_url?: string
+  api_key?: string
+  model?: string
+  enabled?: boolean
+}

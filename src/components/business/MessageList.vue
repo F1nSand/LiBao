@@ -29,6 +29,20 @@ watch(
   },
 )
 
+/** 打开/切换会话 → 强制滚动到底（默认看最新消息）；与吸底跟随 watch 并存 */
+const lastConvId = ref<string | null>(null)
+watch(
+  () => props.messages[0]?.conversation_id ?? null,
+  (id) => {
+    if (id && id !== lastConvId.value) {
+      lastConvId.value = id
+      const el = containerRef.value
+      if (el) void nextTick(() => (el.scrollTop = el.scrollHeight))
+    }
+  },
+  { immediate: true },
+)
+
 defineExpose({ containerRef })
 </script>
 

@@ -45,6 +45,15 @@ const mockEvalCases: Record<string, Array<Record<string, unknown>>> = {
   })),
 }
 
+/** mock webhook / provider 配置（内存态；provider 契约见 api/provider.ts） */
+const mockHooks: Array<Record<string, unknown>> = [
+  { id: 'hk_001', tool_id: 'tl_demo_notify', conversation_id: 'c_001', enabled: true, created_at: isoDate(120) },
+]
+const mockProviders: Array<Record<string, unknown>> = [
+  { id: 'pv_001', name: 'openai', base_url: 'https://api.openai.com/v1', model: 'gpt-4o', enabled: true, has_key: true, created_at: isoDate(200) },
+  { id: 'pv_002', name: 'deepseek', base_url: '', model: 'deepseek-chat', enabled: false, has_key: true, created_at: isoDate(100) },
+]
+
 function readBody(req: IncomingMessage): Promise<ParsedBody> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = []
@@ -578,6 +587,41 @@ export const mockServer = {
         }),
       )
     }
+    /* ===== Webhook（docs 03 §5.10） ===== */
+    if (method === 'GET' && pathname === '/hooks') return void json(res, ok(mockHooks))
+    p = match(pathname, '/hooks/:tool_id/register')
+    if (method === 'POST' && p) {
+      const hk = { id: uid('hk'), tool_id: p.tool_id, conversation_id: body.json?.conversation_id ?? null, enabled: true, created_at: isoDate(0) }
+      mockHooks.push(hk)
+      return void json(res, ok(hk))
+    }
+    p = match(pathname, '/hooks/:tool_id')
+    if (method === 'DELETE' && p) {
+      const toolId = p.tool_id
+      mockHooks.splice(mockHooks.findIndex((h) => h.tool_id === toolId), 1)
+      return void json(res, ok(null))
+    }
+
+    /* ===== Provider 配置（前端契约，mock 演示；真实后端待实现） ===== */
+    if (method === 'GET' && pathname === '/settings/providers') return void json(res, ok(mockProviders))
+    if (method === 'POST' && pathname === '/settings/providers') {
+      const pv = { id: uid('pv'), ...(body.json ?? {}), has_key: !!body.json?.api_key, enabled: body.json?.enabled ?? true, created_at: isoDate(0) }
+      mockProviders.push(pv)
+      return void json(res, ok(pv))
+    }
+    p = match(pathname, '/settings/providers/:id')
+    if (method === 'PATCH' && p) {
+      const id = p.id
+      const pv = mockProviders.find((x) => x.id === id)
+      if (pv) Object.assign(pv, body.json)
+      return void json(res, ok(pv))
+    }
+    if (method === 'DELETE' && p) {
+      const id = p.id
+      mockProviders.splice(mockProviders.findIndex((x) => x.id === id), 1)
+      return void json(res, ok(null))
+    }
+
     if (method === 'GET' && pathname === '/system/cost') {
       return void json(
         res,

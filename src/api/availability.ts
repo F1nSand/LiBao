@@ -19,6 +19,8 @@ export const FEATURE = {
   systemTrace: 'system.trace',
   systemEvals: 'system.evals',
   systemCost: 'system.cost',
+  hooks: 'hooks',
+  providers: 'settings.providers',
 } as const
 export type Feature = (typeof FEATURE)[keyof typeof FEATURE]
 
@@ -34,6 +36,8 @@ const FEATURE_ROUTES: Array<[RegExp, Feature]> = [
   [/^\/system\/logs/, FEATURE.systemLogs],
   [/^\/system\/evals/, FEATURE.systemEvals],
   [/^\/system\/cost/, FEATURE.systemCost],
+  [/^\/hooks/, FEATURE.hooks],
+  [/^\/settings\/providers/, FEATURE.providers],
 ]
 
 const unavailable = ref<Record<string, boolean>>({})

@@ -11,6 +11,13 @@
       - 新增 4 个内置工具：`calculator`（安全算术，默认开）、`datetime_calc`（日期计算）、`unit_converter`（单位换算）、`weather`（wttr.in 天气，默认关需 allowlist 授权）。
       - 聊天发「用计算器算 / 今天加 3 天 / 5 公里是多少米 / 北京天气」即可触发对应工具卡；/tools 管理页可管理启停。
 
+[open] 2026-08-17 · →后端 | **Provider 配置契约待实现**（前端 api/provider.ts 已按此接线，未实现走 404 降级空态）| 请实现：
+      - `GET /settings/providers` → `ProviderConfig[]`：`{id, name, base_url?, model?, enabled, has_key, created_at}`
+      - `POST /settings/providers` body `{name, base_url?, api_key, model?, enabled?}` → ProviderConfig（api_key 只写不读，响应仅 has_key 标记）
+      - `PATCH /settings/providers/{id}` body `{base_url?, model?, enabled?, api_key?}` → ProviderConfig
+      - `DELETE /settings/providers/{id}` → ok
+      安全约定：api_key 永不回传明文（has_key 布尔）；缺端点时设置页 Provider tab 显示「后端暂未实现」空态。
+[done] 2026-08-17 · →后端 | **Webhook 管理前端已接**（docs 03 §5.10）| 设置页 Webhook tab（list/register/delete）接 `GET /hooks`、`POST /hooks/{tool_id}/register`、`DELETE /hooks/{tool_id}`，mock+真实后端渲染验证通过，无需后端改。
 [done] 2026-08-17 · →后端 | **评估管理前端已接线**（EvalManage 组件 + 死代码 createEvalSet/addEvalCase/patchEvalCase/listEvalRuns 全激活）| 与你 M5 契约对接，真实后端验证通过。
       实现：评估集 CRUD（新建/重命名/删除）、用例管理（列表/添加/layer/启用开关/删除）、运行历史列表 + 选中回看结果、配对比较（候选 vs 基线矩阵 + 汇总 W/L/T/Δ）。
       types 对齐：EvalCase.layer、EvalRun.baseline_run_id、EvalCaseResult.latency_ms/cost、PairwiseDetail。
@@ -328,3 +335,14 @@
 - **P4 gate**：typecheck ✓ / lint 0err / **120 单测 PASS** / **21 e2e PASS**；docs/02（/system 行、system store 行、组件表加 EvalManage）+ progress.md + 交接板同步。
 - 排障记录：EvalManage 真实后端验证时偶现 `/auth/login` 500——隔离复现不了（干净直达 /chat），发生在登录端点非评估调用，判为后端重启竞态的环境瞬态，非代码问题。
 - 不做（记录）：Provider 配置表单（后端无 Provider API，做=死表单，等补端点）；工作区内部设计（用户已定不做）；hooks/webhook 管理页（后端 M6 前开放项，本轮未做，留待后续）。
+
+## 2026-08-17 对话显示 + 设置增强（L2）：打开会话滚到底 + hooks/Provider 进设置 + 契约交接
+用户三项要求：
+- ① **打开会话默认滚到底**：MessageList 加会话切换强制滚动 watch（`messages[0].conversation_id` 变化 → `scrollTop = scrollHeight`），与吸底跟随并存；DOM 实测发消息后底部 ✓ / 上滚到顶 ✓ / 切换会话后回底 ✓。
+- ② **hooks 管理 + Provider 配置表单进设置**：
+  - 新 `api/hooks.ts`（list/register/delete）+ `api/provider.ts`（list/create/update/delete）；types `WebhookConfig/RegisterHookRequest/ProviderConfig/SaveProviderRequest`；`FEATURE.hooks/providers` 降级。
+  - SettingsView：新增 **Webhook 管理** tab（列表/注册/删除）+ **Provider 配置** tab 重做（列表/添加/启用开关/删除，availability 降级空态）。
+  - mock 补 hooks/providers 路由 + 种子。
+- ③ **后端没做的留契约**：交接板 `[open] →后端 Provider 配置契约`（/settings/providers CRUD + api_key 只写不读 has_key 安全约定）；Webhook 管理已接确认（后端已有 hooks API）。
+- 验证：typecheck ✓ / lint 0err / **120 单测 PASS** / **21 e2e PASS** / DOM 手测（设置 Provider/Webhook tab 渲染；打开会话滚到底 3 项全过）。
+- 排障记录：滚到底 DOM 测试首轮失败 = 测试消息含 "HTTP/2"（数字+`/`）触发 mock 计算器中断路径 → composer 卡 disabled；换无数学符号消息即过，非产品 bug。
