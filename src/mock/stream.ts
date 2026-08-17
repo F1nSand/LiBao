@@ -48,6 +48,13 @@ function doneEvent(message: Message, tokenUsage?: Record<string, unknown>): SseS
   }
 }
 
+/** 逐轮消息封口（docs/03 §3 多消息）：一轮思考完成 → message 事件 + 落库（与 doneEvent 同） */
+function sealEvent(message: Message): SseScriptItem {
+  if (!messages[message.conversation_id]) messages[message.conversation_id] = []
+  messages[message.conversation_id].push(message)
+  return { type: 'message', payload: { message }, delayMs: delay(120) }
+}
+
 /** 简单四则运算（demo 用） */
 function calcExpression(expr: string): number {
   const m = expr.match(/(-?\d+(?:\.\d+)?)\s*[*x×]\s*(-?\d+(?:\.\d+)?)/)
@@ -109,7 +116,7 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
     ]
   }
 
-  // 默认：web_search 占位 → 回填
+  // 默认：两轮多消息——轮1「检索 + web_search 工具」→ message 封口；轮2「最终答案」→ done
   const toolCallId = uid('tc')
   const jobRef = uid('job')
   const summaryLines = [
@@ -118,7 +125,9 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
     '2. **摘要二**：补充背景与相关链接。',
     '3. **摘要三**：进一步阅读建议。\n',
   ]
-  const fullText = `正在检索「${content}」…\n\n${summaryLines.join('\n')}`
+  const round1Text = '正在检索相关信息…\n\n检索完成，整理结果中…\n'
+  const finalText = `正在检索「${content}」…\n\n${summaryLines.join('\n')}`
+  const now = new Date().toISOString()
   return [
     ...base,
     tok('正在检索相关信息…\n'),
@@ -152,19 +161,32 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
       },
       delayMs: delay(200),
     },
-    tok(fullText),
+    // 轮1 封口：检索文本 + web_search 工具（独立消息，思考链可见）
+    sealEvent({
+      id: messageId,
+      conversation_id: conversationId,
+      role: 'assistant',
+      content: round1Text,
+      attachments: [],
+      tool_calls: [
+        { tool_call_id: toolCallId, tool_name: 'web_search', input: { query: content }, output: { hits: summaryLines.length }, status: 'done', position: 0, duration_ms: 812 },
+      ] satisfies ToolCallRecord[],
+      round: 0,
+      trace_id: `tr_${randHex(12)}`,
+      created_at: now,
+    }),
+    tok(finalText),
     doneEvent(
       {
-        id: messageId,
+        id: uid('msg'),
         conversation_id: conversationId,
         role: 'assistant',
-        content: fullText,
+        content: finalText,
         attachments: [],
-        tool_calls: [
-          { tool_call_id: toolCallId, tool_name: 'web_search', input: { query: content }, output: { hits: summaryLines.length }, status: 'done', position: 0, duration_ms: 812 },
-        ] satisfies ToolCallRecord[],
+        tool_calls: [],
+        round: 1,
         trace_id: `tr_${randHex(12)}`,
-        created_at: new Date().toISOString(),
+        created_at: now,
       },
     ),
   ]

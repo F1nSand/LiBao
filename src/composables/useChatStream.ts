@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 import { streamChatAt, streamTaskResume } from '@/api/sse'
 import type { ChatRequest, SseEnvelope, TokenUsage } from '@/types'
-import type { AgentSwitchPayload, ToolResultPayload } from '@/types'
+import type { AgentSwitchPayload, MessageSealPayload, ToolResultPayload } from '@/types'
 import { flushNow, throttleByRaf } from '@/utils/rAF'
 
 /**
@@ -130,6 +130,14 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     timers.clear()
   }
 
+  /** 一轮思考完成：复位本轮流式段（保留 taskId/conversationId/messageId 跨轮续用），下一轮继续 */
+  function sealRound(): void {
+    state.segments = []
+    state.partialText = ''
+    state.toolCalls = {}
+    state.status = 'running'
+  }
+
   function findCard(p: { tool_call_id?: string; job_ref?: string }): ToolCallCardState | undefined {
     if (p.tool_call_id && state.toolCalls[p.tool_call_id]) return state.toolCalls[p.tool_call_id]
     if (p.job_ref) return Object.values(state.toolCalls).find((c) => c.job_ref === p.job_ref)
@@ -254,6 +262,14 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
       case 'thinking': {
         // 思考（docs/03 §3.3 监视器预留）：后端发射即入活动区，不发射永不出现
         state.segments.push({ kind: 'thinking', id: segId(), text: (p.text ?? '') as string })
+        break
+      }
+      case 'message': {
+        // 逐轮消息封口（docs/03 §3 多消息扩展）：一轮思考（文本+工具）完成，追加为独立消息 + 复位段
+        flushText()
+        flushNow()
+        opts.onPersistedMessage?.((p as MessageSealPayload).message)
+        sealRound()
         break
       }
       case 'done': {

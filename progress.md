@@ -7,16 +7,20 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
-[done] 2026-08-17 · ←后端 | **通用助手实用工具包**（269 测试全绿 + verify 14/8/6）| 前端零改动（工具卡自动渲染）。
-      - 新增 4 个内置工具：`calculator`（安全算术，默认开）、`datetime_calc`（日期计算）、`unit_converter`（单位换算）、`weather`（wttr.in 天气，默认关需 allowlist 授权）。
-      - 聊天发「用计算器算 / 今天加 3 天 / 5 公里是多少米 / 北京天气」即可触发对应工具卡；/tools 管理页可管理启停。
+[open] 2026-08-17 · →后端 | **逐轮消息契约待实现**（前端 useChatStream 已支持 `message` 事件封口 + mock 已演示）| 请实现多消息（一轮思考 = 一条消息，思考链可见）：
+      - **SSE**：新增 `message` 事件——每非最终轮的工具结果齐后发射，payload `{message: <serialize_message>}`（content=该轮 AI 文本剥 thinking、tool_calls=该轮含 output、round=轮次）；最后一条仍由 `done` 发。发射点参考 `stream_core.py` updates 的 tool_execute 后。
+      - **按轮持久化**：`on_final`（chat + resume + task 对等）从本轮最后一个 HumanMessage 后遍历 `final_state["messages"]` 的 AI 消息，每条建一个 Message 行（content=轮文本、tool_calls=该轮、parent_id=用户消息、round=序号），替代合并成一条。
+      - **Message 模型**：加 `round` int 列（migration；`created_at` 同 commit 无序）；`serialize_message` 带 round；`list_messages`/`trajectory` 按 `(created_at, round)` 排序。
+      - 前端在 `message` 事件封口追加 → 刷新一致（GET messages 逐轮、轨迹自动多轮 Message/Step 组）。未实现前真实后端仍单气泡（无回归）。
+[done] 2026-08-17 · ←后端 | **通用助手实用工具包 + 出站黑名单**（272 测试全绿 + verify 14/8/6）| 前端零改动（工具卡自动渲染）。
+      - 新增 5 个内置工具：`calculator`（安全算术，默认开）、`datetime_calc`（日期计算）、`unit_converter`（单位换算）、`weather`（wttr.in 天气）、`web_search`（Bing 联网搜索）——weather/web_search 默认关，/tools 启用即可。
+      - **出站白名单改黑名单**：`fetch_url_denylist`（默认空 = 全放行），fetch_url/weather/web_search 同 gate；实测真实联网全通（example.com / wttr.in Beijing 27°C / Bing 3 条）。
+      - 聊天发「用计算器算 / 今天加 3 天 / 5 公里是多少米 / 北京天气 / 搜索 python」即可触发对应工具卡。
 
-[open] 2026-08-17 · →后端 | **Provider 配置契约待实现**（前端 api/provider.ts 已按此接线，未实现走 404 降级空态）| 请实现：
-      - `GET /settings/providers` → `ProviderConfig[]`：`{id, name, base_url?, model?, enabled, has_key, created_at}`
-      - `POST /settings/providers` body `{name, base_url?, api_key, model?, enabled?}` → ProviderConfig（api_key 只写不读，响应仅 has_key 标记）
-      - `PATCH /settings/providers/{id}` body `{base_url?, model?, enabled?, api_key?}` → ProviderConfig
-      - `DELETE /settings/providers/{id}` → ok
-      安全约定：api_key 永不回传明文（has_key 布尔）；缺端点时设置页 Provider tab 显示「后端暂未实现」空态。
+[done] 2026-08-17 · ←后端 | **Provider 配置已实现**（`/settings/providers` CRUD，276 测试全绿）| 与你契约完全一致，前端零改动。
+      - `GET /settings/providers` → `ProviderConfig[]`（含 has_key 布尔，无 api_key）；`POST /settings/providers`（api_key 只写不读）；`PATCH/DELETE /settings/providers/{id}`。
+      - 安全约定兑现：api_key 明文仅存库、永不 API 回传（响应仅 has_key 标记）。
+      - 启动同步：启用的 provider 会覆盖 Settings（LLM 即用配置的 base_url/model/api_key）。
 [done] 2026-08-17 · →后端 | **Webhook 管理前端已接**（docs 03 §5.10）| 设置页 Webhook tab（list/register/delete）接 `GET /hooks`、`POST /hooks/{tool_id}/register`、`DELETE /hooks/{tool_id}`，mock+真实后端渲染验证通过，无需后端改。
 [done] 2026-08-17 · →后端 | **评估管理前端已接线**（EvalManage 组件 + 死代码 createEvalSet/addEvalCase/patchEvalCase/listEvalRuns 全激活）| 与你 M5 契约对接，真实后端验证通过。
       实现：评估集 CRUD（新建/重命名/删除）、用例管理（列表/添加/layer/启用开关/删除）、运行历史列表 + 选中回看结果、配对比较（候选 vs 基线矩阵 + 汇总 W/L/T/Δ）。
@@ -346,3 +350,12 @@
 - ③ **后端没做的留契约**：交接板 `[open] →后端 Provider 配置契约`（/settings/providers CRUD + api_key 只写不读 has_key 安全约定）；Webhook 管理已接确认（后端已有 hooks API）。
 - 验证：typecheck ✓ / lint 0err / **120 单测 PASS** / **21 e2e PASS** / DOM 手测（设置 Provider/Webhook tab 渲染；打开会话滚到底 3 项全过）。
 - 排障记录：滚到底 DOM 测试首轮失败 = 测试消息含 "HTTP/2"（数字+`/`）触发 mock 计算器中断路径 → composer 卡 disabled；换无数学符号消息即过，非产品 bug。
+
+## 2026-08-17 对话多消息（逐轮思考链）+ 轨迹优化（L3，前端 + 后端契约）
+用户需求：一轮思考 = 一条消息（思考链直观可见）；轨迹同步优化。已确认前端+后端契约方案、轨迹自动提升+UI打磨。
+- **A 契约**：sse.ts 加 `message` 事件类型 + `MessageSealPayload`；api.ts `Message.round`；useChatStream 加 `sealRound()`（复位段、保留 taskId/conversationId/messageId）+ `case 'message'`（onPersistedMessage 追加本轮 + 复位）。
+- **C mock 多消息**：buildChatScript 默认分支拆两轮——轮1（检索 + web_search 工具）→ `message` 事件封口落库；轮2（最终答案）→ done；`sealEvent` helper。
+- **D 轨迹**：`foldTrajectory` 已支持同 Turn 多 assistant 节点（Message + Step N）→ 自动逐轮呈现；`dispatch_subagent` 工具单元格标记「⇄ 派发 subagent」；trajectory.spec 增强多轮含工具用例。
+- **E 后端契约**：交接板 `[open]` 逐轮消息——SSE `message` 事件 + 按轮持久化 + `Message.round` 列 + 排序；chat/resume/task 对等。
+- **验证**：typecheck ✓ / lint 0err / **121 单测 PASS**（+1 message 事件）/ **21 e2e PASS** / DOM 手测（mock：2 个 assistant 气泡、轮1 web_search+检索文本、轮2 最终答案；刷新后重选会话仍 2 条；轨迹 Turn 1 · 2 步 · 1 工具，Message + Step 分组）0 页面错误。
+- 不做（记录）：thinking 推理作为消息（后端仍剥离，契约预留）；逐轮 token_usage/cost 展示；轨迹大重构。

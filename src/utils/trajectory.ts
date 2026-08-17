@@ -112,10 +112,12 @@ function makeMessageCell(n: TrajectoryNode, index: number): TrajectoryCell {
 
 function makeToolCell(n: TrajectoryNode, tc: TrajectoryToolCall, index: number): TrajectoryCell {
   const argsRaw = safeStringify(tc.input)
+  // subagent 派发（agent 控制）标记：⇄ 派发 subagent，弱化显示（docs/02 §6.3）
+  const isDispatch = tc.tool_name === 'dispatch_subagent'
   return {
     index,
     kind: 'tool',
-    text: `${tc.tool_name} ${truncate(argsRaw, 40)}`.trim(),
+    text: isDispatch ? `⇄ 派发 subagent ${truncate(argsRaw, 40)}`.trim() : `${tc.tool_name} ${truncate(argsRaw, 40)}`.trim(),
     previewMarkdown: tc.output !== undefined ? safeStringify(tc.output) : argsRaw,
     input: tc.input,
     output: tc.output,

@@ -56,10 +56,16 @@ describe('foldTrajectory（对话轨迹折叠）', () => {
     expect(turns[0].groups[0].title).toBe('Message')
   })
 
-  it('同一 Turn 内多个 assistant 节点 → 后续为 Step N', () => {
-    const turns = foldTrajectory([user(1, 'q'), assistant(2, 'a1'), assistant(3, 'a2')])
+  it('同一 Turn 多个 assistant 节点（逐轮消息）→ Message（含工具）+ Step 1', () => {
+    const turns = foldTrajectory([
+      user(1, 'q'),
+      assistant(2, '检索中', [{ tool_call_id: 't1', tool_name: 'web_search', input: {}, output: {}, ok: true, position: 0 }]),
+      assistant(3, '最终答案'),
+    ])
     expect(turns).toHaveLength(1)
     expect(turns[0].groups.map((g) => g.title)).toEqual(['Message', 'Step 1'])
+    expect(turns[0].groups[0].cells.map((c) => c.kind)).toEqual(['message', 'tool'])
+    expect(turns[0].groups[1].cells.map((c) => c.kind)).toEqual(['message'])
   })
 
   it('连续 user → 开两个 Turn，index 全局递增', () => {

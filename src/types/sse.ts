@@ -1,5 +1,6 @@
 /** SSE 事件协议（docs/03 §3） */
 import type { TokenUsage } from './domain'
+import type { Message } from './api'
 
 export type SseEventType =
   | 'message_start'
@@ -9,6 +10,7 @@ export type SseEventType =
   | 'agent_switch'
   | 'status'
   | 'interrupt'
+  | 'message'
   | 'done'
   | 'error'
   // 监视器预留（docs/03 §3.3，MVP 后实施）
@@ -82,6 +84,13 @@ export interface DonePayload {
   token_usage?: TokenUsage
   cost?: number
   message?: unknown
+}
+
+/** 逐轮消息封口（docs/03 §3 多消息扩展）：一轮思考（文本+工具）完成时由后端发射，前端追加为独立消息 */
+export interface MessageSealPayload {
+  message_id?: string
+  token_usage?: TokenUsage
+  message: Message
 }
 
 export interface ErrorPayload {

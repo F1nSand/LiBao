@@ -97,6 +97,26 @@ describe('useChatStream 状态机', () => {
     expect(cs.state.segments[1]).toMatchObject({ kind: 'thinking', text: '' })
   })
 
+  it('message 事件封口一轮：追加消息 + 复位段（保留 taskId）；done 追加最后一条', async () => {
+    const persisted: unknown[] = []
+    const cs = useChatStream({ onPersistedMessage: (m) => persisted.push(m) })
+    await cs.start(chatReq as never)
+    chatHandlers!.onEvent(ev('message_start', 1, { message_id: 'm1', agent_id: 'a', conversation_id: 'c', task_id: 't1' }))
+    chatHandlers!.onEvent(ev('token', 2, { text: '检索中' }))
+    chatHandlers!.onEvent(ev('message', 3, { message: { id: 'm1', conversation_id: 'c', role: 'assistant', content: '检索中', tool_calls: [], created_at: 'x' } }))
+    // 轮1 追加 + 段复位，但跨轮上下文保留
+    expect(persisted).toHaveLength(1)
+    expect(cs.state.segments).toHaveLength(0)
+    expect(cs.state.partialText).toBe('')
+    expect(cs.state.taskId).toBe('t1')
+    expect(cs.state.conversationId).toBe('c')
+    // 下一轮 token + done 追加最后一条
+    chatHandlers!.onEvent(ev('token', 4, { text: '答案' }))
+    chatHandlers!.onEvent(ev('done', 5, { message_id: 'm2', message: { id: 'm2', conversation_id: 'c', role: 'assistant', content: '答案', tool_calls: [], created_at: 'x' } }))
+    expect(persisted).toHaveLength(2)
+    expect(cs.state.finished).toBe(true)
+  })
+
   it('tool_call → 建卡；占位→回填 done', async () => {
     const cs = useChatStream()
     await cs.start(chatReq as never)

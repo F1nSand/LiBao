@@ -76,6 +76,8 @@ export interface Message {
   tool_calls?: ToolCallRecord[]
   token_usage?: TokenUsage
   trace_id?: string
+  /** 轮次序号（逐轮消息：一轮思考 = 一条消息；同一 turn 内排序用） */
+  round?: number
   created_at: string
 }
 
