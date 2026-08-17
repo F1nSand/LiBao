@@ -71,7 +71,7 @@ class Settings(BaseSettings):
 
     # ---- fetch_url 内置工具（docs 07 RM-8）----
     # 出站白名单（fail-closed）：["*"] 放通全部仅限开发；空列表 = 全拒
-    fetch_url_allowlist: list[str] = []
+    fetch_url_denylist: list[str] = []  # 出站黑名单（默认空 = 全放行）；精确域名或 *.example.com 通配
     fetch_url_max_chars: int = 8000
 
     # ---- 跨域 ----

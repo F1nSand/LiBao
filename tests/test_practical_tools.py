@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from app.core.config import get_settings
-from app.tools.builtin import calculator, datetime_calc, unit_converter, weather
+from app.tools.builtin import calculator, datetime_calc, unit_converter, weather, web_search
 
 # ---- calculator ----
 
@@ -79,21 +79,57 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_weather_gated_by_allowlist():
+def test_weather_denylist_blocks(monkeypatch):
     settings = get_settings()
-    orig = settings.fetch_url_allowlist
-    settings.fetch_url_allowlist = []
+    monkeypatch.setattr(settings, "fetch_url_denylist", ["wttr.in"])
+    out = _run(weather.weather_handler("Beijing"))
+    assert "error" in out and "黑名单" in out["error"]
+    monkeypatch.setattr(settings, "fetch_url_denylist", [])  # 默认全放行
+
+
+# ---- web_search ----
+
+def test_web_search_parse():
+    html = (
+        '<li class="b_algo"><h2><a href="https://example.com/1">One &amp; Title</a></h2>'
+        '<div class="b_caption"><p class="b_lineclamp2">snippet one</p></div></li>'
+        '<li class="b_algo"><h2><a href="https://example.com/2">Two</a></h2></li>'
+    )
+    results = web_search.parse_results(html, 5)
+    assert results[0]["title"] == "One & Title"
+    assert results[0]["url"] == "https://example.com/1"
+    assert results[0]["snippet"] == "snippet one"
+    assert len(results) == 2
+
+
+async def test_web_search_denylist_blocks(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "fetch_url_denylist", ["www.bing.com"])
+    out = await web_search.web_search_handler("python")
+    assert "error" in out and "黑名单" in out["error"]
+
+
+async def test_web_search_mock(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "fetch_url_denylist", [])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, text='<li class="b_algo"><h2><a href="https://x.com/a">Result X</a></h2></li>'
+        )
+
+    web_search._transport = httpx.MockTransport(handler)
     try:
-        out = _run(weather.weather_handler("Beijing"))
-        assert "error" in out and "授权" in out["error"]
+        out = await web_search.web_search_handler("python")
+        assert out["count"] == 1 and out["results"][0]["url"] == "https://x.com/a"
     finally:
-        settings.fetch_url_allowlist = orig
+        web_search._transport = None
 
 
 def test_weather_parses_mock_response(monkeypatch):
     settings = get_settings()
-    orig = settings.fetch_url_allowlist
-    settings.fetch_url_allowlist = ["wttr.in"]
+    orig = settings.fetch_url_denylist
+    settings.fetch_url_denylist = []
     try:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
@@ -120,4 +156,4 @@ def test_weather_parses_mock_response(monkeypatch):
         assert out["weather"] == "晴"
     finally:
         weather._transport = None
-        settings.fetch_url_allowlist = orig
+        settings.fetch_url_denylist = orig

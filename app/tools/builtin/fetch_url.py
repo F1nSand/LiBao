@@ -1,7 +1,7 @@
 """内置工具 tl_fetch_url：只读抓取网页（docs 07 RM-8 / docs 04 F4）。
 
-出站白名单 fail-closed（Settings.fetch_url_allowlist）；内容清洗（D3：剥 script/style + 折叠空白）；
-默认不启用（管理员显式开启）。异常兜底 error（不抛，executor 正常打包）。
+出站黑名单（Settings.fetch_url_denylist，默认空 = 全放行；精确域名或 *.example.com 通配）；
+内容清洗（D3：剥 script/style + 折叠空白）；默认不启用（管理员显式开启）。异常兜底 error。
 """
 from __future__ import annotations
 
@@ -53,23 +53,23 @@ def _extract_title(raw: str) -> str | None:
     return m.group(1).strip()[:200] if m else None
 
 
-def _allowed(host: str, allowlist: list[str]) -> bool:
-    """白名单匹配：精确域名或 *.example.com 通配。空白名单 = fail-closed 全拒。"""
-    if not allowlist:
+def _denied(host: str, denylist: list[str]) -> bool:
+    """黑名单匹配：精确域名或 *.example.com 通配。空黑名单 = 默认全放行。"""
+    if not denylist:
         return False
     host = host.lower()
-    return any(h == host or (h.startswith("*.") and host.endswith(h[1:])) for h in allowlist)
+    return any(h == host or (h.startswith("*.") and host.endswith(h[1:])) for h in denylist)
 
 
 async def handler(url: str, max_chars: int = 8000) -> dict[str, Any]:
-    """只读抓取：白名单校验 → GET → 清洗。异常兜底 error。"""
+    """只读抓取：黑名单校验（默认全放行）→ GET → 清洗。异常兜底 error。"""
     settings = get_settings()
     try:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             return {"error": "仅支持 http/https URL"}
-        if not _allowed(parsed.hostname, settings.fetch_url_allowlist):
-            return {"error": f"域名 {parsed.hostname} 不在出站白名单内"}
+        if _denied(parsed.hostname, settings.fetch_url_denylist):
+            return {"error": f"域名 {parsed.hostname} 在出站黑名单内"}
         limit = min(max_chars, _MAX_FETCH_CHARS)
         async with httpx.AsyncClient(
             transport=_transport, timeout=_FETCH_TIMEOUT_S, follow_redirects=True

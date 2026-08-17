@@ -1,4 +1,4 @@
-"""A1 fetch_url 工具测试（纯单元，无 DB）：注册态 / 内容清洗 / 白名单 / 错误兜底 / executor 全路径。"""
+"""A1 fetch_url 工具测试（纯单元，无 DB）：注册态 / 内容清洗 / 出站黑名单（默认全放行）/ 错误兜底 / executor 全路径。"""
 from __future__ import annotations
 
 import httpx
@@ -14,7 +14,7 @@ from app.tools.registry import get, unregister
 def _clean_fetch(monkeypatch):
     register_builtin_tools()
     s = get_settings()
-    monkeypatch.setattr(s, "fetch_url_allowlist", ["allowed.com", "*.ok.com"])
+    monkeypatch.setattr(s, "fetch_url_denylist", [])  # 默认空 = 全放行
     yield
     fetch_url._transport = None
     unregister("tl_fetch_url")
@@ -34,19 +34,17 @@ def test_registered_default_off():
     assert "url" in aci["function"]["parameters"]["properties"]
 
 
-def test_allowlist_blocks_outside(monkeypatch):
+def test_denylist_semantics(monkeypatch):
     s = get_settings()
-    monkeypatch.setattr(s, "fetch_url_allowlist", ["allowed.com"])
-    assert fetch_url._allowed("evil.com", s.fetch_url_allowlist) is False
-    assert fetch_url._allowed("allowed.com", s.fetch_url_allowlist) is True
-    assert fetch_url._allowed("sub.allowed.com", s.fetch_url_allowlist) is False  # 无通配，精确匹配
-    assert fetch_url._allowed("a.ok.com", ["*.ok.com"]) is True  # *. 通配
-    assert fetch_url._allowed("a.b.ok.com", ["*.ok.com"]) is True
+    monkeypatch.setattr(s, "fetch_url_denylist", [])
+    assert fetch_url._denied("evil.com", s.fetch_url_denylist) is False  # 空黑名单 = 默认全放行
+    monkeypatch.setattr(s, "fetch_url_denylist", ["evil.com"])
+    assert fetch_url._denied("evil.com", s.fetch_url_denylist) is True
+    assert fetch_url._denied("sub.evil.com", s.fetch_url_denylist) is False  # 无通配，精确匹配
+    assert fetch_url._denied("a.bad.com", ["*.bad.com"]) is True  # *. 通配
 
 
-async def test_fetch_cleans_html(monkeypatch):
-    s = get_settings()
-    monkeypatch.setattr(s, "fetch_url_allowlist", ["allowed.com"])
+async def test_fetch_cleans_html():
     html = (
         "<html><head><title>示例页</title></head><body>"
         "<script>var x=1</script><p>你好</p><style>a{color:red}</style><p>  世界  </p>"
@@ -57,8 +55,8 @@ async def test_fetch_cleans_html(monkeypatch):
         return httpx.Response(200, text=html, headers={"content-type": "text/html"})
 
     _mock(handler)
-    result = await fetch_url.handler("https://allowed.com/a", max_chars=200)
-    assert result["url"] == "https://allowed.com/a"
+    result = await fetch_url.handler("https://example.com/a", max_chars=200)
+    assert result["url"] == "https://example.com/a"
     assert result["title"] == "示例页"
     assert "你好" in result["text"] and "世界" in result["text"]
     assert "var x=1" not in result["text"]  # script 剥掉
@@ -74,15 +72,17 @@ async def test_fetch_truncates():
         return httpx.Response(200, text=html)
 
     _mock(handler)
-    result = await fetch_url.handler("https://allowed.com/long", max_chars=100)
+    result = await fetch_url.handler("https://example.com/long", max_chars=100)
     assert len(result["text"]) <= 100
     assert result["truncated"] is True
 
 
-async def test_fetch_allowlist_blocks():
+async def test_fetch_denylist_blocks(monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "fetch_url_denylist", ["evil.com"])
     result = await fetch_url.handler("http://evil.com/x")
     assert "error" in result
-    assert "白名单" in result["error"]
+    assert "黑名单" in result["error"]
 
 
 async def test_fetch_invalid_url():
@@ -95,20 +95,17 @@ async def test_fetch_non_200():
         return httpx.Response(503, text="err")
 
     _mock(handler)
-    result = await fetch_url.handler("https://allowed.com/x")
+    result = await fetch_url.handler("https://example.com/x")
     assert "error" in result
     assert "503" in result["error"]
 
 
-async def test_executor_full_path(monkeypatch):
-    s = get_settings()
-    monkeypatch.setattr(s, "fetch_url_allowlist", ["allowed.com"])
-
+async def test_executor_full_path():
     def handler(request):
         return httpx.Response(200, text="<html><body><p>正文内容</p></body></html>")
 
     _mock(handler)
     spec = get("tl_fetch_url")
-    result = await executor.execute(spec, {"url": "https://allowed.com/x"})
+    result = await executor.execute(spec, {"url": "https://example.com/x"})
     assert result.ok is True
     assert result.output["text"] == "正文内容"

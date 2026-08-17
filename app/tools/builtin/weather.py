@@ -1,6 +1,6 @@
 """内置工具 tl_weather：天气查询（wttr.in，免费无 key）。
 
-出站白名单 fail-closed（wttr.in 需在 Settings.fetch_url_allowlist）——与 fetch_url 同 gate；
+出站黑名单（Settings.fetch_url_denylist，默认空 = 全放行）——与 fetch_url 同 gate；
 transport 注入点（镜像 fetch_url/embeddings）供测试 mock，不碰真实外网。异常兜底 error。
 默认不启用（管理员显式开启，seed DB 行可管理）。
 """
@@ -20,10 +20,10 @@ _transport: httpx.AsyncBaseTransport | None = None  # 测试注入点（镜像 f
 
 
 async def weather_handler(location: str) -> dict[str, Any]:
-    """查天气：location 城市名/拼音/坐标 → 当前温度/天气/湿度/风。wttr.in 需在白名单。"""
+    """查天气：location 城市名/拼音/坐标 → 当前温度/天气/湿度/风。默认全放行（除非 wttr.in 在黑名单）。"""
     settings = get_settings()
-    if _WEATHER_HOST not in settings.fetch_url_allowlist:
-        return {"error": f"天气服务未授权（{_WEATHER_HOST} 不在 fetch_url_allowlist）"}
+    if _WEATHER_HOST in settings.fetch_url_denylist:
+        return {"error": f"天气服务被出站黑名单拦截（{_WEATHER_HOST}）"}
     try:
         url = f"https://{_WEATHER_HOST}/{quote(location)}?format=j1"
         async with httpx.AsyncClient(transport=_transport, timeout=_TIMEOUT_S, follow_redirects=True) as client:

@@ -34,7 +34,8 @@ AGENT_SYSTEM_PROMPT = (
     "- 需要评审方案 / 计划（可行性、风险、遗漏、更优解）时 → 派发「方案评审」proposal_review。\n"
     "实用工具直接用（不需要派发 subagent）：\n"
     "- 数学计算 → calculator（如 (3+4)*2-1）；日期计算 → datetime_calc（now/add_days/weekday/days_between）；\n"
-    "- 单位换算 → unit_converter（长度/重量/温度/速度）；当前时间 → time_now；查天气 → weather（若已启用）。\n"
+    "- 单位换算 → unit_converter（长度/重量/温度/速度）；当前时间 → time_now；查天气 → weather（若已启用）；\n"
+    "- 联网搜索最新信息 → web_search（若已启用）；抓取具体网页 → fetch_url（若已启用）。\n"
     "派发后基于 subagent 结论继续回答用户，用中文回答。\n"
     "用户要求发送通知/提醒时使用 demo_notify 工具（该工具为演示人工确认流程：会先请求确认，确认后才真正发送）。"
 )
@@ -387,7 +388,7 @@ async def main() -> None:
             idempotent=False,
             enabled=True,
         )
-        # 实用工具：计算器/日期计算/单位换算默认开（离线纯本地）；天气默认关（网络，需 allowlist 授权）
+        # 实用工具：计算器/日期计算/单位换算默认开（离线纯本地）；天气默认关（网络，出站默认全放行）
         await _get_or_create_tool(
             session,
             org,
@@ -446,8 +447,26 @@ async def main() -> None:
         await _get_or_create_tool(
             session,
             org,
+            name="web_search",
+            description="联网搜索（DuckDuckGo，默认全放行，除非出站黑名单拦截）。",
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "搜索关键词"},
+                    "max_results": {"type": "integer", "description": "返回条数，默认 5"},
+                },
+                "required": ["query"],
+            },
+            tool_type="perception",
+            require_confirm=False,
+            idempotent=False,
+            enabled=False,
+        )
+        await _get_or_create_tool(
+            session,
+            org,
             name="weather",
-            description="查询天气（wttr.in，需 fetch_url_allowlist 授权）。",
+            description="查询天气（wttr.in，默认全放行，除非出站黑名单拦截）。",
             params_schema={
                 "type": "object",
                 "properties": {"location": {"type": "string", "description": "城市名/拼音/坐标"}},
@@ -472,6 +491,7 @@ async def main() -> None:
             "tl_datetime_calc",
             "tl_unit_converter",
             "tl_weather",
+            "tl_web_search",
         ]
         agent = await _get_or_create_agent(
             session, org, name=AGENT_NAME, prompt=AGENT_SYSTEM_PROMPT, tool_ids=agent_tools, is_default=True

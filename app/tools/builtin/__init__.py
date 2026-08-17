@@ -15,6 +15,7 @@ from app.tools.builtin import (
     tool_search,
     unit_converter,
     weather,
+    web_search,
 )
 from app.tools.registry import SandboxLevel, ToolSpec, ToolType, get, register
 
@@ -182,11 +183,36 @@ def register_builtin_tools() -> None:
     )
     _register(
         ToolSpec(
+            id="tl_web_search",
+            name="web_search",
+            description=(
+                "联网搜索：关键词 → 搜索结果列表（标题/链接/摘要）。需要获取最新网上信息、"
+                "查找资料时使用；配合 fetch_url 打开具体页面。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "搜索关键词"},
+                    "max_results": {"type": "integer", "description": "返回条数，默认 5，上限 10"},
+                },
+                "required": ["query"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=False,  # 默认关闭：网络工具，管理员显式启用（出站默认全放行，除非黑名单）
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=20000,
+            handler=web_search.web_search_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
             id="tl_weather",
             name="weather",
             description=(
-                "查询天气：城市名/拼音/坐标 → 当前温度/天气/湿度/风。需要知道某地天气时使用；"
-                "受出站白名单限制（wttr.in 需在 fetch_url_allowlist）。"
+                "查询天气：城市名/拼音/坐标 → 当前温度/天气/湿度/风。需要知道某地天气时使用。"
             ),
             params_schema={
                 "type": "object",
@@ -196,7 +222,7 @@ def register_builtin_tools() -> None:
                 "required": ["location"],
             },
             tool_type=ToolType.PERCEPTION,
-            enabled=False,  # 默认关闭：网络工具，管理员启用 + allowlist 授权
+            enabled=False,  # 默认关闭：网络工具，管理员显式启用（出站默认全放行，除非黑名单）
             require_confirm=False,
             idempotent=False,
             sandbox=SandboxLevel.NONE,
