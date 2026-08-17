@@ -23,6 +23,7 @@ class Message(BaseModel, Base):
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)  # system/user/assistant/tool
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    thinking: Mapped[str | None] = mapped_column(Text, nullable=True)  # 该轮推理（reasoning_content，docs 03 §3）
     attachments: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     tool_calls: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     token_usage: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

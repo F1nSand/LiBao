@@ -53,6 +53,7 @@ def serialize_message(msg: Message) -> dict[str, Any]:
         "conversation_id": str(msg.conversation_id),
         "role": msg.role,
         "content": msg.content,
+        "thinking": getattr(msg, "thinking", None),  # 该轮推理（docs 03 §3 逐轮消息扩展）
         "attachments": msg.attachments or [],
         "tool_calls": msg.tool_calls or [],
         "token_usage": msg.token_usage,
@@ -81,7 +82,7 @@ def serialize_trajectory_node(m: Message, seq: int) -> dict[str, Any]:
         "kind": m.role,  # user/assistant（context/steering/compaction 为 mock 扩展，真实无）
         "time": int(m.created_at.timestamp() * 1000) if m.created_at else 0,
         "content": m.content,
-        "thinking": None,  # 未单独存推理链
+        "thinking": getattr(m, "thinking", None),  # 该轮推理（docs 03 §3 逐轮消息扩展）
         "diff": None,  # 无 context/system 更新差异
         "token_usage": m.token_usage,
         "trace_id": m.trace_id,

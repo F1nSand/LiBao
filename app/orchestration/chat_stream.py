@@ -86,8 +86,23 @@ async def chat_stream_events(
 ) -> AsyncIterator[str]:
     emit = sse_emitter()
     msg_repo = MessageRepository(db)
-    # 逐轮消息收集（docs 03 §3 多消息扩展）：stream_core 每轮工具结果齐后 append，on_final 据此按轮持久化
+    # 逐轮消息收集（docs 03 §3 多消息扩展）：stream_core 每轮工具结果齐后 append + 即时落库
     round_sink: list[dict[str, Any]] = []
+
+    async def _persist_round(round_msg: dict[str, Any]) -> None:
+        """即时落库（docs 03 §3）：每轮工具结果齐后同步写该轮 Message（任务中 DB 已有已完成轮次）。"""
+        row = await msg_repo.create(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=round_msg["content"],
+            thinking=round_msg.get("thinking") or "",
+            tool_calls=round_msg["tool_calls"],
+            parent_id=user_msg.id,
+            trace_id=trace_id,
+            round=round_msg["round"],
+        )
+        row.id = uuid.UUID(round_msg["id"])
+        await db.commit()
 
     # ---- ① 开头持久化用户消息（message-as-log，刷新可回放）----
     # C8：用户消息 + 附件回填 + 记忆轨迹 + touch 合并为单事务（原 3 次独立 commit，D10 同事务偏差）
@@ -143,44 +158,40 @@ async def chat_stream_events(
         )
 
     async def on_final(final_state: dict[str, Any]) -> dict[str, Any]:
-        # ---- ② 流结束：按轮持久化 assistant 消息（docs 03 §3 多消息扩展）+ run_logs + last_message_at ----
+        # ---- ② 流结束：只补最终轮（round_sink 轮已在流中即时落库）+ run_logs + last_message_at ----
         fm = final_state.get("final_message", {}) or {}
         totals = final_state.get("totals") or {}
-        # round_sink 的轮（有工具结果，stream_core 已发 message 事件，id 一致）
-        persisted: list[Message] = []
-        for round_msg in round_sink:
-            row = await msg_repo.create(
-                conversation_id=conversation.id,
-                role="assistant",
-                content=round_msg["content"],
-                tool_calls=round_msg["tool_calls"],
-                parent_id=user_msg.id,
-                trace_id=trace_id,
-                round=round_msg["round"],
-            )
-            row.id = uuid.UUID(round_msg["id"])
-            persisted.append(row)
-        # 最终轮（无工具结果；tool_calls 空——该轮本身无工具；id=assistant_msg_id，done 事件承载）
+        # 最终轮推理（最后一条 AI 消息的 reasoning_content）
+        last_ai = next(
+            (m for m in reversed(final_state.get("messages", [])) if getattr(m, "type", "") == "ai"), None
+        )
+        final_thinking = (
+            ((getattr(last_ai, "additional_kwargs", {}) or {}).get("reasoning_content") or "") if last_ai else ""
+        )
         final_row = await msg_repo.create(
             conversation_id=conversation.id,
             role="assistant",
             content=fm.get("content", ""),
-            tool_calls=[],
+            thinking=final_thinking,
+            tool_calls=[],  # 最终轮本身无工具
             token_usage=fm.get("token_usage") or totals,
             parent_id=user_msg.id,
             trace_id=trace_id,
             round=len(round_sink) + 1,
         )
         final_row.id = assistant_msg_id
-        persisted.append(final_row)
         for log in final_state.get("run_logs", []):
             await RunLogRepository(db).create(session_id=conversation.id, **log)
-        # M3：记忆轨迹（逐轮助手消息各一条）
-        for row in persisted:
+        # M3：记忆轨迹（round_sink 轮 + 最终轮各一条）
+        for round_msg in round_sink:
             await MemoryService().record_trace(
-                db, user.id, role="assistant", content=row.content, trace_id=trace_id,
-                conversation_id=conversation.id, message_id=row.id,
+                db, user.id, role="assistant", content=round_msg["content"], trace_id=trace_id,
+                conversation_id=conversation.id, message_id=round_msg["id"],
             )
+        await MemoryService().record_trace(
+            db, user.id, role="assistant", content=fm.get("content", ""), trace_id=trace_id,
+            conversation_id=conversation.id, message_id=assistant_msg_id,
+        )
         await ConversationRepository(db).touch_last_message(conversation.id)
         await db.commit()
         return _done_payload(assistant_msg_id, fm.get("token_usage") or totals, serialize_message(final_row))
@@ -199,6 +210,7 @@ async def chat_stream_events(
         on_interrupt=on_interrupt,
         on_final=on_final,
         round_sink=round_sink,
+        on_round_message=_persist_round,
     ):
         yield frame
 
@@ -231,6 +243,23 @@ async def resume_stream_events(
 
     assistant_msg_id = uuid.uuid4()
     round_sink: list[dict[str, Any]] = []
+
+    async def _persist_round(round_msg: dict[str, Any]) -> None:
+        """即时落库（docs 03 §3）：resume 续流每轮同步写该轮 Message（会话流才落库）。"""
+        if not conversation_id:
+            return
+        row = await MessageRepository(db).create(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=round_msg["content"],
+            thinking=round_msg.get("thinking") or "",
+            tool_calls=round_msg["tool_calls"],
+            trace_id=trace_id,
+            round=round_msg["round"],
+        )
+        row.id = uuid.UUID(round_msg["id"])
+        await db.commit()
+
     graph_config = _graph_config(
         thread_id=str(thread_id),
         trace_id=trace_id,
@@ -264,45 +293,48 @@ async def resume_stream_events(
         totals = final_state.get("totals") or {}
         assistant_msg: Message | None = None
         if conversation_id:
-            # 会话流：按轮持久化 assistant 消息（docs 03 §3）+ run_logs + touch（任务流无会话，只更新任务状态）
+            # 会话流：只补最终轮（round_sink 轮已在流中即时落库）+ run_logs + touch（任务流无会话，只更新任务状态）
             msg_repo = MessageRepository(db)
-            persisted: list[Message] = []
-            for round_msg in round_sink:
-                row = await msg_repo.create(
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=round_msg["content"],
-                    tool_calls=round_msg["tool_calls"],
-                    trace_id=trace_id,
-                    round=round_msg["round"],
-                )
-                row.id = uuid.UUID(round_msg["id"])
-                persisted.append(row)
+            last_ai = next(
+                (m for m in reversed(final_state.get("messages", [])) if getattr(m, "type", "") == "ai"), None
+            )
+            final_thinking = (
+                ((getattr(last_ai, "additional_kwargs", {}) or {}).get("reasoning_content") or "") if last_ai else ""
+            )
             assistant_msg = await msg_repo.create(
                 conversation_id=conversation_id,
                 role="assistant",
                 content=fm.get("content", ""),
+                thinking=final_thinking,
                 tool_calls=[],
                 token_usage=fm.get("token_usage") or totals,
                 trace_id=trace_id,
                 round=len(round_sink) + 1,
             )
             assistant_msg.id = assistant_msg_id
-            persisted.append(assistant_msg)
             for log in final_state.get("run_logs", []):
                 await RunLogRepository(db).create(session_id=conversation_id, **log)
             await ConversationRepository(db).touch_last_message(conversation_id)
-            # C8：resume 续答轮补 assistant 轨迹（逐轮各一条；maintenance 原料）
-            for row in persisted:
+            # C8：resume 续答轮补 assistant 轨迹（round_sink 轮 + 最终轮各一条；maintenance 原料）
+            for round_msg in round_sink:
                 await MemoryService().record_trace(
                     db,
                     user.id,
                     role="assistant",
-                    content=row.content,
+                    content=round_msg["content"],
                     trace_id=trace_id,
                     conversation_id=conversation_id,
-                    message_id=row.id,
+                    message_id=round_msg["id"],
                 )
+            await MemoryService().record_trace(
+                db,
+                user.id,
+                role="assistant",
+                content=fm.get("content", ""),
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                message_id=assistant_msg_id,
+            )
         # F10：重读任务行，避免覆盖并发取消（与 task_run 一致）
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status != "cancelled":
@@ -341,6 +373,7 @@ async def resume_stream_events(
         on_final=on_final,
         on_error=on_error,
         round_sink=round_sink,
+        on_round_message=_persist_round,
     ):
         yield frame
 

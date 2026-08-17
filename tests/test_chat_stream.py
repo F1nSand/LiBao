@@ -121,3 +121,43 @@ async def test_chat_stream_event_sequence(chat_fixture):
         assert msgs[1].round == 1 and msgs[1].tool_calls and msgs[1].tool_calls[0]["tool_name"] == "time_now"
         assert msgs[2].round == 2 and msgs[2].tool_calls == []
         assert msgs[1].trace_id == "trace-t10"
+
+
+async def test_thinking_event_and_persistence(chat_fixture):
+    """thinking（reasoning_content）：SSE 发射 + 按轮持久化（docs 03 §3）。"""
+
+    from app.tools.builtin import register_builtin_tools
+
+    register_builtin_tools()
+    sessionmaker, org, user, agent, conv = chat_fixture
+
+    class ThinkingModel(FakeChatModel):
+        async def ainvoke(self, messages):
+            resp: AIMessage = await super().ainvoke(messages)
+            resp.additional_kwargs["reasoning_content"] = "我在思考调用时间工具。"
+            return resp
+
+    graph = build_graph()
+    async with sessionmaker() as session:
+        frames = []
+        async for frame in chat_stream_events(
+            db=session, graph=graph, conversation=conv, agent=agent, user=user,
+            content="现在几点？", trace_id="trace-think", model_override=ThinkingModel(),
+        ):
+            frames.append(frame)
+
+        events = []
+        for frame in frames:
+            if frame.startswith(":"):
+                continue
+            data = frame.split("\n\n")[0].split("data: ", 1)[1]
+            events.append(json.loads(data))
+        think_events = [e for e in events if e["type"] == "thinking"]
+        assert think_events, "应发射 thinking 事件"
+        assert think_events[0]["payload"]["text"] == "我在思考调用时间工具。"
+
+        msgs = await MessageRepository(session).list_by_conversation(conv.id)
+        # 即时落库：任务完成后 DB 已有全部轮次
+        assert [m.role for m in msgs] == ["user", "assistant", "assistant"]
+        assert msgs[1].thinking == "我在思考调用时间工具。"  # 工具轮
+        assert msgs[2].thinking == "我在思考调用时间工具。"  # 最终轮

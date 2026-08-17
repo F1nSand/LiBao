@@ -10,8 +10,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -47,7 +48,7 @@ def _chunk_text(chunk: Any) -> str:
 
 
 def _build_round_message(round_data: dict[str, Any], tool_results: list[dict[str, Any]]) -> dict[str, Any]:
-    """逐轮消息（docs 03 §3 多消息扩展）：content 剥 thinking + tool_calls 该轮含 output + round 序号。"""
+    """逐轮消息（docs 03 §3）：content 剥 thinking + thinking(reasoning_content) + 该轮 tool_calls + round。"""
     by_id = {r.get("tool_call_id"): r for r in tool_results}
     tool_calls = []
     for tc in round_data["tool_calls"]:
@@ -57,6 +58,7 @@ def _build_round_message(round_data: dict[str, Any], tool_results: list[dict[str
     return {
         "role": "assistant",
         "content": message_text(round_data["content"]),
+        "thinking": round_data.get("thinking") or "",
         "tool_calls": tool_calls,
         "round": round_data["round"],
     }
@@ -109,6 +111,7 @@ async def stream_graph_events(
     on_error: Callable[[Exception], Any] | None = None,
     keepalive_interval: int = KEEPALIVE_INTERVAL,
     round_sink: list[dict[str, Any]] | None = None,
+    on_round_message: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> AsyncIterator[str]:
     """驱动 graph.astream → SSE 帧。
 
@@ -116,7 +119,9 @@ async def stream_graph_events(
     - on_final(final_state)：正常结束回调（返回 done payload dict 或 None）；
     - on_error(exc)：图级异常回调（后台运行器用它把任务置 failed）。
     - round_sink：逐轮消息收集（docs 03 §3 多消息扩展）——每轮工具结果齐后 emit `message` 事件，
-      并把该轮消息（含 id/content/tool_calls/round）append 进 sink；on_final 据此按轮持久化（id 一致）。
+      并把该轮消息（含 id/content/tool_calls/round）append 进 sink；on_final 据此补最终轮（id 一致）。
+    - on_round_message：每轮工具结果齐后同步落库回调（即时落库：任务中 DB 已有已完成轮次，
+      前端轨迹轮询/切会话即见）；on_final 不再重复落已落库轮次。
     """
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 
@@ -159,6 +164,17 @@ async def stream_graph_events(
     # 逐轮消息（docs 03 §3）：round_seq 计数；pending_round = 本轮 agent_execute 的 AIMessage（有 tool_calls）
     round_seq = 0
     pending_round: dict[str, Any] | None = None
+
+    async def _emit_round(round_msg: dict[str, Any]) -> str:
+        """逐轮消息封口：生成 id → append sink → 即时落库（on_round_message）→ 发 `message` 事件。"""
+        msg_id = str(uuid.uuid4())
+        round_msg["id"] = msg_id
+        if round_sink is not None:
+            round_sink.append(round_msg)
+        if on_round_message is not None:
+            await on_round_message(round_msg)
+        return emit("message", {"message_id": msg_id, "message": round_msg})
+
     try:
         while True:
             kind, payload = await queue.get()
@@ -184,6 +200,10 @@ async def stream_graph_events(
                     text = _chunk_text(chunk)
                     if text:
                         yield emit("token", {"text": text})
+                    # 推理增量（DeepSeek reasoning_content；docs 03 §3 thinking 事件，前端累积到一轮一条）
+                    rc = (getattr(chunk, "additional_kwargs", {}) or {}).get("reasoning_content")
+                    if rc:
+                        yield emit("thinking", {"text": rc, "ts": int(time.time() * 1000)})
             elif mode == "updates":
                 for node, update in item.items():
                     if node == "agent_execute":
@@ -194,6 +214,10 @@ async def stream_graph_events(
                                     "content": m.content,
                                     "tool_calls": [dict(tc) for tc in tcs],
                                     "round": round_seq + 1,
+                                    "thinking": (getattr(m, "additional_kwargs", {}) or {}).get(
+                                        "reasoning_content"
+                                    )
+                                    or "",
                                 }
                             for tc in tcs:
                                 spec = get_by_name(tc["name"]) or get(tc["name"])
@@ -227,12 +251,9 @@ async def stream_graph_events(
                         # 逐轮消息封口（docs 03 §3）：本轮工具结果齐后发 `message` 事件（前端追加独立消息 + sealRound）
                         if pending_round is not None:
                             round_seq += 1
-                            round_msg = _build_round_message(pending_round, update.get("tool_results", []))
-                            msg_id = str(uuid.uuid4())
-                            round_msg["id"] = msg_id
-                            if round_sink is not None:
-                                round_sink.append(round_msg)
-                            yield emit("message", {"message_id": msg_id, "message": round_msg})
+                            yield await _emit_round(
+                                _build_round_message(pending_round, update.get("tool_results", []))
+                            )
                             pending_round = None
                         else:
                             # resume 中断轮：本轮 AI 消息在中断前（本流不可见），仅用工具结果构建轮消息（content 空；
@@ -240,12 +261,15 @@ async def stream_graph_events(
                             tcs = list(update.get("tool_results", []))
                             if tcs:
                                 round_seq += 1
-                                round_msg = {"role": "assistant", "content": "", "tool_calls": tcs, "round": round_seq}
-                                msg_id = str(uuid.uuid4())
-                                round_msg["id"] = msg_id
-                                if round_sink is not None:
-                                    round_sink.append(round_msg)
-                                yield emit("message", {"message_id": msg_id, "message": round_msg})
+                                yield await _emit_round(
+                                    {
+                                        "role": "assistant",
+                                        "content": "",
+                                        "thinking": "",
+                                        "tool_calls": tcs,
+                                        "round": round_seq,
+                                    }
+                                )
                     elif node == "context_update":
                         yield emit("status", {"status": "finalizing", "context_metrics": None})
                     elif node == "__interrupt__":
