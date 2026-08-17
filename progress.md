@@ -7,6 +7,10 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[open] 2026-08-17 · →后端 | **逐轮消息需按轮即时落库**（多轮任务中轨迹实时同步 + 切换会话不丢）| 当前 `on_final` 才批量落库，任务中 DB 无轮次：
+      - 现状：`chat_stream.py` 用 `round_sink` 收集 → `on_final` `for round_msg in round_sink: msg_repo.create(...)` 一次性落库；流式 `message` 事件已发射但 DB 滞后 → 轨迹读 DB 为空、切换会话重读丢失，任务完成再进入才全。
+      - 修法：在 `message` 事件发射处（`stream_core` 该轮工具结果齐后）**同步落库该轮 Message**；`on_final` 只补最后一条（或跳过已落库轮次）。
+      - 效果：任务中 DB 已有已完成轮次 → 前端轨迹轮询（2.5s，已实现）实时更新；切换会话回来聊天/轨迹读 DB 即现。前端零改动。
 [done] 2026-08-17 · →后端 | **逐轮消息前端已对接真实后端验证通过** | 多消息 + 轨迹多轮全链路 OK，前端零改动。
       实测（:8000 + :5174）：
       - 「用计算器算 (3+4)*2-1」→ 2 气泡（轮1 calculator 工具卡 + 轮2 最终答案 `(3+4)*2-1 = 13 ✅`），刷新后重选会话仍 2 条。
@@ -364,3 +368,11 @@
 - **E 后端契约**：交接板 `[open]` 逐轮消息——SSE `message` 事件 + 按轮持久化 + `Message.round` 列 + 排序；chat/resume/task 对等。
 - **验证**：typecheck ✓ / lint 0err / **121 单测 PASS**（+1 message 事件）/ **21 e2e PASS** / DOM 手测（mock：2 个 assistant 气泡、轮1 web_search+检索文本、轮2 最终答案；刷新后重选会话仍 2 条；轨迹 Turn 1 · 2 步 · 1 工具，Message + Step 分组）0 页面错误。
 - 不做（记录）：thinking 推理作为消息（后端仍剥离，契约预留）；逐轮 token_usage/cost 展示；轨迹大重构。
+
+## 2026-08-17 会话滚动到底 + 轨迹实时同步/切换保持（L2，前端 + 后端契约）
+用户三反馈：①打开会话最上端；②多轮任务中轨迹不实时同步；③切换会话再回来丢工作流。
+- **A 滚动**：MessageList 强制滚动改监听 `messages` **引用变化**（加载/切换/重选）+ `forceScrollBottom()`（nextTick + 双 rAF + timeout 兜底，content-visibility 估算高度拉到真实底）；吸底跟随 watch 也改走 forceScrollBottom。
+- **B 轨迹实时**：TrajectoryPanel 加 `live` prop + 每 2.5s 轮询（不重置选中/搜索/折叠）；ChatView 传 `stream.state.streaming`。
+- **C 后端契约**（交接板 `[open]`）：逐轮消息需按轮即时落库（message 事件发射处同步落库，on_final 只补最后一条），否则任务中 DB 无轮次、轨迹/切换读 DB 为空。
+- 验证：typecheck ✓ / lint 0err / **121 单测 PASS** / **21 e2e PASS** / DOM 手测（mock-fast：发消息后滚到底 ✓、切走切回滚到底 ✓；mock 非 fast：轨迹 live 轮询 8s 内 14 次请求 + 台账 Message/Step 多轮）0 页面错误。
+- 说明：③ 真实后端需后端按轮落库契约落地（mock sealEvent 已即时落库，故 mock 切换保持可用）；未落地前轨迹轮询无新数据（无回归）。

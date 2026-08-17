@@ -163,6 +163,7 @@ function onKeydown(e: KeyboardEvent) {
       <TrajectoryPanel
         v-if="mode === 'trajectory' && chat.currentId"
         :conversation-id="chat.currentId"
+        :live="stream.state.streaming"
         class="trajectory-panel"
       />
       <el-empty v-if="mode === 'trajectory' && !chat.currentId" description="请先选择会话" :image-size="60" />

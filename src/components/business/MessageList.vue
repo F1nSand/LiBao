@@ -25,20 +25,32 @@ watch(
     const el = containerRef.value
     if (!el) return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 140
-    if (nearBottom) void nextTick(() => (el.scrollTop = el.scrollHeight))
+    // 吸底跟随：近底时也走双 rAF（content-visibility 估算高度 → 拉到真实底）
+    if (nearBottom) forceScrollBottom()
   },
 )
 
-/** 打开/切换会话 → 强制滚动到底（默认看最新消息）；与吸底跟随 watch 并存 */
-const lastConvId = ref<string | null>(null)
+/** 强制滚动到底。`.msg-row` 用 content-visibility 延迟渲染（scrollHeight 是估算值）→ 双 rAF + timeout 等真实高度后再拉 */
+function forceScrollBottom(): void {
+  const el = containerRef.value
+  if (!el) return
+  const scroll = () => {
+    el.scrollTop = el.scrollHeight
+  }
+  void nextTick(() => {
+    scroll()
+    requestAnimationFrame(scroll)
+    requestAnimationFrame(scroll)
+    setTimeout(scroll, 60)
+  })
+}
+
+/** 会话加载/切换（messages 引用替换，append 不换引用）→ 强制滚动到底，默认看最新消息；与吸底跟随 watch 并存 */
 watch(
-  () => props.messages[0]?.conversation_id ?? null,
-  (id) => {
-    if (id && id !== lastConvId.value) {
-      lastConvId.value = id
-      const el = containerRef.value
-      if (el) void nextTick(() => (el.scrollTop = el.scrollHeight))
-    }
+  () => props.messages,
+  () => {
+    if (!props.messages.length) return
+    forceScrollBottom()
   },
   { immediate: true },
 )

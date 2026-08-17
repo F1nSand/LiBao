@@ -8,8 +8,9 @@ import TrajectoryLedger from './TrajectoryLedger.vue'
 import TrajectoryDetailPanel from './TrajectoryDetailPanel.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
-/** 轨迹工作区（docs/02 §6.3）：独立页 TrajectoryView 与 Chat「轨迹」模式共用；无页面级 back/title */
-const props = defineProps<{ conversationId: string | null; focusToolCallId?: string }>()
+/** 轨迹工作区（docs/02 §6.3）：独立页 TrajectoryView 与 Chat「轨迹」模式共用；无页面级 back/title。
+ * `live` = 会话流式活跃 → 轮询实时同步（docs 03 §5.2.1 / §5.8 逐轮落库后即现）。 */
+const props = defineProps<{ conversationId: string | null; focusToolCallId?: string; live?: boolean }>()
 
 const store = useTrajectoryStore()
 
@@ -49,6 +50,47 @@ async function load() {
 
 watch(() => props.conversationId, load, { immediate: true })
 
+/* ---------- live 实时同步：流式活跃时轮询刷新（不重置选中/搜索/折叠，避免打断查看） ---------- */
+const POLL_INTERVAL_MS = 2500
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+async function refresh() {
+  const id = props.conversationId
+  if (id) await store.load(id)
+}
+
+function startPolling() {
+  stopPolling()
+  if (!props.conversationId || !props.live) return
+  pollTimer = setInterval(() => void refresh(), POLL_INTERVAL_MS)
+}
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+watch(
+  () => props.conversationId,
+  () => {
+    void load()
+    startPolling()
+  },
+  { immediate: true },
+)
+
+watch(
+  () => props.live,
+  (live) => {
+    if (live) startPolling()
+    else {
+      stopPolling()
+      void refresh() // 流式结束再刷一次收尾
+    }
+  },
+)
+
 function onSelect(index: number) {
   selectedIndex.value = index
 }
@@ -62,7 +104,10 @@ function onEsc(e: KeyboardEvent) {
   if (e.key === 'Escape') selectedIndex.value = null
 }
 onMounted(() => window.addEventListener('keydown', onEsc))
-onBeforeUnmount(() => window.removeEventListener('keydown', onEsc))
+onBeforeUnmount(() => {
+  stopPolling()
+  window.removeEventListener('keydown', onEsc)
+})
 
 function onSplitStart(e: MouseEvent) {
   e.preventDefault()

@@ -51,6 +51,8 @@ Mock 演示账号：`admin/admin123`（管理员）· `dev/dev123`（开发者�
 - **助手消息 = 活动区 + 回复气泡**（docs/02 §5.4.3）：工具调用/agent 切换/思考进 `.msg-activity`（紧凑行非气泡，回复气泡**上方**往下递进），文本进 `.msg-text` 气泡。流式段按事件序拆分两区；持久化 `Message.tool_calls[].position` 分组。**工具失败无重试按钮**——重试由 agent/用户以语言发起，`ToolCallCard` 只保留错误文案。
 - **流式 markdown 渐进渲染**（docs/02 §5.4.1）：`MarkdownRenderer` streaming 走 `renderStreamingMarkdown`（`splitStreamingText` 按换行切分：stable 渲染 + 末行 `.stream-tail` 纯文本）；done 全量。`stable` 仅在换行跨越时变化 → 解析天然节流。
 - **逐轮消息封口**（docs/02 §5.4.3 / docs/03 §3）：`message` SSE 事件 = 一轮思考完成（追加 `onPersistedMessage` + `sealRound()` 复位段，**保留** taskId/conversationId/messageId 跨轮续用）；`done` = 最后一条。一轮 = 一条独立消息气泡。真实后端未实现该事件前仍是单气泡（无回归）。
+- **会话滚动到底**（MessageList）：`messages` **引用变化**（会话加载/切换/重选）触发强制滚动；`.msg-row` 用 `content-visibility` 延迟渲染 → `scrollHeight` 是估算值，需 `nextTick` + **双 rAF** + `setTimeout` 拉到真实底部；吸底跟随 watch 同样走 `forceScrollBottom()`。
+- **轨迹实时同步**（TrajectoryPanel）：`live` prop（= 会话流式活跃）→ 每 2.5s 轮询 `store.load`（不重置选中/搜索/折叠）；依赖后端按轮即时落库（否则轮询无新数据）。
 - 消息持久化在 mock 的 `doneEvent`（最后一条）与 `sealEvent`（中间轮）里 push 到 `messages[conv]`；新会话（conversation_id=null）由 mock server 先注册 conversation。
 - **mock 任务事件端点是 GET**（`/tasks/{id}/events`，契约 docs/03 §5.3 / 真实后端 / `TaskDetail.vue` 都是 GET）——改 mock 路由时不要只留 POST。
 - **`agent_switch` 仅流式期显示**：`MessageBubble` 的 `.agent-switch` 指示条挂在 `showStreamBubble`（`!finished`）的流式气泡里，done 后被持久化消息替换即消失（`Message` 无持久化字段）。不要写依赖 done 后仍可见该指示条的 e2e 断言（mock-fast 下是竞态）。
