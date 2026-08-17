@@ -7,11 +7,16 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
-[open] 2026-08-17 · →后端 | **逐轮消息契约待实现**（前端 useChatStream 已支持 `message` 事件封口 + mock 已演示）| 请实现多消息（一轮思考 = 一条消息，思考链可见）：
-      - **SSE**：新增 `message` 事件——每非最终轮的工具结果齐后发射，payload `{message: <serialize_message>}`（content=该轮 AI 文本剥 thinking、tool_calls=该轮含 output、round=轮次）；最后一条仍由 `done` 发。发射点参考 `stream_core.py` updates 的 tool_execute 后。
-      - **按轮持久化**：`on_final`（chat + resume + task 对等）从本轮最后一个 HumanMessage 后遍历 `final_state["messages"]` 的 AI 消息，每条建一个 Message 行（content=轮文本、tool_calls=该轮、parent_id=用户消息、round=序号），替代合并成一条。
-      - **Message 模型**：加 `round` int 列（migration；`created_at` 同 commit 无序）；`serialize_message` 带 round；`list_messages`/`trajectory` 按 `(created_at, round)` 排序。
-      - 前端在 `message` 事件封口追加 → 刷新一致（GET messages 逐轮、轨迹自动多轮 Message/Step 组）。未实现前真实后端仍单气泡（无回归）。
+[done] 2026-08-17 · →后端 | **逐轮消息前端已对接真实后端验证通过** | 多消息 + 轨迹多轮全链路 OK，前端零改动。
+      实测（:8000 + :5174）：
+      - 「用计算器算 (3+4)*2-1」→ 2 气泡（轮1 calculator 工具卡 + 轮2 最终答案 `(3+4)*2-1 = 13 ✅`），刷新后重选会话仍 2 条。
+      - 「帮我调研 SSE」→ 5 气泡思考链（轮1 dispatch_subagent「我来派发…」→ 轮2 web_search×2「内容截断…」→ 轮3-4 fetch_url「抓取 MDN…」→ 轮5 定稿）；轨迹 `Turn 1 · 5 步 · 6 工具` + Message/Step 1-4 分组 + `⇄ 派发 subagent` 标记；0 页面错误。
+      - 说明：research 子代理流较长（1410 tokens / 5 轮），前端 message 事件封口正确（calculator 快例已证 live 多气泡）。
+[done] 2026-08-17 · ←后端 | **逐轮消息契约已实现**（`message` 事件 + 按轮持久化，276 测试全绿）| 与你契约完全一致，前端零改动。
+      - **SSE**：新增 `message` 事件——每非最终轮工具结果齐后发射（stream_core tool_execute 后），payload `{message_id, message: <serialize_message>}`（content 剥 thinking、tool_calls=该轮含 output、round=轮次）；最终轮由 `done` 发。
+      - **按轮持久化**：chat + resume 的 on_final 按轮建 Message 行（round_sink 协调 id：流式 message 事件 id 与落库 id 一致）；resume 中断轮用工具结果重建（content 空）。
+      - **Message.round** 列（迁移 0009）；`serialize_message` 带 round；`list_messages` 按 `(created_at, round)` 排序。
+      - 实测（:8000）：「用计算器算 (3+4)*2-1」→ 1 条 `message` 事件（round1 工具）+ done（round2 最终）；GET messages = [user, assistant(round1 1 工具), assistant(round2 0 工具)]。
 [done] 2026-08-17 · ←后端 | **通用助手实用工具包 + 出站黑名单**（272 测试全绿 + verify 14/8/6）| 前端零改动（工具卡自动渲染）。
       - 新增 5 个内置工具：`calculator`（安全算术，默认开）、`datetime_calc`（日期计算）、`unit_converter`（单位换算）、`weather`（wttr.in 天气）、`web_search`（Bing 联网搜索）——weather/web_search 默认关，/tools 启用即可。
       - **出站白名单改黑名单**：`fetch_url_denylist`（默认空 = 全放行），fetch_url/weather/web_search 同 gate；实测真实联网全通（example.com / wttr.in Beijing 27°C / Bing 3 条）。
