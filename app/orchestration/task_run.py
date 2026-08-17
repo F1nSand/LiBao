@@ -82,6 +82,10 @@ async def _run_graph_common(
 
             for log in final_state.get("run_logs", []):
                 await RunLogRepository(db).create(task_id=task_id, **log)
+            # M6 前：占位任务写端（docs 04 §3.3 F5）——任务结束时把在途占位状态落 task.placeholder_events
+            placeholder_events = final_state.get("placeholder_jobs", [])
+            if placeholder_events:
+                updated.placeholder_events = placeholder_events
             if updated.status != "cancelled":  # 运行中被取消不覆盖
                 fm = final_state.get("final_message", {}) or {}
                 await svc.set_done(db, updated, final_message=fm)

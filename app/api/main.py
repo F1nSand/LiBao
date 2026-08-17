@@ -33,6 +33,9 @@ from app.api.routers import (
     tools,
     users,
 )
+from app.api.routers import (
+    settings as settings_router,
+)
 from app.core.config import get_settings
 from app.core.errors import ERR_INTERNAL, AppError, http_status_for
 from app.core.logging import set_trace_id, setup_logging
@@ -87,6 +90,10 @@ async def lifespan(app: FastAPI):
         ).scalar_one_or_none()
         if org is not None:
             await ToolService().sync_registry_from_db(session, org.id)
+            # M6 前：启用 provider → 覆盖 Settings（LLM 即用配置的 provider）
+            from app.services.provider import ProviderService
+
+            await ProviderService().sync_active_to_settings(session, org.id)
         await ToolService().sync_registry_from_db(session)  # 全量：MCP 行重建（不动已有 spec enabled）
     # checkpoint 表由 setup() 创建（须在 alembic upgrade head 之后，langgraph#2570 规避）
     async with PostgresCheckpointer(settings.sync_checkpoint_dsn) as saver:
@@ -160,6 +167,7 @@ def create_app() -> FastAPI:
         users.router,
         evals.router,
         hooks.router,
+        settings_router.router,
         system.router,
     ):
         app.include_router(router, prefix=settings.base_url)

@@ -11,6 +11,7 @@ from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion, Mem
 from app.storage.models.message import Message
 from app.storage.models.notification import Notification
 from app.storage.models.org import Org
+from app.storage.models.provider import ProviderConfig
 from app.storage.models.run_log import RunLog
 from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
@@ -36,6 +37,7 @@ __all__ = [
     "Message",
     "Notification",
     "Org",
+    "ProviderConfig",
     "RunLog",
     "Task",
     "ToolDefinition",
