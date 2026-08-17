@@ -7,6 +7,10 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[open] 2026-08-17 · →后端 | **thinking 推理需发射 + 持久化**（前端展示已就绪：活动区折叠行 + Message.thinking 读取）| 当前后端不发射 thinking 事件、持久化剥 thinking：
+      - **SSE**：每轮 agent_execute 的 thinking blocks 处**发射 `thinking` 事件**（payload `{text, ts}`，前端 `useChatStream` 已累积到一轮一条）；token/message 仍剥 thinking。
+      - **持久化**：`serialize_message` 带 `thinking`（Message 加 thinking 文本列或 JSONB，按轮随 message 落库）；`serialize_trajectory_node` 的 `thinking` 从恒 None 改读该字段（轨迹 message 单元格附 thinking）。
+      - 前端 `Message.thinking` 字段 + 活动区折叠显示已备，mock 已演示；落地后真实后端即显示。
 [open] 2026-08-17 · →后端 | **逐轮消息需按轮即时落库**（多轮任务中轨迹实时同步 + 切换会话不丢）| 当前 `on_final` 才批量落库，任务中 DB 无轮次：
       - 现状：`chat_stream.py` 用 `round_sink` 收集 → `on_final` `for round_msg in round_sink: msg_repo.create(...)` 一次性落库；流式 `message` 事件已发射但 DB 滞后 → 轨迹读 DB 为空、切换会话重读丢失，任务完成再进入才全。
       - 修法：在 `message` 事件发射处（`stream_core` 该轮工具结果齐后）**同步落库该轮 Message**；`on_final` 只补最后一条（或跳过已落库轮次）。
@@ -376,3 +380,11 @@
 - **C 后端契约**（交接板 `[open]`）：逐轮消息需按轮即时落库（message 事件发射处同步落库，on_final 只补最后一条），否则任务中 DB 无轮次、轨迹/切换读 DB 为空。
 - 验证：typecheck ✓ / lint 0err / **121 单测 PASS** / **21 e2e PASS** / DOM 手测（mock-fast：发消息后滚到底 ✓、切走切回滚到底 ✓；mock 非 fast：轨迹 live 轮询 8s 内 14 次请求 + 台账 Message/Step 多轮）0 页面错误。
 - 说明：③ 真实后端需后端按轮落库契约落地（mock sealEvent 已即时落库，故 mock 切换保持可用）；未落地前轨迹轮询无新数据（无回归）。
+
+## 2026-08-17 工具轮消息 + thinking 推理显示（L2，前端 + 后端契约）
+用户反馈：工具轮（模型无文本）只有工具卡、无消息气泡；轨迹无每轮 message。补充：thinking 推理也要显示（不气泡、放活动区、长文本收缩）。
+- **A 工具轮占位**：`format.ts` 加 `toolCallSummary(name, input)`；`MessageBubble.partsFromMessage/Stream` 空 content 有工具 → 占位「调用 [工具]：入参」；`foldTrajectory` 空 content 有工具 → message cell 占位。
+- **B thinking 显示**：`Message` 加 `thinking` 字段；`ChatView.onPersistedMessage` 透传 `m.thinking`（否则丢）；`partsFromMessage` 读 thinking 加活动区行；`.thinking-row` 改可折叠（line-clamp 3 + 展开/收起）；`useChatStream` thinking 累积到末段；mock 默认分支插 thinking 事件 + sealEvent 带 thinking。
+- **C 后端契约**（交接板 `[open]`）：发射 `thinking` 事件（每轮 thinking blocks）+ 按轮持久化 thinking + `serialize_message`/`serialize_trajectory_node` 带 thinking。
+- 验证：typecheck ✓ / lint 0err / **123 单测 PASS**（+toolCallSummary + MessageBubble 占位 + 轨迹占位 + thinking 累积）/ **21 e2e PASS** / DOM 手测（真实后端：calculator 轮消息「调用 calculator：(3+4)*2-1」+ 轨迹 message 单元格；mock：thinking 行 line-clamp 收起→展开→收起）。
+- 说明：thinking 在真实后端待后端发射/持久化契约落地（前端就绪、mock 演示）；未落地前无 thinking 数据（无回归）。

@@ -260,8 +260,11 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
         break
       }
       case 'thinking': {
-        // 思考（docs/03 §3.3 监视器预留）：后端发射即入活动区，不发射永不出现
-        state.segments.push({ kind: 'thinking', id: segId(), text: (p.text ?? '') as string })
+        // 思考（docs/03 §3.3）：一轮思考累积到末段，不因分块堆叠多行
+        const t = (p.text ?? '') as string
+        const last = state.segments[state.segments.length - 1]
+        if (last && last.kind === 'thinking') last.text += t
+        else state.segments.push({ kind: 'thinking', id: segId(), text: t })
         break
       }
       case 'message': {

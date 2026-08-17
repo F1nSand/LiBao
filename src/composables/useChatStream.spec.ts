@@ -85,16 +85,18 @@ describe('useChatStream 状态机', () => {
     expect(cs.state.streaming).toBe(true) // 切换事件不改变流式状态
   })
 
-  it('thinking → segments 追加 thinking 段（text）', async () => {
+  it('thinking 累积到末段（连续事件不堆叠）；缺 text 兜底不崩', async () => {
     const cs = useChatStream()
     await cs.start(chatReq as never)
     chatHandlers!.onEvent(ev('message_start', 1, { message_id: 'm1', agent_id: 'a', conversation_id: 'c', task_id: 't1' }))
     chatHandlers!.onEvent(ev('thinking', 2, { text: '正在推理…', ts: 1700000000000 }))
+    chatHandlers!.onEvent(ev('thinking', 3, { text: '继续推理', ts: 1700000000000 }))
     expect(cs.state.segments).toHaveLength(1)
-    expect(cs.state.segments[0]).toMatchObject({ kind: 'thinking', text: '正在推理…' })
-    // 缺 text 兜底空串，不崩
-    chatHandlers!.onEvent(ev('thinking', 3, { ts: 1700000000000 }))
-    expect(cs.state.segments[1]).toMatchObject({ kind: 'thinking', text: '' })
+    expect(cs.state.segments[0]).toMatchObject({ kind: 'thinking', text: '正在推理…继续推理' })
+    // 缺 text 兜底空串追加，不堆叠新段
+    chatHandlers!.onEvent(ev('thinking', 4, { ts: 1700000000000 }))
+    expect(cs.state.segments).toHaveLength(1)
+    expect(cs.state.segments[0]).toMatchObject({ kind: 'thinking', text: '正在推理…继续推理' })
   })
 
   it('message 事件封口一轮：追加消息 + 复位段（保留 taskId）；done 追加最后一条', async () => {

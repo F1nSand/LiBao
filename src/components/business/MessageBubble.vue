@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { Message, ToolCallRecord } from '@/types'
 import type { StreamState, ToolCallCardState } from '@/composables/useChatStream'
 import MarkdownRenderer from '@/components/common/MarkdownRenderer.vue'
 import ToolCallCard from './ToolCallCard.vue'
 import AttachmentBubble from './AttachmentBubble.vue'
+import { toolCallSummary } from '@/utils/format'
 
 /**
  * 消息气泡（docs/02 §5.3/§5.4.3）：
@@ -42,33 +43,47 @@ function fromRecord(c: ToolCallRecord): ToolCallCardState {
   }
 }
 
+function toolPlaceholder(calls: Array<{ tool_name: string; input: unknown }>): string {
+  const first = toolCallSummary(calls[0].tool_name, calls[0].input)
+  return calls.length > 1 ? `${first} 等 ${calls.length} 个工具` : first
+}
+
 function partsFromStream(s: StreamState): RenderParts {
   const activity: ActivityItem[] = []
   let text: TextSeg | null = null
+  const toolCalls: Array<{ tool_name: string; input: unknown }> = []
   for (const seg of s.segments) {
     if (seg.kind === 'text') {
       // 文本：唯一文本段 → 回复气泡（活动区下方）；done 后无持久化场景切 markdown 渲染
       text = { kind: 'text', content: seg.text, streaming: !s.finished }
     } else if (seg.kind === 'tool') {
       const card = s.toolCalls[seg.cardId]
-      if (card) activity.push({ kind: 'tool', card })
+      if (card) {
+        activity.push({ kind: 'tool', card })
+        toolCalls.push({ tool_name: card.tool_name, input: card.input })
+      }
     } else if (seg.kind === 'agent') {
       activity.push({ kind: 'agent', from: seg.from, to: seg.to, reason: seg.reason })
     } else {
       activity.push({ kind: 'thinking', text: seg.text })
     }
   }
+  // 工具轮无文本 → 占位消息「调用 [工具]：入参」（流式中即时显示）
+  if (!text && toolCalls.length) text = { kind: 'text', content: toolPlaceholder(toolCalls), streaming: !s.finished }
   return { activity, text }
 }
 
 function partsFromMessage(m: Message): RenderParts {
   const activity: ActivityItem[] = []
+  // 推理链在工具/文本之上（模型先思考再行动）
+  if (m.thinking?.trim()) activity.push({ kind: 'thinking', text: m.thinking })
   const calls = [...(m.tool_calls ?? [])].sort((a, b) => a.position - b.position)
   for (const c of calls) activity.push({ kind: 'tool', card: fromRecord(c) })
-  return {
-    activity,
-    text: m.content ? { kind: 'text', content: m.content, streaming: false } : null,
-  }
+  const hasContent = !!(m.content ?? '').trim()
+  let text: TextSeg | null = null
+  if (hasContent) text = { kind: 'text', content: m.content, streaming: false }
+  else if (calls.length) text = { kind: 'text', content: toolPlaceholder(calls), streaming: false }
+  return { activity, text }
 }
 
 const parts = computed<RenderParts>(() => {
@@ -76,6 +91,21 @@ const parts = computed<RenderParts>(() => {
   if (props.message) return partsFromMessage(props.message)
   return { activity: [], text: null }
 })
+
+/** thinking 折叠展开态（按活动项索引）；长文本收起 line-clamp 3，点展开看全文 */
+const expandedThinking = ref<Set<number>>(new Set())
+function isThinkingLong(_i: number, text: string): boolean {
+  return text.length > 90 || text.split('\n').length > 3
+}
+function isThinkingExpanded(i: number): boolean {
+  return expandedThinking.value.has(i)
+}
+function toggleThinking(i: number): void {
+  const s = new Set(expandedThinking.value)
+  if (s.has(i)) s.delete(i)
+  else s.add(i)
+  expandedThinking.value = s
+}
 
 const role = computed(() => (props.stream ? 'assistant' : props.message?.role ?? 'user'))
 </script>
@@ -112,7 +142,13 @@ const role = computed(() => (props.stream ? 'assistant' : props.message?.role ??
             </div>
             <div v-else class="thinking-row">
               <el-icon :size="13"><Aim /></el-icon>
-              <span class="thinking-text">{{ item.text }}</span>
+              <span
+                class="thinking-text"
+                :class="{ collapsed: isThinkingLong(i, item.text) && !isThinkingExpanded(i) }"
+              >{{ item.text }}</span>
+              <button v-if="isThinkingLong(i, item.text)" class="thinking-toggle" type="button" @click="toggleThinking(i)">
+                {{ isThinkingExpanded(i) ? '收起' : '展开' }}
+              </button>
             </div>
           </template>
         </div>
@@ -205,9 +241,27 @@ const role = computed(() => (props.stream ? 'assistant' : props.message?.role ??
 .thinking-text {
   display: inline-block;
   max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.thinking-text.collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+.thinking-toggle {
+  border: none;
+  background: transparent;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.thinking-toggle:hover {
+  color: var(--app-primary);
 }
 .msg-empty {
   color: var(--app-text-muted);

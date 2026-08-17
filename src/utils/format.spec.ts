@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatBytes, formatDate, formatDuration, truncate } from './format'
+import { formatBytes, formatDate, formatDuration, toolCallSummary, truncate } from './format'
 
 describe('format 工具', () => {
   it('formatBytes', () => {
@@ -25,5 +25,12 @@ describe('format 工具', () => {
     expect(truncate('abc', 2)).toBe('ab…')
     expect(truncate('abc', 10)).toBe('abc')
     expect(truncate(null)).toBe('')
+  })
+
+  it('toolCallSummary 工具轮占位', () => {
+    expect(toolCallSummary('calculator', { expression: '(3+4)*2-1' })).toBe('调用 calculator：(3+4)*2-1')
+    expect(toolCallSummary('web_search', { query: '什么是 SSE', limit: 5 })).toBe('调用 web_search：什么是 SSE, 5')
+    expect(toolCallSummary('time_now', '')).toBe('调用 time_now')
+    expect(toolCallSummary('demo', { a: { b: 1 } })).toContain('调用 demo')
   })
 })

@@ -126,11 +126,18 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
     '3. **摘要三**：进一步阅读建议。\n',
   ]
   const round1Text = '正在检索相关信息…\n\n检索完成，整理结果中…\n'
+  const round1Thinking =
+    '用户想了解 SSE。我需要先检索资料获取权威信息，再整理成结构化回答。\n考虑点：1) SSE 基于 HTTP 长连接与 EventSource API；2) 数据帧格式 data:/event:/id:/retry: 字段；3) 与 WebSocket 的适用场景差异；4) 自动重连与 Last-Event-ID 机制。\n检索后按 原理→工作机制→数据格式→优缺点 组织回答，最后给出适用建议。'
   const finalText = `正在检索「${content}」…\n\n${summaryLines.join('\n')}`
   const now = new Date().toISOString()
   return [
     ...base,
     tok('正在检索相关信息…\n'),
+    {
+      type: 'thinking',
+      payload: { text: round1Thinking },
+      delayMs: delay(150),
+    },
     {
       type: 'tool_call',
       payload: { tool_call_id: toolCallId, tool_name: 'web_search', input: { query: content, limit: 5 }, require_confirm: false },
@@ -161,12 +168,13 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
       },
       delayMs: delay(200),
     },
-    // 轮1 封口：检索文本 + web_search 工具（独立消息，思考链可见）
+    // 轮1 封口：thinking + 检索文本 + web_search 工具（独立消息，思考链可见）
     sealEvent({
       id: messageId,
       conversation_id: conversationId,
       role: 'assistant',
       content: round1Text,
+      thinking: round1Thinking,
       attachments: [],
       tool_calls: [
         { tool_call_id: toolCallId, tool_name: 'web_search', input: { query: content }, output: { hits: summaryLines.length }, status: 'done', position: 0, duration_ms: 812 },

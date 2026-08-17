@@ -78,6 +78,8 @@ export interface Message {
   trace_id?: string
   /** 轮次序号（逐轮消息：一轮思考 = 一条消息；同一 turn 内排序用） */
   round?: number
+  /** 推理链（docs/03 §3.3；后端持久化后返回，前端活动区折叠显示） */
+  thinking?: string
   created_at: string
 }
 

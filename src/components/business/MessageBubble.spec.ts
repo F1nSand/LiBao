@@ -63,4 +63,20 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     expect(w.find('.msg-activity').exists()).toBe(false)
     expect(w.find('.user-text').text()).toBe('你好')
   })
+
+  it('工具轮无文本（content 空但有 tool_calls）→ 气泡占位「调用 [工具]：入参」', () => {
+    const toolMsg: Message = {
+      id: 'm2',
+      conversation_id: 'c1',
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        { tool_call_id: 'tc1', tool_name: 'calculator', input: { expression: '(3+4)*2-1' }, status: 'done', position: 0 },
+      ],
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const w = mount(MessageBubble, { props: { message: toolMsg } })
+    expect(w.find('.msg-text').text()).toContain('调用 calculator：(3+4)*2-1')
+    expect(w.find('.msg-activity .tool-card').exists()).toBe(true)
+  })
 })

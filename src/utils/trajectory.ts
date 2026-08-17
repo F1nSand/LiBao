@@ -1,5 +1,5 @@
 import type { TokenUsage, TrajectoryNode, TrajectoryToolCall } from '@/types'
-import { formatDuration, truncate } from './format'
+import { formatDuration, toolCallSummary, truncate } from './format'
 
 /**
  * 对话轨迹折叠（docs/02 §6.3）：`TrajectoryNode[]` → Turn → Group → Cell。
@@ -181,8 +181,15 @@ export function foldTrajectory(nodes: TrajectoryNode[]): TrajectoryTurn[] {
           summary: '',
           startedAt: n.time,
         }
-        if (n.content && n.content.trim()) group.cells.push(makeMessageCell(n, ++idx))
         const tcs = [...(n.tool_calls ?? [])].sort((a, b) => a.position - b.position)
+        if (n.content && n.content.trim()) {
+          group.cells.push(makeMessageCell(n, ++idx))
+        } else if (tcs.length) {
+          // 工具轮无文本 → message cell 占位「调用 [工具]：入参」（与聊天气泡一致）
+          const first = toolCallSummary(tcs[0].tool_name, tcs[0].input)
+          const placeholder = tcs.length > 1 ? `${first} 等 ${tcs.length} 个工具` : first
+          group.cells.push(makeMessageCell({ ...n, content: placeholder }, ++idx))
+        }
         for (const tc of tcs) group.cells.push(makeToolCell(n, tc, ++idx))
         const durs = tcs.filter((t) => t.duration_ms != null).map((t) => t.duration_ms as number)
         group.summary = `${formatDuration(durs.length ? durs.reduce((a, b) => a + b, 0) : null)} · ${tcs.length} 工具`

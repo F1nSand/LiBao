@@ -32,3 +32,25 @@ export function truncate(s: string | undefined | null, max = 40): string {
   if (!s) return ''
   return s.length > max ? `${s.slice(0, max)}…` : s
 }
+
+function safeJson(v: unknown): string {
+  try {
+    return JSON.stringify(v)
+  } catch {
+    return String(v)
+  }
+}
+
+/** 工具调用摘要（工具轮无文本时的消息占位）：`调用 [名称]：入参摘要`。
+ * input 为 string 直接用；对象取各字段值 join（`{expression: "(3+4)*2-1"}` → `(3+4)*2-1`）；其他 JSON。 */
+export function toolCallSummary(name: string, input: unknown): string {
+  let summary = ''
+  if (typeof input === 'string') summary = input
+  else if (input && typeof input === 'object' && !Array.isArray(input)) {
+    const vals = Object.values(input as Record<string, unknown>).filter((v) => v != null && v !== '')
+    summary = vals.map((v) => (typeof v === 'string' ? v : safeJson(v))).join(', ')
+  } else if (input != null) {
+    summary = safeJson(input)
+  }
+  return `调用 ${name}${summary ? `：${truncate(summary, 40)}` : ''}`
+}

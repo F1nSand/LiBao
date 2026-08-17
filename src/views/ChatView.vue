@@ -27,6 +27,7 @@ const stream = useChatStream({
       role: 'assistant',
       content: hasContent ? m.content! : stream.state.partialText,
       tool_calls: m.tool_calls?.length ? m.tool_calls : undefined,
+      thinking: m.thinking,
       created_at: m.created_at ?? new Date().toISOString(),
     })
   },

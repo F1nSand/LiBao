@@ -53,6 +53,7 @@ Mock 演示账号：`admin/admin123`（管理员）· `dev/dev123`（开发者�
 - **逐轮消息封口**（docs/02 §5.4.3 / docs/03 §3）：`message` SSE 事件 = 一轮思考完成（追加 `onPersistedMessage` + `sealRound()` 复位段，**保留** taskId/conversationId/messageId 跨轮续用）；`done` = 最后一条。一轮 = 一条独立消息气泡。真实后端未实现该事件前仍是单气泡（无回归）。
 - **会话滚动到底**（MessageList）：`messages` **引用变化**（会话加载/切换/重选）触发强制滚动；`.msg-row` 用 `content-visibility` 延迟渲染 → `scrollHeight` 是估算值，需 `nextTick` + **双 rAF** + `setTimeout` 拉到真实底部；吸底跟随 watch 同样走 `forceScrollBottom()`。
 - **轨迹实时同步**（TrajectoryPanel）：`live` prop（= 会话流式活跃）→ 每 2.5s 轮询 `store.load`（不重置选中/搜索/折叠）；依赖后端按轮即时落库（否则轮询无新数据）。
+- **工具轮占位 + thinking 折叠**：`toolCallSummary(name, input)`（`utils/format.ts`）为无文本工具轮生成「调用 [工具]：入参」占位；`MessageBubble.partsFromMessage` 读 `Message.thinking` 加活动区 thinking 行（`isThinkingLong` → line-clamp 收起 + 展开/收起按钮）。`ChatView.onPersistedMessage` 须透传 `m.thinking`（否则持久化丢推理）。
 - 消息持久化在 mock 的 `doneEvent`（最后一条）与 `sealEvent`（中间轮）里 push 到 `messages[conv]`；新会话（conversation_id=null）由 mock server 先注册 conversation。
 - **mock 任务事件端点是 GET**（`/tasks/{id}/events`，契约 docs/03 §5.3 / 真实后端 / `TaskDetail.vue` 都是 GET）——改 mock 路由时不要只留 POST。
 - **`agent_switch` 仅流式期显示**：`MessageBubble` 的 `.agent-switch` 指示条挂在 `showStreamBubble`（`!finished`）的流式气泡里，done 后被持久化消息替换即消失（`Message` 无持久化字段）。不要写依赖 done 后仍可见该指示条的 e2e 断言（mock-fast 下是竞态）。

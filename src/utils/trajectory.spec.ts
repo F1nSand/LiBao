@@ -40,14 +40,15 @@ describe('foldTrajectory（对话轨迹折叠）', () => {
     expect(g.cells[2].isError).toBe(false)
   })
 
-  it('content 为空的 assistant 省略 message cell，仅保留 tool cell', () => {
+  it('content 为空的工具轮 → message cell 占位「调用 [工具]」+ tool cell', () => {
     const turns = foldTrajectory([
       user(1, '查'),
       assistant(2, '', [
-        { tool_call_id: 't', tool_name: 'search', input: {}, output: {}, ok: true, duration_ms: 10, position: 0 },
+        { tool_call_id: 't', tool_name: 'search', input: { query: 'sse' }, output: {}, ok: true, duration_ms: 10, position: 0 },
       ]),
     ])
-    expect(turns[0].groups[0].cells.map((c) => c.kind)).toEqual(['tool'])
+    expect(turns[0].groups[0].cells.map((c) => c.kind)).toEqual(['message', 'tool'])
+    expect(turns[0].groups[0].cells[0].content).toContain('调用 search')
   })
 
   it('assistant 开头（无前置 user）→ userCell 为 null', () => {
