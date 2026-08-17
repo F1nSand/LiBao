@@ -17,10 +17,11 @@ class MessageRepository:
     async def list_by_conversation(
         self, conversation_id: uuid.UUID, *, limit: int = 500, offset: int = 0
     ) -> list[Message]:
+        # 同 commit 的 created_at 会并列 → round 作次级排序（docs 03 §3 逐轮消息扩展）
         stmt = (
             select(Message)
             .where(Message.conversation_id == conversation_id, Message.deleted_at.is_(None))
-            .order_by(Message.created_at.asc())
+            .order_by(Message.created_at.asc(), Message.round.asc())
             .limit(limit)
             .offset(offset)
         )
@@ -43,6 +44,7 @@ class MessageRepository:
         token_usage: dict[str, Any] | None = None,
         parent_id: uuid.UUID | None = None,
         trace_id: str | None = None,
+        round: int = 1,
     ) -> Message:
         msg = Message(
             conversation_id=conversation_id,
@@ -52,6 +54,7 @@ class MessageRepository:
             tool_calls=tool_calls or [],
             token_usage=token_usage,
             parent_id=parent_id,
+            round=round,
             trace_id=trace_id,
         )
         self.session.add(msg)

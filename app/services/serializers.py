@@ -56,6 +56,7 @@ def serialize_message(msg: Message) -> dict[str, Any]:
         "attachments": msg.attachments or [],
         "tool_calls": msg.tool_calls or [],
         "token_usage": msg.token_usage,
+        "round": getattr(msg, "round", 1),  # 轮次（docs 03 §3 逐轮消息扩展）
         "trace_id": msg.trace_id,
         "created_at": _dt(msg.created_at),
     }

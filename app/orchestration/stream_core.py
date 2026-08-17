@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -43,6 +44,22 @@ def message_text(content: Any) -> str:
 def _chunk_text(chunk: Any) -> str:
     """从 AIMessageChunk 提取 text（流式增量块；兼容 str 或 content blocks）。"""
     return message_text(getattr(chunk, "content", ""))
+
+
+def _build_round_message(round_data: dict[str, Any], tool_results: list[dict[str, Any]]) -> dict[str, Any]:
+    """逐轮消息（docs 03 §3 多消息扩展）：content 剥 thinking + tool_calls 该轮含 output + round 序号。"""
+    by_id = {r.get("tool_call_id"): r for r in tool_results}
+    tool_calls = []
+    for tc in round_data["tool_calls"]:
+        full = by_id.get(tc.get("id"))
+        if full is not None:
+            tool_calls.append(full)
+    return {
+        "role": "assistant",
+        "content": message_text(round_data["content"]),
+        "tool_calls": tool_calls,
+        "round": round_data["round"],
+    }
 
 
 def build_initial_state(
@@ -91,12 +108,15 @@ async def stream_graph_events(
     on_final: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
     on_error: Callable[[Exception], Any] | None = None,
     keepalive_interval: int = KEEPALIVE_INTERVAL,
+    round_sink: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[str]:
     """驱动 graph.astream → SSE 帧。
 
     - on_interrupt(value)：中断时回调（返回 SSE 帧或 None），随后流结束；
     - on_final(final_state)：正常结束回调（返回 done payload dict 或 None）；
     - on_error(exc)：图级异常回调（后台运行器用它把任务置 failed）。
+    - round_sink：逐轮消息收集（docs 03 §3 多消息扩展）——每轮工具结果齐后 emit `message` 事件，
+      并把该轮消息（含 id/content/tool_calls/round）append 进 sink；on_final 据此按轮持久化（id 一致）。
     """
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 
@@ -136,6 +156,9 @@ async def stream_graph_events(
     producer_task = asyncio.create_task(producer())
     keepalive_task = asyncio.create_task(keepalive())
     final_state: dict[str, Any] | None = None
+    # 逐轮消息（docs 03 §3）：round_seq 计数；pending_round = 本轮 agent_execute 的 AIMessage（有 tool_calls）
+    round_seq = 0
+    pending_round: dict[str, Any] | None = None
     try:
         while True:
             kind, payload = await queue.get()
@@ -165,7 +188,14 @@ async def stream_graph_events(
                 for node, update in item.items():
                     if node == "agent_execute":
                         for m in update.get("messages", []):
-                            for tc in getattr(m, "tool_calls", []) or []:
+                            tcs = getattr(m, "tool_calls", None) or []
+                            if tcs:
+                                pending_round = {
+                                    "content": m.content,
+                                    "tool_calls": [dict(tc) for tc in tcs],
+                                    "round": round_seq + 1,
+                                }
+                            for tc in tcs:
                                 spec = get_by_name(tc["name"]) or get(tc["name"])
                                 yield emit(
                                     "tool_call",
@@ -194,6 +224,28 @@ async def stream_graph_events(
                                     "duration_ms": r.get("duration_ms", 0),
                                 },
                             )
+                        # 逐轮消息封口（docs 03 §3）：本轮工具结果齐后发 `message` 事件（前端追加独立消息 + sealRound）
+                        if pending_round is not None:
+                            round_seq += 1
+                            round_msg = _build_round_message(pending_round, update.get("tool_results", []))
+                            msg_id = str(uuid.uuid4())
+                            round_msg["id"] = msg_id
+                            if round_sink is not None:
+                                round_sink.append(round_msg)
+                            yield emit("message", {"message_id": msg_id, "message": round_msg})
+                            pending_round = None
+                        else:
+                            # resume 中断轮：本轮 AI 消息在中断前（本流不可见），仅用工具结果构建轮消息（content 空；
+                            # 含 cancelled 拒绝分支——该轮尝试了工具）
+                            tcs = list(update.get("tool_results", []))
+                            if tcs:
+                                round_seq += 1
+                                round_msg = {"role": "assistant", "content": "", "tool_calls": tcs, "round": round_seq}
+                                msg_id = str(uuid.uuid4())
+                                round_msg["id"] = msg_id
+                                if round_sink is not None:
+                                    round_sink.append(round_msg)
+                                yield emit("message", {"message_id": msg_id, "message": round_msg})
                     elif node == "context_update":
                         yield emit("status", {"status": "finalizing", "context_metrics": None})
                     elif node == "__interrupt__":

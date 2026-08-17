@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ForeignKey, Index, String, Text
+from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,4 +27,5 @@ class Message(BaseModel, Base):
     tool_calls: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     token_usage: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     parent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    round: Mapped[int] = mapped_column(Integer, default=1, nullable=False)  # 轮次（docs 03 §3 逐轮消息扩展）
     trace_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)

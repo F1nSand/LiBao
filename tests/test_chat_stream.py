@@ -106,13 +106,18 @@ async def test_chat_stream_event_sequence(chat_fixture):
         assert tool_call["payload"]["tool_name"] == "time_now"
         tool_result = next(e for e in events if e["type"] == "tool_result")
         assert tool_result["payload"]["ok"] is True
+        # 逐轮消息（docs 03 §3）：第 1 轮（工具）发 message 事件；最终轮由 done 承载
+        seal = next(e for e in events if e["type"] == "message")
+        assert seal["payload"]["message"]["round"] == 1
+        assert seal["payload"]["message"]["tool_calls"][0]["tool_name"] == "time_now"
         done = events[-1]
         assert done["payload"]["message"]["role"] == "assistant"
-        assert done["payload"]["message"]["tool_calls"][0]["tool_name"] == "time_now"
+        assert done["payload"]["message"]["round"] == 2
 
         msgs = await MessageRepository(session).list_by_conversation(conv.id)
         roles = [m.role for m in msgs]
-        assert roles == ["user", "assistant"]
+        assert roles == ["user", "assistant", "assistant"]  # 工具轮 + 最终轮各一条
         assert msgs[0].content == "现在几点？"
-        assert msgs[1].tool_calls and msgs[1].tool_calls[0]["tool_name"] == "time_now"
+        assert msgs[1].round == 1 and msgs[1].tool_calls and msgs[1].tool_calls[0]["tool_name"] == "time_now"
+        assert msgs[2].round == 2 and msgs[2].tool_calls == []
         assert msgs[1].trace_id == "trace-t10"

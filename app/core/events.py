@@ -8,6 +8,7 @@ from typing import Any
 
 SSE_EVENT_TYPES = (
     "message_start",
+    "message",  # 逐轮消息封口（docs 03 §3 多消息扩展）：每非最终轮工具结果齐后发射
     "token",
     "tool_call",
     "tool_result",

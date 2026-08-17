@@ -153,19 +153,25 @@ async def test_resume_approved_done(interrupt_fixture):
         assert "token" in types and "status" in types
         assert types[-1] == "done"
         done = events[-1]
-        assert done["payload"]["message"]["tool_calls"][0]["status"] == "done"
+        assert done["payload"]["message"]["tool_calls"] == []  # 最终轮无工具（逐轮消息，docs 03 §3）
+        # 中断轮（confirm 工具）在 message 事件（resume 用工具结果重建轮，content 空）
+        seal = next(e for e in events if e["type"] == "message")
+        assert seal["payload"]["message"]["round"] == 1
+        assert seal["payload"]["message"]["tool_calls"][0]["tool_name"] == "confirm_test"
 
         task2 = await TaskRepository(session).get_by_id(task_id)
         assert task2.status == "done"
         assert task2.output and task2.output.get("content") == "已按确认结果处理。"
 
         msgs = await MessageRepository(session).list_by_conversation(conv.id)
-        assert [m.role for m in msgs] == ["user", "assistant"]
-        assert msgs[-1].tool_calls[0]["status"] == "done"
+        assert [m.role for m in msgs] == ["user", "assistant", "assistant"]  # 中断轮 + 最终轮
+        assert msgs[1].round == 1 and msgs[1].tool_calls[0]["tool_name"] == "confirm_test"
+        assert msgs[1].tool_calls[0]["status"] == "done"
+        assert msgs[2].round == 2 and msgs[2].tool_calls == []
 
-        # C8：resume 续答轮补 assistant 轨迹（中断路径只落 user，resume 后才有 assistant）
+        # C8：resume 续答轮补 assistant 轨迹（中断轮 + 最终轮各一条）
         traces = await MemoryRepository(session).list_traces(user.id, limit=10, offset=0)
-        assert [t.role for t in traces] == ["user", "assistant"]
+        assert [t.role for t in traces] == ["user", "assistant", "assistant"]
         assert traces[-1].content == "已按确认结果处理。"
         assert traces[-1].trace_id == "trace-resume"
         assert traces[-1].message_id == uuid.UUID(done["payload"]["message_id"])
@@ -186,9 +192,15 @@ async def test_resume_denied_cancelled(interrupt_fixture):
             frames.append(frame)
         events = _frames_to_events(frames)
         assert events[-1]["type"] == "done"
-        assert events[-1]["payload"]["message"]["tool_calls"][0]["status"] == "cancelled"
+        assert events[-1]["payload"]["message"]["tool_calls"] == []  # 最终轮无工具（逐轮消息）
+        # 拒绝分支：confirm 工具 cancelled 在该轮 message 事件（resume 用工具结果重建轮）
+        seal = next(e for e in events if e["type"] == "message")
+        assert seal["payload"]["message"]["round"] == 1
+        assert seal["payload"]["message"]["tool_calls"][0]["status"] == "cancelled"
 
         task2 = await TaskRepository(session).get_by_id(task_id)
         assert task2.status == "cancelled"  # 拒绝分支任务保持 cancelled
         msgs = await MessageRepository(session).list_by_conversation(conv.id)
-        assert msgs[-1].tool_calls[0]["status"] == "cancelled"
+        assert [m.role for m in msgs] == ["user", "assistant", "assistant"]
+        assert msgs[1].round == 1 and msgs[1].tool_calls[0]["status"] == "cancelled"
+        assert msgs[2].tool_calls == []
