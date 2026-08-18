@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db, require_admin
 from app.api.envelope import ok
 from app.services.provider import ProviderService, serialize_provider
 from app.storage.models.user import User
@@ -35,7 +35,7 @@ class ProviderPatchRequest(BaseModel):
 
 @router.get("/settings/providers")
 async def list_providers(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return ok(await ProviderService().list(db, user))
@@ -44,7 +44,7 @@ async def list_providers(
 @router.post("/settings/providers")
 async def create_provider(
     req: ProviderWriteRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     row = await ProviderService().create(
@@ -58,7 +58,7 @@ async def create_provider(
 async def patch_provider(
     provider_id: uuid.UUID,
     req: ProviderPatchRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     row = await ProviderService().patch(
@@ -71,7 +71,7 @@ async def patch_provider(
 @router.delete("/settings/providers/{provider_id}")
 async def delete_provider(
     provider_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     await ProviderService().delete(db, user, provider_id)

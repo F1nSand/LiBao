@@ -88,7 +88,7 @@ async def test_run_eval_completes_with_pass_rate(eval_fixture):
     graph = build_graph()
     await run_eval(graph, sessionmaker, run_id, model_override=FakeEvalModel(judge_pass=True))
     async with sessionmaker() as session:
-        detail = await svc.get_run_detail(session, run_id)
+        detail = await svc.get_run_detail(session, user, run_id)
         assert detail["run"]["status"] == "done"
         assert detail["run"]["pass_rate"] == 1.0
         assert len(detail["results"]) == 2
@@ -107,7 +107,7 @@ async def test_run_eval_failed_judge_counts_fail(eval_fixture):
     graph = build_graph()
     await run_eval(graph, sessionmaker, run_id, model_override=FakeEvalModel(judge_pass=False))
     async with sessionmaker() as session:
-        detail = await svc.get_run_detail(session, run_id)
+        detail = await svc.get_run_detail(session, user, run_id)
         assert detail["run"]["status"] == "done"
         assert detail["run"]["pass_rate"] == 0.0
         assert detail["results"][0]["pass"] is False

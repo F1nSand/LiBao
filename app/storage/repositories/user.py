@@ -28,8 +28,11 @@ class UserRepository:
         self.session.add(row)
         return row
 
-    async def list_paged(self, *, limit: int, offset: int) -> tuple[list[User], int]:
+    async def list_paged(self, *, limit: int, offset: int, org_id: uuid.UUID | None = None) -> tuple[list[User], int]:
+        """分页用户列表；org_id 非 None 时按组织收敛（org admin 只看本组织用户）。"""
         base = select(User).where(User.deleted_at.is_(None))
+        if org_id is not None:
+            base = base.where(User.org_id == org_id)
         total = int((await self.session.execute(select(func.count()).select_from(base.subquery()))).scalar_one())
         stmt = base.order_by(User.created_at.desc()).limit(limit).offset(offset)
         return list((await self.session.execute(stmt)).scalars()), total

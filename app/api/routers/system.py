@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db, require_admin
 from app.api.envelope import ok
 from app.api.schemas.common import paged
 from app.core.config import get_settings
@@ -40,7 +40,7 @@ async def list_logs(
     level: str | None = Query(None, description="INFO/WARNING/ERROR → 映射 run_log.status"),
     start: str | None = Query(None, description="ISO 时间范围起点"),
     end: str | None = Query(None, description="ISO 时间范围终点"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     status = _LEVEL_TO_STATUS.get((level or "").upper())
@@ -55,13 +55,13 @@ async def list_logs(
 
 @router.get("/system/evals")
 async def evals_runs_alias(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """契约路径 GET /system/evals（docs 03 §5.8）：评估运行列表别名（同 /system/evals/runs）。"""
     from app.services.eval import EvalService
 
-    return ok(await EvalService().list_runs(db))
+    return ok(await EvalService().list_runs(db, user))
 
 
 @router.get("/system/cost")
@@ -69,7 +69,7 @@ async def get_cost(
     start: str | None = Query(None, description="ISO 时间范围起点"),
     end: str | None = Query(None, description="ISO 时间范围终点"),
     provider: str | None = Query(None),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """成本/调用量统计（docs 03 §5.8 CostStat）：token_usage.cost SQL 聚合（M5 观测模块化）。"""
@@ -82,7 +82,7 @@ async def get_cost(
 @router.get("/system/logs/trace/{trace_id}")
 async def get_trace(
     trace_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """单 trace 全链路时间线（TraceTimeline 消费）。"""

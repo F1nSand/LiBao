@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ERR_USER_NOT_FOUND, ERR_USERNAME_CONFLICT, AppError
+from app.core.errors import ERR_FORBIDDEN, ERR_USER_NOT_FOUND, ERR_USERNAME_CONFLICT, AppError
 from app.core.security import hash_password, verify_password
 from app.services.serializers import serialize_user
 from app.storage.models.user import User
@@ -30,9 +30,11 @@ class UserService:
 
     # ---- 管理 CRUD（2e，docs 03 §5.1）----
 
-    async def list_paged(self, db: AsyncSession, page: int, page_size: int) -> dict[str, Any]:
+    async def list_paged(
+        self, db: AsyncSession, page: int, page_size: int, org_id: uuid.UUID | None = None
+    ) -> dict[str, Any]:
         repo = UserRepository(db)
-        items, total = await repo.list_paged(limit=page_size, offset=(page - 1) * page_size)
+        items, total = await repo.list_paged(limit=page_size, offset=(page - 1) * page_size, org_id=org_id)
         from app.api.schemas.common import paged
 
         return paged([serialize_user(u) for u in items], total, page, page_size)
@@ -57,27 +59,37 @@ class UserService:
         await db.refresh(row)
         return row
 
-    async def get_owned(self, db: AsyncSession, user_id: uuid.UUID) -> User:
+    @staticmethod
+    def _guard_self(user: User, user_id: uuid.UUID) -> None:
+        """禁止对自身执行角色/启停/删除（否则最后一个 admin 可自删/自禁 → org 自锁死）。"""
+        if user_id == user.id:
+            raise AppError(ERR_FORBIDDEN, "不能对自己执行此管理操作")
+
+    async def get_owned(self, db: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID) -> User:
+        """取本组织用户（org admin 只能改本组织用户；跨 org 一律视为不存在，防存在性探测）。"""
         user = await UserRepository(db).get_by_id(user_id)
-        if user is None or user.deleted_at is not None:
+        if user is None or user.deleted_at is not None or user.org_id != org_id:
             raise AppError(ERR_USER_NOT_FOUND, "用户不存在")
         return user
 
-    async def change_role(self, db: AsyncSession, user_id: uuid.UUID, role: str) -> User:
-        user = await self.get_owned(db, user_id)
-        await UserRepository(db).update_role(user, role)
+    async def change_role(self, db: AsyncSession, user: User, user_id: uuid.UUID, role: str) -> User:
+        self._guard_self(user, user_id)
+        target = await self.get_owned(db, user_id, user.org_id)
+        await UserRepository(db).update_role(target, role)
         await db.commit()
-        await db.refresh(user)
-        return user
+        await db.refresh(target)
+        return target
 
-    async def change_enabled(self, db: AsyncSession, user_id: uuid.UUID, enabled: bool) -> User:
-        user = await self.get_owned(db, user_id)
-        await UserRepository(db).set_enabled(user, enabled)
+    async def change_enabled(self, db: AsyncSession, user: User, user_id: uuid.UUID, enabled: bool) -> User:
+        self._guard_self(user, user_id)
+        target = await self.get_owned(db, user_id, user.org_id)
+        await UserRepository(db).set_enabled(target, enabled)
         await db.commit()
-        await db.refresh(user)
-        return user
+        await db.refresh(target)
+        return target
 
-    async def soft_delete(self, db: AsyncSession, user_id: uuid.UUID) -> None:
-        user = await self.get_owned(db, user_id)
-        await UserRepository(db).soft_delete(user)
+    async def soft_delete(self, db: AsyncSession, user: User, user_id: uuid.UUID) -> None:
+        self._guard_self(user, user_id)
+        target = await self.get_owned(db, user_id, user.org_id)
+        await UserRepository(db).soft_delete(target)
         await db.commit()

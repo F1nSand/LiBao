@@ -83,7 +83,8 @@ class RunLogRepository:
                 func.date(RunLog.created_at).label("day"),
                 RunLog.input["model"].as_string().label("model"),
                 func.count().label("calls"),
-                func.coalesce(func.cast(RunLog.token_usage["cost"].astext, Float), 0.0).label("cost"),
+                # token_usage.cost 必须进聚合，否则违反 GROUP BY（实测 /system/cost 50001）
+                func.sum(func.coalesce(func.cast(RunLog.token_usage["cost"].astext, Float), 0.0)).label("cost"),
             )
             .where(RunLog.type == "llm")
             .group_by("day", "model")

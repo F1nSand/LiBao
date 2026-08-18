@@ -132,27 +132,32 @@ class EvalService:
         await db.refresh(row)
         return row
 
-    async def list_runs(self, db: AsyncSession) -> list[dict[str, Any]]:
-        return [serialize_eval_run(r) for r in await EvalRepository(db).list_runs()]
+    async def list_runs(self, db: AsyncSession, user: User) -> list[dict[str, Any]]:
+        """运行列表：按当前用户组织收敛（org_id 过滤，越权数据不可见）。"""
+        return [serialize_eval_run(r) for r in await EvalRepository(db).list_runs(org_id=user.org_id)]
 
-    async def get_run_detail(self, db: AsyncSession, run_id: uuid.UUID) -> dict[str, Any]:
-        repo = EvalRepository(db)
-        run = await repo.get_run(run_id)
+    async def get_run_owned(self, db: AsyncSession, user: User, run_id: uuid.UUID) -> EvalRun:
+        """取本组织运行；跨 org 一律视为不存在（40414，防存在性探测），镜像 get_set_owned。"""
+        run = await EvalRepository(db).get_run(run_id, org_id=user.org_id)
         if run is None:
-            raise AppError(ERR_EVAL_RUN_NOT_FOUND, "评估运行不存在")
-        results = await repo.list_results(run_id)
+            raise AppError(ERR_EVAL_RUN_NOT_FOUND, "评估运行不存在或无权访问")
+        return run
+
+    async def get_run_detail(self, db: AsyncSession, user: User, run_id: uuid.UUID) -> dict[str, Any]:
+        run = await self.get_run_owned(db, user, run_id)
+        results = await EvalRepository(db).list_results(run_id)
         return {"run": serialize_eval_run(run), "results": [serialize_eval_result(r) for r in results]}
 
-    async def pairwise(self, db: AsyncSession, run_id: uuid.UUID, baseline_run_id: uuid.UUID) -> dict[str, Any]:
+    async def pairwise(
+        self, db: AsyncSession, user: User, run_id: uuid.UUID, baseline_run_id: uuid.UUID
+    ) -> dict[str, Any]:
         """配对比较（docs 06 §2.4，McNemar 思路）：同评估集两 run 逐题比胜负。
 
         判断「真变好还是运气」——不是两个成功率数字谁大；一次只动一个变量。
         """
         repo = EvalRepository(db)
-        run = await repo.get_run(run_id)
-        baseline = await repo.get_run(baseline_run_id)
-        if run is None or baseline is None:
-            raise AppError(ERR_EVAL_RUN_NOT_FOUND, "评估运行不存在")
+        run = await self.get_run_owned(db, user, run_id)
+        baseline = await self.get_run_owned(db, user, baseline_run_id)
         results = await repo.list_results(run_id)
         base_results = await repo.list_results(baseline_run_id)
         base_map = {str(r.case_id): r for r in base_results}

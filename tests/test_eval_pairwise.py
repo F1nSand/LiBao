@@ -75,7 +75,7 @@ async def test_pairwise_win_lose_tie(eval_fixture):
     await run_eval(graph, sessionmaker, candidate_id, model_override=FakeEvalModel(fail_inputs=["1+1"]))
 
     async with sessionmaker() as session:
-        pw = await svc.pairwise(session, candidate_id, baseline_id)
+        pw = await svc.pairwise(session, user, candidate_id, baseline_id)
         assert pw["summary"]["wins"] == 1  # 2+2: base fail / cand pass
         assert pw["summary"]["losses"] == 1  # 1+1: base pass / cand fail
         assert pw["summary"]["ties"] == 1  # 3+3: both pass
@@ -127,7 +127,7 @@ async def test_run_detail_includes_latency_cost(eval_fixture):
     graph = build_graph()
     await run_eval(graph, sessionmaker, run_id, model_override=FakeEvalModel())
     async with sessionmaker() as session:
-        detail = await svc.get_run_detail(session, run_id)
+        detail = await svc.get_run_detail(session, user, run_id)
         r = detail["results"][0]
         assert "latency_ms" in r and r["latency_ms"] is not None
         assert "cost" in r and r["cost"] == 0.0  # Fake 无 usage_metadata → 估算 0

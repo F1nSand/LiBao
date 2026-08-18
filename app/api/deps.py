@@ -1,7 +1,8 @@
 """API 层依赖注入（docs 01 §2 api/deps.py）。
 
 依赖方向：api → services → storage。get_current_user 不直触存储，经 services/user.py 加载。
-存储相关 import 延迟到函数体内，避免在 storage 就绪前导入失败。
+服务类 import 延迟到函数体内（避免 storage 就绪前导入失败）；User 模型为纯 SQLAlchemy
+（无引擎依赖），顶层 import 安全（routers 已普遍如此），供 require_role 注解被 FastAPI 解析。
 """
 from __future__ import annotations
 
@@ -13,7 +14,8 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ERR_UNAUTHORIZED, AppError
+from app.core.errors import ERR_FORBIDDEN, ERR_UNAUTHORIZED, AppError
+from app.storage.models.user import User
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -58,7 +60,24 @@ async def get_current_user(
     return user
 
 
-def ensure_user_in_org(user, org_id: uuid.UUID) -> None:
-    """数据隔离：资源必须属于当前用户所在组织（docs 00 多租户隔离）。"""
-    if str(user.org_id) != str(org_id):
-        raise AppError(40301, "无权访问该资源")
+_ROLE_LABELS = {"admin": "管理员", "developer": "开发者", "viewer": "只读用户"}
+
+
+def require_role(*roles: str):
+    """角色守卫依赖工厂（docs 01 §10 RBAC）。
+
+    返回可被 `Depends()` 使用的依赖；校验通过后返回当前 user，故 handler 参数名/类型零改动：
+        user: User = Depends(require_admin)
+    """
+    labels = "/".join(_ROLE_LABELS.get(r, r) for r in roles)
+
+    async def _require_role(user: User = Depends(get_current_user)) -> User:
+        if user.role not in roles:
+            raise AppError(ERR_FORBIDDEN, f"需要 {labels} 角色才能访问")
+        return user
+
+    return _require_role
+
+
+require_admin = require_role("admin")                  # 管理员专属
+require_developer = require_role("admin", "developer")  # developer+（admin 恒通过）

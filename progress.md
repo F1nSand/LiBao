@@ -1,5 +1,14 @@
 # 进度账本 — plan: C:\Users\Admin1\.claude\plans\immutable-inventing-breeze.md（M3）
 
+## M6-1 多用户 RBAC + 数据隔离（2026-08-18 完成，plan: agent-sparkling-patterson.md，285 测试全绿 + ruff + verify 14/8/6）
+
+- **角色守卫**：`deps.py` `require_role(*roles)` 工厂 + `require_admin`/`require_developer`（返回 user）；tools/kb → developer+，settings/system/evals/hooks管理/users → admin，health + hooks 公开收包 → 公开。对齐前端守卫（前端早已守卫，本轮后端补 API 直调兜底）。
+- **Eval 运行/结果 org 隔离**：`get_run`/`list_runs` 加 org_id（join EvalSet.org_id）；`EvalService.get_run_owned` 镜像 `get_set_owned`，跨 org 40414。
+- **用户**：`list_paged` org 收敛；create_user 拒跨 org 写（40301）；`get_owned` org 比对（40411）；`_guard_self` 防最后一个 admin 自锁死。
+- **顺带修 bug**：`aggregate_llm` 的 `token_usage.cost` 未进 GROUP BY → `/system/cost` 50001，包 `func.sum` + 回归测试（test_system_logs）。
+- **测试**：改 test_users_api/test_evals/test_eval_pairwise 签名；新增 test_rbac（纯单测）、test_eval_org_isolation（两 org 隔离）、用户 org 收敛 + 自守卫测试。
+- **已知留白**（记录不修）：run_log 无 org 列 → `/system/logs` `/system/cost` 仅 admin 全平台（run_log 加列留部署/观测轮）；webhook 公开接收跨 org tool_id 碰撞（M6-1 前既有）。
+
 ## L1 笔记（2026-08-15 工作流提速轮）
 - 用户采纳 3 条提速建议：① 全局 CLAUDE.md 验证纪律明确 L1 全量测试按天合并跑一次（L2/L3 仍每轮全量）；② Gate3 Simplify L2 降为 2 路（Reuse+Simplification），L3 恢复 4 路；③ 新增 `scripts/verify_m3.sh` M3 e2e 一键验证 —— 14 项断言全过（真实 SiliconFlow 索引 + 中文混合检索命中 + 附件分析 ready + 二进制回读一致 + 清理）。
 - 脚本踩坑（已修，注释已内联）：Git Bash→curl.exe 中文 argv 按 Windows codepage(GBK) 转码 → 后端 400「There was an error parsing the body」，JSON body 必须写文件后 `--data-binary @file`；jget 对复合结构 print 输出 Python repr（单引号）→ json.load 失败，数组计数用单 python 内联。

@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db, require_developer
 from app.api.envelope import ok
 from app.api.schemas.kb import CreateCollectionRequest, KbSearchRequest, KbStatusRequest
 from app.core.errors import ERR_DOCUMENT_TYPE_UNSUPPORTED, AppError
@@ -27,7 +27,7 @@ def _decode_text(data: bytes) -> str:
 
 @router.get("/kb/collections")
 async def list_collections(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     svc = KbService()
@@ -39,7 +39,7 @@ async def list_collections(
 @router.post("/kb/collections")
 async def create_collection(
     req: CreateCollectionRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     coll = await KbService().create_collection(db, user, req.name, req.chunk_size, req.overlap, req.description)
@@ -49,7 +49,7 @@ async def create_collection(
 @router.delete("/kb/collections/{collection_id}")
 async def delete_collection(
     collection_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     await KbService().delete_collection(db, user, collection_id)
@@ -59,7 +59,7 @@ async def delete_collection(
 @router.get("/kb/collections/{collection_id}/documents")
 async def list_documents(
     collection_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     svc = KbService()
@@ -72,7 +72,7 @@ async def list_documents(
 async def upload_document(
     collection_id: uuid.UUID,
     file: UploadFile = File(...),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     """multipart 上传：txt/md 提取文本入库 → uploaded → 后台处理链。"""
@@ -89,7 +89,7 @@ async def upload_document(
 @router.get("/kb/documents/{document_id}")
 async def get_document(
     document_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     doc = await KbService().get_document(db, user, document_id)
@@ -99,7 +99,7 @@ async def get_document(
 @router.get("/kb/documents/{document_id}/status")
 async def get_document_status(
     document_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     doc = await KbService().get_document(db, user, document_id)
@@ -116,7 +116,7 @@ async def get_document_status(
 @router.post("/kb/documents/{document_id}/reindex")
 async def reindex_document(
     document_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     await KbService().reindex_document(db, user, document_id)
@@ -127,7 +127,7 @@ async def reindex_document(
 async def patch_document_status(
     document_id: uuid.UUID,
     req: KbStatusRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     await KbService().archive_document(db, user, document_id, req.status)
@@ -137,7 +137,7 @@ async def patch_document_status(
 @router.delete("/kb/documents/{document_id}")
 async def delete_document(
     document_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     await KbService().delete_document(db, user, document_id)
@@ -147,7 +147,7 @@ async def delete_document(
 @router.post("/kb/search")
 async def search_kb(
     req: KbSearchRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     hits = await KbService().search(db, user, req.collection_ids, req.query, req.top_k, req.hybrid)

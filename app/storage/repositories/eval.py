@@ -87,11 +87,18 @@ class EvalRepository:
         self.session.add(row)
         return row
 
-    async def get_run(self, run_id: uuid.UUID) -> EvalRun | None:
-        return await self.session.get(EvalRun, run_id)
+    async def get_run(self, run_id: uuid.UUID, org_id: uuid.UUID | None = None) -> EvalRun | None:
+        """取运行；org_id 非 None 时按运行所属评估集的组织校验（越权即视为不存在）。"""
+        stmt = select(EvalRun).where(EvalRun.id == run_id)
+        if org_id is not None:
+            stmt = stmt.join(EvalSet, EvalSet.id == EvalRun.eval_set_id).where(EvalSet.org_id == org_id)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def list_runs(self) -> list[EvalRun]:
-        stmt = select(EvalRun).order_by(EvalRun.created_at.desc())
+    async def list_runs(self, org_id: uuid.UUID | None = None) -> list[EvalRun]:
+        stmt = select(EvalRun)
+        if org_id is not None:
+            stmt = stmt.join(EvalSet, EvalSet.id == EvalRun.eval_set_id).where(EvalSet.org_id == org_id)
+        stmt = stmt.order_by(EvalRun.created_at.desc())
         return list((await self.session.execute(stmt)).scalars())
 
     # ---- 结果 ----

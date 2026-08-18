@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db, require_admin
 from app.api.envelope import ok
 from app.services.eval import EvalService, run_eval
 from app.services.serializers import serialize_eval_case, serialize_eval_run, serialize_eval_set
@@ -45,7 +45,7 @@ class RunEvalRequest(BaseModel):
 
 @router.get("/sets")
 async def list_sets(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return ok(await EvalService().list_sets(db, user))
@@ -54,7 +54,7 @@ async def list_sets(
 @router.post("/sets")
 async def create_set(
     req: CreateEvalSetRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return ok(serialize_eval_set(await EvalService().create_set(db, user, req.name, req.description)))
@@ -63,7 +63,7 @@ async def create_set(
 @router.get("/sets/{eval_set_id}/cases")
 async def list_cases(
     eval_set_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return ok(await EvalService().list_cases(db, user, eval_set_id))
@@ -73,7 +73,7 @@ async def list_cases(
 async def patch_set(
     eval_set_id: uuid.UUID,
     req: PatchEvalSetRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return ok(serialize_eval_set(await EvalService().patch_set(db, user, eval_set_id, req.name, req.description)))
@@ -82,7 +82,7 @@ async def patch_set(
 @router.delete("/sets/{eval_set_id}")
 async def delete_set(
     eval_set_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     await EvalService().delete_set(db, user, eval_set_id)
@@ -93,7 +93,7 @@ async def delete_set(
 async def add_case(
     eval_set_id: uuid.UUID,
     req: AddEvalCaseRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return ok(
@@ -108,7 +108,7 @@ async def patch_case(
     eval_set_id: uuid.UUID,
     case_id: uuid.UUID,
     req: PatchEvalCaseRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return ok(serialize_eval_case(await EvalService().patch_case(db, user, eval_set_id, case_id, req.active)))
@@ -118,7 +118,7 @@ async def patch_case(
 async def delete_case(
     eval_set_id: uuid.UUID,
     case_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     await EvalService().delete_case(db, user, eval_set_id, case_id)
@@ -129,7 +129,7 @@ async def delete_case(
 async def run_eval_endpoint(
     req: RunEvalRequest,
     request: Request,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     run = await EvalService().create_run(db, user, req.eval_set_id, baseline_run_id=req.baseline_run_id)
@@ -146,27 +146,27 @@ async def run_eval_endpoint(
 
 @router.get("/runs")
 async def list_runs(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return ok(await EvalService().list_runs(db))
+    return ok(await EvalService().list_runs(db, user))
 
 
 @router.get("/runs/{run_id}")
 async def get_run_detail(
     run_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return ok(await EvalService().get_run_detail(db, run_id))
+    return ok(await EvalService().get_run_detail(db, user, run_id))
 
 
 @router.get("/runs/{run_id}/pairwise")
 async def get_pairwise(
     run_id: uuid.UUID,
     baseline_run_id: uuid.UUID = Query(...),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """配对比较（docs 06 §2.4）：候选 run vs 基线 run 逐题胜负矩阵 + 汇总。"""
-    return ok(await EvalService().pairwise(db, run_id, baseline_run_id))
+    return ok(await EvalService().pairwise(db, user, run_id, baseline_run_id))

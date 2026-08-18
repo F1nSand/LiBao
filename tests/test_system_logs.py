@@ -70,3 +70,23 @@ async def test_trace_events(log_fixture):
         assert sorted(e["node_type"] for e in events) == ["llm", "tool"]
         assert sorted(e["status"] for e in events) == ["failed", "success"]
         assert all(e["ts"] > 0 for e in events)
+
+
+async def test_aggregate_llm_groups_by_day_model(log_fixture):
+    """M6-1 回归：token_usage.cost 需进聚合（旧 SQL 违反 GROUP BY → /system/cost 50001）。"""
+    sessionmaker, uid = log_fixture
+    async with sessionmaker() as session:
+        repo = RunLogRepository(session)
+        for cost in (0.5, 0.3):  # 同 model 两行，cost 应求和
+            await repo.create(
+                trace_id=f"agg_{uid}", node="agent_execute", type="llm", status="ok",
+                input={"model": "deepseek-agg"}, output={}, duration_ms=1,
+                token_usage={"cost": cost},
+            )
+        await session.commit()
+    async with sessionmaker() as session:
+        rows = await RunLogRepository(session).aggregate_llm()
+        agg = next((r for r in rows if r.model == "deepseek-agg"), None)
+        assert agg is not None
+        assert agg.calls >= 2  # 共享 DB：本测试两行保证下限
+        assert agg.cost >= 0.8  # 0.5 + 0.3

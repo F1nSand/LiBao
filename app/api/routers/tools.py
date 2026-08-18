@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db, require_developer
 from app.api.envelope import ok
 from app.api.schemas.tools import (
     CreateToolRequest,
@@ -25,7 +25,7 @@ router = APIRouter()
 @router.get("/tools/search")  # 必须在 /tools/{tool_id} 之前定义，避免被 path 参数吞掉
 async def search_tools(
     q: str = Query(..., min_length=1),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     hits = await ToolService().search(db, user.org_id, q)
@@ -37,7 +37,7 @@ async def search_tools(
 @router.post("/tools/mcp/register")
 async def register_mcp(
     req: McpRegisterRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     return ok(await McpService().register(db, user, req))
@@ -45,7 +45,7 @@ async def register_mcp(
 
 @router.get("/tools/mcp")
 async def list_mcp_servers(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     return ok(await McpService().list_servers(db, user.org_id))
@@ -54,7 +54,7 @@ async def list_mcp_servers(
 @router.delete("/tools/mcp/{server_id}")
 async def unregister_mcp(
     server_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     await McpService().unregister(db, user, server_id)
@@ -66,7 +66,7 @@ async def list_tools(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     enabled: bool | None = Query(None),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     data = await ToolService().list_for_org(db, user.org_id, page, page_size, enabled=enabled)
@@ -76,7 +76,7 @@ async def list_tools(
 @router.post("/tools")
 async def create_tool(
     req: CreateToolRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     row = await ToolService().create(db, user, req)
@@ -86,7 +86,7 @@ async def create_tool(
 @router.get("/tools/{tool_id}")
 async def get_tool(
     tool_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     row = await ToolService().get_in_org(db, user.org_id, tool_id)
@@ -100,7 +100,7 @@ async def get_tool(
 async def update_tool(
     tool_id: str,
     req: UpdateToolRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     row = await ToolService().update(db, user, tool_id, req)
@@ -111,7 +111,7 @@ async def update_tool(
 async def toggle_tool(
     tool_id: str,
     req: ToolToggleRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     row = await ToolService().set_enabled(db, user, tool_id, req.enabled)
@@ -121,7 +121,7 @@ async def toggle_tool(
 @router.delete("/tools/{tool_id}")
 async def delete_tool(
     tool_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     await ToolService().soft_delete(db, user, tool_id)
@@ -132,7 +132,7 @@ async def delete_tool(
 async def test_tool(
     tool_id: str,
     req: ToolTestRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
     result = await ToolService().test(db, user.org_id, tool_id, req.params)

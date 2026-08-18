@@ -10,7 +10,7 @@ import uuid
 from fastapi import APIRouter, Body, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db, require_admin
 from app.api.envelope import ok
 from app.core.errors import ERR_HOOK_TOKEN, AppError
 from app.services.webhook import WebhookService
@@ -24,7 +24,7 @@ async def register_hook(
     tool_id: str,
     token: str = Body(..., embed=True, description="webhook 共享密钥（只存 hash，调用方需保管）"),
     conversation_id: uuid.UUID | None = Body(None, embed=True, description="事件投递目标会话（可选）"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     row = await WebhookService().register(db, user, tool_id, token, conversation_id)
@@ -33,7 +33,7 @@ async def register_hook(
 
 @router.get("/hooks")
 async def list_hooks(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return ok(await WebhookService().list(db, user))
@@ -42,7 +42,7 @@ async def list_hooks(
 @router.delete("/hooks/{tool_id}")
 async def unregister_hook(
     tool_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     await WebhookService().unregister(db, user, tool_id)
