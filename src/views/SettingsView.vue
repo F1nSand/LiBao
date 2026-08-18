@@ -29,7 +29,14 @@ const loading = ref(false)
 const usersUnavailable = computed(() => isUnavailable(FEATURE.users))
 
 const createVisible = ref(false)
-const createForm = reactive({ username: '', password: '', name: '', role: 'viewer' as Role })
+const createForm = reactive({ username: '', password: '', name: '', role: 'viewer' as Role, org_id: 'org_1' })
+
+/** 组织筛选（数据隔离：客户端过滤，不改 listUsers 契约；org_id 来自 mock/真实用户数据） */
+const orgFilter = ref('all')
+const orgOptions = computed(() => [...new Set(users.value.map((u) => u.org_id).filter((v): v is string => !!v))])
+const filteredUsers = computed(() =>
+  orgFilter.value === 'all' ? users.value : users.value.filter((u) => u.org_id === orgFilter.value),
+)
 
 /* ---------- Provider 配置（契约见 api/provider.ts，后端未实现走降级） ---------- */
 const providers = ref<ProviderConfig[]>([])
@@ -76,7 +83,7 @@ async function onCreate() {
   )
   if (created === undefined) return
   createVisible.value = false
-  Object.assign(createForm, { username: '', password: '', name: '', role: 'viewer' })
+  Object.assign(createForm, { username: '', password: '', name: '', role: 'viewer', org_id: 'org_1' })
   ElMessage.success('用户已创建')
   await load()
 }
@@ -197,11 +204,18 @@ async function onDeleteHook(toolId: string) {
       <el-tab-pane label="用户与权限" name="users">
         <template v-if="!usersUnavailable">
           <div class="users-toolbar">
+            <el-select v-model="orgFilter" size="small" style="width: 130px">
+              <el-option label="全部组织" value="all" />
+              <el-option v-for="org in orgOptions" :key="org" :label="org" :value="org" />
+            </el-select>
             <el-button type="primary" :icon="'Plus'" @click="createVisible = true">新建用户</el-button>
           </div>
-          <el-table :data="users" v-loading="loading" size="small">
+          <el-table :data="filteredUsers" v-loading="loading" size="small">
             <el-table-column prop="username" label="用户名" width="140" />
             <el-table-column prop="name" label="姓名" width="140" />
+            <el-table-column prop="org_id" label="组织" width="100">
+              <template #default="{ row }"><span class="mono">{{ row.org_id ?? '—' }}</span></template>
+            </el-table-column>
             <el-table-column label="角色" width="160">
               <template #default="{ row }">
                 <el-select :model-value="row.role" size="small" @change="(r: Role) => onChangeRole(row, r)">
@@ -289,6 +303,7 @@ async function onDeleteHook(toolId: string) {
         <el-form-item label="用户名"><el-input v-model="createForm.username" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="createForm.password" type="password" /></el-form-item>
         <el-form-item label="姓名"><el-input v-model="createForm.name" /></el-form-item>
+        <el-form-item label="组织"><el-input v-model="createForm.org_id" placeholder="如 org_1 / org_2" /></el-form-item>
         <el-form-item label="角色">
           <el-select v-model="createForm.role">
             <el-option v-for="(label, val) in ROLE_LABEL" :key="val" :label="label" :value="val" />

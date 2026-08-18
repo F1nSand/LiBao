@@ -419,3 +419,4 @@
 - Task 1: complete (commits 764e302, npx vitest run src/api/evolution.spec.ts src/api/availability.spec.ts → 11 PASS)
 - Task 2: complete (commits 21966f5, typecheck ✓ lint 0err + mock 路由 node fetch 验证全过)
 - Task 3: complete (commits 25d467e, typecheck ✓ lint 0err + DOM 冒烟：5 行/筛选 1 条/抽屉契约字段/0 错误)
+- Task 4: complete (commits 824c829；docs/03 §5.13 提案落盘共享 docs（非 git 仓库）+ 交接板 [open]）

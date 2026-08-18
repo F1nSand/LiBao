@@ -20,6 +20,9 @@ export const users: Array<User & { password: string }> = [
   { id: 'u_admin', username: 'admin', password: 'admin123', name: '管理员', role: 'admin', org_id: 'org_1', enabled: true, created_at: isoDate(60) },
   { id: 'u_dev', username: 'dev', password: 'dev123', name: '开发者', role: 'developer', org_id: 'org_1', enabled: true, created_at: isoDate(55) },
   { id: 'u_viewer', username: 'viewer', password: 'viewer123', name: '访客', role: 'viewer', org_id: 'org_1', enabled: true, created_at: isoDate(50) },
+  // org_2（多租户数据隔离演示：组织筛选可切到第二组织）
+  { id: 'u_dev2', username: 'dev2', password: 'dev2123', name: '开发者二组', role: 'developer', org_id: 'org_2', enabled: true, created_at: isoDate(40) },
+  { id: 'u_view2', username: 'viewer2', password: 'viewer2123', name: '访客二组', role: 'viewer', org_id: 'org_2', enabled: true, created_at: isoDate(35) },
 ]
 
 // 单通用 Agent 模型：chat/conversation/task 固定用组织默认通用 Agent（无 /agents 端点）
