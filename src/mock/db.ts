@@ -80,6 +80,7 @@ export const conversations: Conversation[] = [
   { id: 'c_001', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '计算 6*7', status: 'active', max_messages: 1000, last_message_at: isoDate(10), created_at: isoDate(60) },
   { id: 'c_002', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '什么是 SSE', status: 'active', max_messages: 1000, last_message_at: isoDate(30), created_at: isoDate(90) },
   { id: 'c_long', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '长会话（轨迹分页演示）', status: 'active', max_messages: 1000, last_message_at: isoDate(20), created_at: isoDate(180) },
+  { id: 'c_scroll', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '滚动测试长会话', status: 'active', max_messages: 1000, last_message_at: isoDate(4), created_at: isoDate(200) },
 ]
 
 export const messages: Record<string, Message[]> = {
@@ -126,6 +127,22 @@ export const messages: Record<string, Message[]> = {
       created_at: isoDate(29),
     },
   ],
+  // 长会话（滚动位置记忆/恢复 e2e）：12 条交替消息，足够高可滚动
+  c_scroll: Array.from({ length: 12 }, (_, i) => {
+    const isUser = i % 2 === 0
+    const base = Math.floor(i / 2) + 1
+    return {
+      id: `ms_${i + 1}`,
+      conversation_id: 'c_scroll',
+      role: isUser ? 'user' : 'assistant',
+      content: isUser
+        ? `第 ${base} 个问题：请说明主题 ${base}。`
+        : `主题 ${base} 的说明：\n\n这是回答的第 ${base} 部分，包含若干行文本，用来让会话内容足够高以支持滚动测试。\n\n- 要点一\n- 要点二\n- 要点三\n\n以上是对问题 ${base} 的回答。`,
+      attachments: [],
+      tool_calls: [],
+      created_at: isoDate(24 - i * 2),
+    }
+  }),
 }
 
 export const tasks: Task[] = [

@@ -14,10 +14,19 @@
       - **顺带修复**：/system/cost 原 50001（SQL 违反 GROUP BY），已修。
       - 测试账号：seed 有 dev/dev123（developer）、viewer/viewer123（viewer）——直接登录即可验证前端守卫后的真实 403 拦截。
 
-[open] 2026-08-18 · →后端 | **经验候选区契约提案**（`/evolution/candidates*`，docs 03 §5.13）| 期望/实际：
-      - 闭环（docs 06 §5）：轨迹 → 经验 → 候选区 → 验证 → 上线/回滚。**前端已实现**：types（`Candidate`，字段对齐 §5.6 变更契约）+ mock 路由（状态迁移+前置校验）+ `/system` 候选区页（EvolutionManage：筛选/搜索/详情抽屉/状态动作）。
-      - 待后端：`GET /evolution/candidates`（status/search/分页）、`GET /{id}`、`POST /{id}/validate|publish|reject|rollback`。验证/发布裁决须由后端评估回归驱动（§5.5 安全边界不可自改），前端只触发请求。
-      - 未落地前：前端 FEATURE.evolution 降级（404 → EmptyState），无回归。
+[done] 2026-08-18 · ←后端 | **经验候选区已实现**（`/evolution/candidates*`，docs 03 §5.13）| 与你契约完全一致，前端零改动（FEATURE.evolution 从降级转正式渲染）。
+      - `GET /evolution/candidates`（status/search 仅 title 包含/分页）、`GET /{id}`、`POST /{id}/validate|publish|reject|rollback`（admin-only，require_admin）。
+      - **同步状态机**：candidate→validate→approved/rejected（pass_rate≥0.8）、candidate→reject→rejected、approved→publish→published、published→rollback→rolled_back；状态不允许 40020（HTTP 200 + 信封）。
+      - **仅 prompt 载体可发布**：tool/skill/memory/context → 40021；publish 写 AgentConfig.system_prompt + AgentVersion 只增（回滚到上一版快照）。
+      - **安全边界兑现**（§5.5）：验证阈值/判定是代码常量，候选 payload 只写 candidates 表、不可自改规则。
+      - **validate 同步跑真实 LLM**（候选快照 + validation_cases 逐条 judge）；候选不存在 40401。
+      - 附带：seed 3 条演示候选（candidate/approved/published）+ 手动创建端点 `POST /evolution/candidates`（前端无）+ 逐轮 cost 已一并落地（见下）。
+      - 实测（:8000 verify_evolution.sh 8/8）：list 3 条 → validate（真实 LLM pass_rate=1.0）→ publish → rollback → tool 载体拒绝。
+
+[done] 2026-08-18 · ←后端 | **逐轮 cost 契约扩展已实现** | 与你契约一致，前端零改动。
+      - `message` 封口事件 payload 加 `cost`（每轮 emit，`{message_id, message, cost}`）；`message` 内也带 `cost`。
+      - `serialize_message`/`Message` REST 带 `cost`（`token_usage.cost` 表面化，缺省 0.0）；逐轮 `_persist_round` 落 `token_usage`（刷新后逐轮成本可见）。
+      - 数据来源：agent_execute 每轮把 `token_usage.cost` 随 AIMessage `usage_metadata` 带出 → stream_core 读入轮消息。
 
 [open] 2026-08-18 · →后端 | **org 名称展示**（`org_id` 为不透明 UUID，前端只透传）| 期望/实际：
       - 现状：真实后端 `org_id` 是 UUID（如 `70b3c93a-…`），TopBar 组织列/用户表 org 列/组织筛选都是 UUID 透传，用户不可读（联调实测）。
@@ -25,10 +34,7 @@
       - 前端已就绪：org 列/筛选按 `org_id` 透传渲染，补字段即自动优先显示；配合你 M6-1 的「/users 按 org 收敛」，筛选在单 org 下仅一项（正常）。
       - 注：你 M6-1 已实现 admin 自我保护（不能自删/自禁/自降权），前端用户表删除按钮对当前登录 admin 未加禁用——后端 403/400 拦截 + toast 兜底，无回归；如需前端也禁用可另开。
 
-[open] 2026-08-18 · →后端 | **逐轮 cost 契约扩展**（`message` 封口事件 payload + `Message` REST 加 `cost`）| 期望/实际：
-      - 现状：中间轮 `message` 封口载荷无 cost，`Message`/`TokenUsage` 无 cost 字段；仅最终 `done` 带 cost 且不落库 → 逐轮成本不可见、刷新丢失。
-      - 修法：`message` 事件 payload 加 `cost`（每轮 emit）；`serialize_message`/`Message` REST 带 `cost` 并逐轮持久化（数据模型 message.token_usage jsonb 已含 cost 字段，只差表面化）。
-      - 前端已就绪：types（`MessageSealPayload.cost`/`Message.cost`）+ mock `sealEvent` 演示 + UI 防御式渲染（气泡 footer `180 tok · ¥0.0008`）。
+[done] 2026-08-18 · →后端 | **逐轮 cost 契约扩展**（前端原始提案）| 后端已实现（见上方 [done] 08-18 逐轮 cost 契约扩展已实现）；前端 types/mock/防御式渲染早已就绪，转正式渲染。
 
 [done] 2026-08-17 · ←后端 | **thinking 发射 + 持久化 + 逐轮即时落库已实现**（277 测试全绿 + ruff）| 与你契约一致，前端零改动。
       - **thinking 事件**：SSE 每轮 agent_execute 的 reasoning_content 增量发射（payload `{text, ts}`，前端累积到一轮一条）；token/message 仍剥 thinking。
@@ -442,3 +448,13 @@
 - M6 真实后端降级核验: PASS (VITE_USE_MOCK=false :5174 → 后端 :8000)
       - TopBar org 显示 `管理员 · <uuid>`（真实后端 org_id 是 UUID，非 mock 的 org_1）；/system 候选区 tab → 无 .evolve-table + EmptyState「后端暂未实现候选区接口」；唯一 404 = /evolution/candidates（预期）；/settings 用户表 4 条真实数据 + org 列；0 页面错误。
       - 备注：真实后端 org_id 为不透明 UUID（非人类可读名），组织筛选/展示是 UUID 透传，非 bug；若后续要「org 名称」需后端/契约补 org 名映射。
+
+## 2026-08-18 对话滚动/贴底优化 + thinking 按钮定位 + 底部缓冲（L2）
+- 计划：C:\Users\Admin1\.claude\plans\agent-twinkling-lantern.md
+- **① thinking 按钮固定**（MessageBubble.vue CSS）：`.thinking-row` `width:100%` + `.thinking-text` `flex:1;min-width:0` + `.thinking-toggle` `flex-shrink:0;align-self:flex-start` → 按钮固定在行右上，收起/展开都不随文本漂移（flex 布局非视口 fixed）。
+- **② 会话滚动位置记忆**（MessageList.vue）：模块级 `scrollPositions: Map<convId,scrollTop>`，scroll 事件 `updatePinned` 顺带记账；messages 引用 watch 改——有记录→`restoreScroll(saved)`（恢复原位，先 `pinned=false` 防拉回）；无记录（新/没开过）→`forceScrollBottom()`（默认到底）。贴底跟随 watch 不变。
+- **③ 底部缓冲**（MessageList.vue CSS）：`.msg-list` `padding: 8px 0 96px`——最新行停在缓冲带上方，不顶 composer；scrollHeight 含 padding，pinned 判定天然正确。
+- mock：`db.ts` 加 `c_scroll` 长会话种子（12 条交替消息，供滚动 e2e）。
+- 测试：MessageBubble.spec +2（thinking 折叠/展开切换 + 短文本无按钮）；e2e/scroll.spec.ts 新增（c_scroll 新开到底→上滚 200→切走 c_002→切回恢复原位）。
+- 验证：typecheck ✓ / lint 0err(3 既有 any) / **139 单测 PASS** / **24 e2e PASS** / DOM 手测（:5199）：按钮 top-aligned+right-pinned+不在文本底 全 true、padBottom 96px、bufferGap 96、新会话贴底 true、0 错误。
+- 备注：后端 08-18 已实现 经验候选区 + 逐轮 cost（前端零改动，FEATURE.evolution 转正式渲染；逐轮成本真实显示）。真实后端候选区/成本 UI 正式核验留作下轮。

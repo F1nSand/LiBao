@@ -1,3 +1,8 @@
+<script lang="ts">
+/** 会话滚动位置记忆（模块级 Map，SPA 会话内存活）：新会话无记录→默认底部；翻过→恢复原位 */
+const scrollPositions = new Map<string, number>()
+</script>
+
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Message } from '@/types'
@@ -24,10 +29,15 @@ const showStreamBubble = computed(() => !!props.stream && props.stream.segments.
 const FOLLOW_TOLERANCE = 32
 const pinned = ref(true)
 
+/** 当前会话 id（滚动位置记账/恢复用）：messages[0].conversation_id 优先 */
+const conversationId = computed(() => props.messages[0]?.conversation_id ?? props.stream?.conversationId ?? '')
+
 function updatePinned(): void {
   const el = containerRef.value
   if (!el) return
   pinned.value = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_TOLERANCE
+  // 滚动即记账：切走再回时恢复原位
+  if (conversationId.value) scrollPositions.set(conversationId.value, el.scrollTop)
 }
 
 onMounted(() => {
@@ -60,12 +70,34 @@ function forceScrollBottom(): void {
   })
 }
 
-/** 会话加载/切换（messages 引用替换，append 不换引用）→ 强制滚动到底，默认看最新消息；与吸底跟随 watch 并存 */
+/** 恢复某会话上次滚动位置（与 forceScrollBottom 相同落地节奏：nextTick + 双 rAF + timeout 等真实高度） */
+function restoreScroll(top: number): void {
+  const el = containerRef.value
+  if (!el) return
+  const scroll = () => {
+    el.scrollTop = top
+  }
+  void nextTick(() => {
+    scroll()
+    requestAnimationFrame(scroll)
+    requestAnimationFrame(scroll)
+    setTimeout(scroll, 60)
+    updatePinned()
+  })
+}
+
+/** 会话加载/切换（messages 引用替换）：有滚动记录 → 恢复原位；无记录（新/没开过）→ 默认到底；与吸底跟随 watch 并存 */
 watch(
   () => props.messages,
   () => {
     if (!props.messages.length) return
-    forceScrollBottom()
+    const saved = conversationId.value ? scrollPositions.get(conversationId.value) : undefined
+    if (saved != null) {
+      pinned.value = false // 立即取消贴底，防恢复期间被内容 watch 拉回
+      restoreScroll(saved)
+    } else {
+      forceScrollBottom()
+    }
   },
   { immediate: true },
 )
@@ -92,7 +124,8 @@ defineExpose({ containerRef })
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 0;
+  /* 底部 96px 缓冲带：流式文本最新一行停在缓冲上方，不顶到 composer */
+  padding: 8px 0 96px;
   background: var(--app-bg);
 }
 .msg-empty {

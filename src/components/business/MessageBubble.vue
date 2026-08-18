@@ -247,12 +247,12 @@ const usageText = computed(() => {
   color: var(--app-text-muted);
 }
 .thinking-row {
+  width: 100%;
   align-items: flex-start;
-  max-width: 100%;
 }
 .thinking-text {
-  display: inline-block;
-  max-width: 100%;
+  flex: 1;
+  min-width: 0;
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
@@ -271,6 +271,8 @@ const usageText = computed(() => {
   cursor: pointer;
   padding: 0 2px;
   flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
 }
 .thinking-toggle:hover {
   color: var(--app-primary);

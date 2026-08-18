@@ -149,4 +149,44 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     const w = mount(MessageBubble, { props: { message: asstMsg } })
     expect(w.find('.msg-usage').exists()).toBe(false)
   })
+
+  it('thinking 长文本：折叠行 + 展开/收起按钮，点击切换展开态', async () => {
+    const msg: Message = {
+      id: 'm6',
+      conversation_id: 'c1',
+      role: 'assistant',
+      content: '答案',
+      thinking: '这是一段足够长的推理内容，用于触发折叠显示的测试文本。'.repeat(6),
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const w = mount(MessageBubble, { props: { message: msg } })
+    const row = w.find('.thinking-row')
+    expect(row.exists()).toBe(true)
+    const text = w.find('.thinking-text')
+    expect(text.classes()).toContain('collapsed')
+    const toggle = w.find('.thinking-toggle')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.text()).toBe('展开')
+    // 点击展开 → 文本不再折叠、按钮变收起
+    await toggle.trigger('click')
+    expect(text.classes()).not.toContain('collapsed')
+    expect(w.find('.thinking-toggle').text()).toBe('收起')
+    // 再点收起 → 恢复折叠
+    await w.find('.thinking-toggle').trigger('click')
+    expect(text.classes()).toContain('collapsed')
+  })
+
+  it('thinking 短文本：无展开按钮、不折叠', () => {
+    const msg: Message = {
+      id: 'm7',
+      conversation_id: 'c1',
+      role: 'assistant',
+      content: '答案',
+      thinking: '简短推理',
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const w = mount(MessageBubble, { props: { message: msg } })
+    expect(w.find('.thinking-toggle').exists()).toBe(false)
+    expect(w.find('.thinking-text').classes()).not.toContain('collapsed')
+  })
 })
