@@ -123,6 +123,35 @@ async def test_chat_stream_event_sequence(chat_fixture):
         assert msgs[1].trace_id == "trace-t10"
 
 
+async def test_message_seal_carries_cost(chat_fixture):
+    """逐轮 cost 表面化（M6-2）：message 封口事件与 done 消息均含 cost（Fake 无 usage → 0.0）。"""
+    from app.tools.builtin import register_builtin_tools
+
+    register_builtin_tools()
+    sessionmaker, org, user, agent, conv = chat_fixture
+    graph = build_graph()
+
+    async with sessionmaker() as session:
+        frames = []
+        async for frame in chat_stream_events(
+            db=session, graph=graph, conversation=conv, agent=agent, user=user,
+            content="现在几点？", trace_id="trace-t10-cost", model_override=FakeChatModel(),
+        ):
+            frames.append(frame)
+
+        events = []
+        for frame in frames:
+            if frame.startswith(":"):
+                continue
+            events.append(json.loads(frame.split("\n\n")[0].split("data: ", 1)[1]))
+
+        seal = next(e for e in events if e["type"] == "message")
+        assert seal["payload"]["cost"] == 0.0
+        assert seal["payload"]["message"]["cost"] == 0.0
+        done = events[-1]
+        assert done["payload"]["message"]["cost"] == 0.0
+
+
 async def test_thinking_event_and_persistence(chat_fixture):
     """thinking（reasoning_content）：SSE 发射 + 按轮持久化（docs 03 §3）。"""
 

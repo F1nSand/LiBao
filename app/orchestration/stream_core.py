@@ -61,6 +61,8 @@ def _build_round_message(round_data: dict[str, Any], tool_results: list[dict[str
         "thinking": round_data.get("thinking") or "",
         "tool_calls": tool_calls,
         "round": round_data["round"],
+        "token_usage": round_data.get("token_usage"),
+        "cost": round_data.get("cost", 0.0),
     }
 
 
@@ -173,7 +175,7 @@ async def stream_graph_events(
             round_sink.append(round_msg)
         if on_round_message is not None:
             await on_round_message(round_msg)
-        return emit("message", {"message_id": msg_id, "message": round_msg})
+        return emit("message", {"message_id": msg_id, "message": round_msg, "cost": round_msg.get("cost", 0.0)})
 
     try:
         while True:
@@ -210,6 +212,7 @@ async def stream_graph_events(
                         for m in update.get("messages", []):
                             tcs = getattr(m, "tool_calls", None) or []
                             if tcs:
+                                round_usage = dict(getattr(m, "usage_metadata", None) or {})
                                 pending_round = {
                                     "content": m.content,
                                     "tool_calls": [dict(tc) for tc in tcs],
@@ -218,6 +221,8 @@ async def stream_graph_events(
                                         "reasoning_content"
                                     )
                                     or "",
+                                    "token_usage": round_usage or None,
+                                    "cost": round_usage.get("cost", 0.0),
                                 }
                             for tc in tcs:
                                 spec = get_by_name(tc["name"]) or get(tc["name"])
@@ -268,6 +273,8 @@ async def stream_graph_events(
                                         "thinking": "",
                                         "tool_calls": tcs,
                                         "round": round_seq,
+                                        "token_usage": None,
+                                        "cost": 0.0,
                                     }
                                 )
                     elif node == "context_update":

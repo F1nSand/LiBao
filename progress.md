@@ -1,5 +1,15 @@
 # 进度账本 — plan: C:\Users\Admin1\.claude\plans\immutable-inventing-breeze.md（M3）
 
+## M6-2 持续进化闭环·经验候选区（2026-08-18 完成，plan: agent-sparkling-patterson.md，297 测试全绿 + ruff + verify_evolution 8/8）
+
+- **候选区**：candidates 表（迁移 0011，org_id 隔离）+ EvolutionRepository/Service/路由（`/evolution/candidates*`，admin-only）。同步状态机 candidate→validate→approved/rejected、reject→rejected、approved→publish→published、published→rollback→rolled_back；错误码 40020/40021/40022/40023 + 40401。
+- **同步 validate**：复用 eval.py `_run_single_case`/`_judge`，瞬态 AgentConfig 快照（prompt 型换 system_prompt），逐 validation_case 跑图+judge，pass_rate≥0.8 approved。
+- **发布/回滚**：`AgentService.publish_prompt/rollback_prompt`（不 commit + `SELECT FOR UPDATE` 防并发腐蚀）+ 单事务组合；AgentVersion 只增（回滚=上一版作为新版本发布，失败版保留）；仅 prompt 载体可发布（tool/skill/memory/context → 40021）；rollback 校验候选是否当前生效（防撤销更晚发布）。
+- **逐轮 cost 扩展**：message 封口事件 payload + serialize_message/Message REST 加 cost（token_usage.cost 表面化）；agent_execute 把 cost 随 usage_metadata 带出 → stream_core 读入轮消息 → _persist_round 落库。
+- **seed**：3 条演示候选（candidate/approved/published，全 prompt）+ 手动创建端点。
+- **前端零改动**：validation_cases 前端是 string[]（我存 {input,expected}，serialize 转可读字符串）；FEATURE.evolution 从降级转正式渲染。
+- **测试**：新增 test_evolution（9）、test_evolution_org_isolation、test_message_cost；扩 test_chat_stream（message seal cost）。verify_evolution.sh 8/8（真实 LLM 全闭环）。
+
 ## M6-1 多用户 RBAC + 数据隔离（2026-08-18 完成，plan: agent-sparkling-patterson.md，285 测试全绿 + ruff + verify 14/8/6）
 
 - **角色守卫**：`deps.py` `require_role(*roles)` 工厂 + `require_admin`/`require_developer`（返回 user）；tools/kb → developer+，settings/system/evals/hooks管理/users → admin，health + hooks 公开收包 → 公开。对齐前端守卫（前端早已守卫，本轮后端补 API 直调兜底）。

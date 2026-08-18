@@ -56,6 +56,8 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
 
     token_usage = dict(usage or {})
     token_usage["cost"] = cost
+    # 把本轮 cost 随消息带出（含 usage 全量），供 stream_core 逐轮 cost 表面化（docs 03 §3 逐轮消息扩展）
+    response.usage_metadata = token_usage
 
     return {
         "messages": [response],

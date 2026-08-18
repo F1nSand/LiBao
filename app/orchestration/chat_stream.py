@@ -97,6 +97,7 @@ async def chat_stream_events(
             content=round_msg["content"],
             thinking=round_msg.get("thinking") or "",
             tool_calls=round_msg["tool_calls"],
+            token_usage=round_msg.get("token_usage"),
             parent_id=user_msg.id,
             trace_id=trace_id,
             round=round_msg["round"],
@@ -254,6 +255,7 @@ async def resume_stream_events(
             content=round_msg["content"],
             thinking=round_msg.get("thinking") or "",
             tool_calls=round_msg["tool_calls"],
+            token_usage=round_msg.get("token_usage"),
             trace_id=trace_id,
             round=round_msg["round"],
         )

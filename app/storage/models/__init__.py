@@ -5,6 +5,7 @@ from app.storage.models.agent import AgentConfig, AgentVersion
 from app.storage.models.attachment import Attachment
 from app.storage.models.conversation import Conversation
 from app.storage.models.eval import EvalCase, EvalResult, EvalRun, EvalSet
+from app.storage.models.evolution import Candidate
 from app.storage.models.kb import KbChunk, KbCollection, KbDocument
 from app.storage.models.mcp_server import McpServer
 from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion, MemoryTrace
@@ -22,6 +23,7 @@ __all__ = [
     "AgentConfig",
     "AgentVersion",
     "Attachment",
+    "Candidate",
     "Conversation",
     "EvalCase",
     "EvalResult",
