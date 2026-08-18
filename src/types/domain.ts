@@ -14,6 +14,11 @@ export type KbDocumentStatus = 'uploaded' | 'chunking' | 'indexing' | 'indexed' 
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR'
 
+/** 经验候选区状态（docs/06 §5 闭环：候选 → 验证 → 批准 → 发布 → 回滚） */
+export type CandidateStatus = 'candidate' | 'validating' | 'approved' | 'rejected' | 'published' | 'rolled_back'
+/** 经验更新载体（docs/06 §5.3：记忆 < 提示词 < 代码 < 重训） */
+export type CandidateChangeType = 'prompt' | 'skill' | 'tool' | 'memory' | 'context'
+
 /** token 用量（docs/04 message.token_usage） */
 export interface TokenUsage {
   prompt_tokens?: number

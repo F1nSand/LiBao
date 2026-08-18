@@ -22,6 +22,8 @@ describe('availability 路由映射', () => {
     expect(featureForUrl('/system/logs')).toBe(FEATURE.systemLogs)
     expect(featureForUrl('/system/evals/run')).toBe(FEATURE.systemEvals)
     expect(featureForUrl('/system/cost')).toBe(FEATURE.systemCost)
+    expect(featureForUrl('/evolution/candidates')).toBe(FEATURE.evolution)
+    expect(featureForUrl('/evolution/candidates/cand_1/publish')).toBe(FEATURE.evolution)
   })
 
   it('未知/既有路径 → null（不误标）', () => {

@@ -1,4 +1,4 @@
-# 进度账本 — plan: C:\Users\Admin1\.claude\plans\agent-time-now-7ms-woolly-iverson.md
+# 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-18-m6-evolution-rbac-deploy.md
 
 ## 📮 前后端交接板（双方 agent 异步传纸条）
 > 本会话开始先读本节 → 处理 → 划掉。格式：[状态] 日期 · 方向 | 事项 | 期望/实际。
