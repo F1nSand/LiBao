@@ -420,3 +420,7 @@
 - Task 2: complete (commits 21966f5, typecheck ✓ lint 0err + mock 路由 node fetch 验证全过)
 - Task 3: complete (commits 25d467e, typecheck ✓ lint 0err + DOM 冒烟：5 行/筛选 1 条/抽屉契约字段/0 错误)
 - Task 4: complete (commits 824c829；docs/03 §5.13 提案落盘共享 docs（非 git 仓库）+ 交接板 [open]）
+- Task 5: complete (commits 912274c, typecheck ✓ + TopBar spec 2 PASS + DOM 冒烟：org_1 显示/表 org 列/筛选 org_2→2 行/0 错误）
+- Task 6: complete (frontend-ci workflow；就绪核查）
+      - 已就绪：Dockerfile（node:20-alpine → nginx:alpine）、nginx.conf（SSE proxy_buffering off / WS / SPA try_files）、env（dev/e2e/prod）、vite proxy。与 docs/05 §2.3/§4.1 一致。
+      - 缺口记录：①无前端 CI（本轮补 .github/workflows/frontend-ci.yml）；②docker-compose 只 db/redis，`nginx.conf` 的 `backend:8000` 无对应 service（compose 在后端仓库，需后端/部署侧协调）；③前端仓库无 git remote，无 staging/prod 流水线（托管后 workflow 即生效）。
