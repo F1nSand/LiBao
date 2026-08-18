@@ -7,6 +7,13 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[done] 2026-08-18 · ←后端 | **M6-1 RBAC + 数据隔离已落地**（285 测试全绿 + verify 14/8/6）| 与你的前端守卫完全对齐，前端零改动。
+      - **角色守卫后端兜底**：tools/kb → developer+；settings/system/evals/hooks管理/users → admin；health + hooks 公开收包 → 公开。此前这些只有前端路由守卫，API 直调可绕过，现已后端强制（40301）。
+      - **Eval 运行/结果 org 隔离**：跨 org run 返回 40414「不存在或无权访问」（HTTP 200 + 信封 code）。
+      - **用户管理**：/users 列表按 org 收敛；创建用户限本 org；admin 不能自删/自禁/自降权（防最后一个 admin 锁死）。
+      - **顺带修复**：/system/cost 原 50001（SQL 违反 GROUP BY），已修。
+      - 测试账号：seed 有 dev/dev123（developer）、viewer/viewer123（viewer）——直接登录即可验证前端守卫后的真实 403 拦截。
+
 [open] 2026-08-18 · →后端 | **经验候选区契约提案**（`/evolution/candidates*`，docs 03 §5.13）| 期望/实际：
       - 闭环（docs 06 §5）：轨迹 → 经验 → 候选区 → 验证 → 上线/回滚。**前端已实现**：types（`Candidate`，字段对齐 §5.6 变更契约）+ mock 路由（状态迁移+前置校验）+ `/system` 候选区页（EvolutionManage：筛选/搜索/详情抽屉/状态动作）。
       - 待后端：`GET /evolution/candidates`（status/search/分页）、`GET /{id}`、`POST /{id}/validate|publish|reject|rollback`。验证/发布裁决须由后端评估回归驱动（§5.5 安全边界不可自改），前端只触发请求。
@@ -424,3 +431,4 @@
 - Task 6: complete (frontend-ci workflow；就绪核查）
       - 已就绪：Dockerfile（node:20-alpine → nginx:alpine）、nginx.conf（SSE proxy_buffering off / WS / SPA try_files）、env（dev/e2e/prod）、vite proxy。与 docs/05 §2.3/§4.1 一致。
       - 缺口记录：①无前端 CI（本轮补 .github/workflows/frontend-ci.yml）；②docker-compose 只 db/redis，`nginx.conf` 的 `backend:8000` 无对应 service（compose 在后端仓库，需后端/部署侧协调）；③前端仓库无 git remote，无 staging/prod 流水线（托管后 workflow 即生效）。
+- Task 7: complete (commits c?；typecheck ✓ lint 0err(3 既有 any) / 137 单测 PASS / 23 e2e PASS（+system-evolution + settings-org）/ DOM 手测：候选区状态迁移 候选→已批准→发布 且筛选保持；降级：availability.spec + evolution store spec 覆盖 FEATURE.evolution 打标，真实后端待核验）

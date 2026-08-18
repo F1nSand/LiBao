@@ -29,7 +29,9 @@ const loading = ref(false)
 const usersUnavailable = computed(() => isUnavailable(FEATURE.users))
 
 const createVisible = ref(false)
-const createForm = reactive({ username: '', password: '', name: '', role: 'viewer' as Role, org_id: 'org_1' })
+/** 新建用户表单初始值（reset 与初始化共用同一工厂，防字段漂移） */
+const emptyCreateForm = () => ({ username: '', password: '', name: '', role: 'viewer' as Role, org_id: 'org_1' })
+const createForm = reactive(emptyCreateForm())
 
 /** 组织筛选（数据隔离：客户端过滤，不改 listUsers 契约；org_id 来自 mock/真实用户数据） */
 const orgFilter = ref('all')
@@ -83,7 +85,7 @@ async function onCreate() {
   )
   if (created === undefined) return
   createVisible.value = false
-  Object.assign(createForm, { username: '', password: '', name: '', role: 'viewer', org_id: 'org_1' })
+  Object.assign(createForm, emptyCreateForm())
   ElMessage.success('用户已创建')
   await load()
 }

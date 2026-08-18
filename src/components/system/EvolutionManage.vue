@@ -46,6 +46,14 @@ const ACTION_LABEL: Record<CandidateAction, string> = {
   rollback: '回滚',
 }
 
+/** 状态动作配置（行内操作按钮 = 循环渲染；状态机与 mock 迁移约束一致） */
+const ACTIONS: Array<{ action: CandidateAction; when: CandidateStatus; type: 'primary' | 'success' | 'warning' | 'danger' }> = [
+  { action: 'validate', when: 'candidate', type: 'primary' },
+  { action: 'reject', when: 'candidate', type: 'danger' },
+  { action: 'publish', when: 'approved', type: 'success' },
+  { action: 'rollback', when: 'published', type: 'warning' },
+]
+
 function renderField(v: unknown): string {
   if (v == null) return '未提供'
   if (Array.isArray(v)) return v.length ? v.join('；') : '未提供'
@@ -63,21 +71,17 @@ function statusTagType(status: unknown): string {
   return TAG_TYPE[status as CandidateStatus] ?? 'info'
 }
 
-function onStatusChange() {
-  void store.list()
-}
-function onSearch() {
-  void store.list()
-}
-function onClearSearch() {
+function reload() {
   void store.list()
 }
 
 async function openDetail(row: Candidate) {
+  const id = row.id
   drawerVisible.value = true
   detail.value = row
-  const d = await store.detail(row.id)
-  if (d) detail.value = d
+  const d = await store.detail(id)
+  // 竞态守卫：快速连点 A→B 时忽略 A 的迟到响应（真实后端有网络延迟时触发）
+  if (d && detail.value?.id === id) detail.value = d
 }
 
 async function doAction(row: Candidate, action: CandidateAction) {
@@ -107,7 +111,7 @@ onMounted(() => void store.list())
 <template>
   <div class="evolve">
     <div class="evolve-toolbar">
-      <el-select v-model="store.statusFilter" size="small" style="width: 140px" @change="onStatusChange">
+      <el-select v-model="store.statusFilter" size="small" style="width: 140px" @change="reload">
         <el-option v-for="o in STATUS_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
       </el-select>
       <el-input
@@ -116,8 +120,8 @@ onMounted(() => void store.list())
         placeholder="搜索标题"
         clearable
         style="width: 220px"
-        @keyup.enter="onSearch"
-        @clear="onClearSearch"
+        @keyup.enter="reload"
+        @clear="reload"
       />
       <span class="evolve-total">共 {{ store.total }} 条候选</span>
     </div>
@@ -142,38 +146,16 @@ onMounted(() => void store.list())
       </el-table-column>
       <el-table-column label="操作" width="170" fixed="right">
         <template #default="{ row }">
-          <el-button
-            v-if="row.status === 'candidate'"
-            size="small"
-            type="primary"
-            text
-            :loading="actionLoading === `${row.id}:validate`"
-            @click.stop="doAction(row, 'validate')"
-          >验证</el-button>
-          <el-button
-            v-if="row.status === 'candidate'"
-            size="small"
-            type="danger"
-            text
-            :loading="actionLoading === `${row.id}:reject`"
-            @click.stop="doAction(row, 'reject')"
-          >拒绝</el-button>
-          <el-button
-            v-if="row.status === 'approved'"
-            size="small"
-            type="success"
-            text
-            :loading="actionLoading === `${row.id}:publish`"
-            @click.stop="doAction(row, 'publish')"
-          >发布</el-button>
-          <el-button
-            v-if="row.status === 'published'"
-            size="small"
-            type="warning"
-            text
-            :loading="actionLoading === `${row.id}:rollback`"
-            @click.stop="doAction(row, 'rollback')"
-          >回滚</el-button>
+          <template v-for="a in ACTIONS" :key="a.action">
+            <el-button
+              v-if="row.status === a.when"
+              size="small"
+              :type="a.type"
+              text
+              :loading="actionLoading === `${row.id}:${a.action}`"
+              @click.stop="doAction(row, a.action)"
+            >{{ ACTION_LABEL[a.action] }}</el-button>
+          </template>
           <span v-if="['validating', 'rejected', 'rolled_back'].includes(row.status)" class="evolve-none">—</span>
         </template>
       </el-table-column>
@@ -250,5 +232,9 @@ onMounted(() => void store.list())
   color: var(--app-text-main);
   white-space: pre-wrap;
   word-break: break-word;
+}
+.mono {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
 }
 </style>

@@ -13,6 +13,14 @@ import type { Candidate, CandidateStatus } from '@/types'
 
 export type CandidateAction = 'validate' | 'publish' | 'reject' | 'rollback'
 
+/** 动作 → API 映射（闭环联合类型穷举；漏加 key 即编译错误，避免静默误路由） */
+const ACTION_API: Record<CandidateAction, (id: string) => Promise<Candidate>> = {
+  validate: validateCandidate,
+  publish: publishCandidate,
+  reject: rejectCandidate,
+  rollback: rollbackCandidate,
+}
+
 /** 经验候选区 store（docs/06 §5 契约提案）：列表 + 状态动作；后端未实现 → FEATURE.evolution 降级 */
 export const useEvolutionStore = defineStore('evolution', {
   state: () => ({
@@ -53,10 +61,7 @@ export const useEvolutionStore = defineStore('evolution', {
     },
     /** 状态动作（validate/publish/reject/rollback）成功后保持筛选重查 */
     async runAction(id: string, action: CandidateAction) {
-      if (action === 'validate') await validateCandidate(id)
-      else if (action === 'publish') await publishCandidate(id)
-      else if (action === 'reject') await rejectCandidate(id)
-      else await rollbackCandidate(id)
+      await ACTION_API[action](id)
       await this.list()
     },
   },

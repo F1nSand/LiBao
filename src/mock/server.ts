@@ -271,41 +271,23 @@ export const mockServer = {
       if (!c) return void json(res, fail(40401, '候选不存在'))
       return void json(res, ok(c))
     }
-    p = match(pathname, '/evolution/candidates/:id/validate')
-    if (method === 'POST' && p) {
-      const c = candidates.find((x) => x.id === p!.id)
-      if (!c) return void json(res, fail(40401, '候选不存在'))
-      if (c.status !== 'candidate') return void json(res, fail(40020, `状态 ${c.status} 不允许验证`))
-      c.status = 'approved'
-      c.updated_at = isoDate(0)
-      return void json(res, ok(c))
-    }
-    p = match(pathname, '/evolution/candidates/:id/publish')
-    if (method === 'POST' && p) {
-      const c = candidates.find((x) => x.id === p!.id)
-      if (!c) return void json(res, fail(40401, '候选不存在'))
-      if (c.status !== 'approved') return void json(res, fail(40020, `状态 ${c.status} 不允许发布`))
-      c.status = 'published'
-      c.updated_at = isoDate(0)
-      return void json(res, ok(c))
-    }
-    p = match(pathname, '/evolution/candidates/:id/reject')
-    if (method === 'POST' && p) {
-      const c = candidates.find((x) => x.id === p!.id)
-      if (!c) return void json(res, fail(40401, '候选不存在'))
-      if (c.status !== 'candidate') return void json(res, fail(40020, `状态 ${c.status} 不允许拒绝`))
-      c.status = 'rejected'
-      c.updated_at = isoDate(0)
-      return void json(res, ok(c))
-    }
-    p = match(pathname, '/evolution/candidates/:id/rollback')
-    if (method === 'POST' && p) {
-      const c = candidates.find((x) => x.id === p!.id)
-      if (!c) return void json(res, fail(40401, '候选不存在'))
-      if (c.status !== 'published') return void json(res, fail(40020, `状态 ${c.status} 不允许回滚`))
-      c.status = 'rolled_back'
-      c.updated_at = isoDate(0)
-      return void json(res, ok(c))
+    // 状态迁移表：candidate → 验证/拒绝 → approved/rejected → 发布 → published → 回滚 → rolled_back
+    const CANDIDATE_TRANSITIONS = {
+      validate: { from: 'candidate', to: 'approved', verb: '验证' },
+      publish: { from: 'approved', to: 'published', verb: '发布' },
+      reject: { from: 'candidate', to: 'rejected', verb: '拒绝' },
+      rollback: { from: 'published', to: 'rolled_back', verb: '回滚' },
+    } as const
+    for (const [action, spec] of Object.entries(CANDIDATE_TRANSITIONS)) {
+      p = match(pathname, `/evolution/candidates/:id/${action}`)
+      if (method === 'POST' && p) {
+        const c = candidates.find((x) => x.id === p!.id)
+        if (!c) return void json(res, fail(40401, '候选不存在'))
+        if (c.status !== spec.from) return void json(res, fail(40020, `状态 ${c.status} 不允许${spec.verb}`))
+        c.status = spec.to
+        c.updated_at = isoDate(0)
+        return void json(res, ok(c))
+      }
     }
 
     /* ===== 会话 / 消息 ===== */
