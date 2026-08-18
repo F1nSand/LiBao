@@ -7,6 +7,11 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[open] 2026-08-18 · →后端 | **经验候选区契约提案**（`/evolution/candidates*`，docs 03 §5.13）| 期望/实际：
+      - 闭环（docs 06 §5）：轨迹 → 经验 → 候选区 → 验证 → 上线/回滚。**前端已实现**：types（`Candidate`，字段对齐 §5.6 变更契约）+ mock 路由（状态迁移+前置校验）+ `/system` 候选区页（EvolutionManage：筛选/搜索/详情抽屉/状态动作）。
+      - 待后端：`GET /evolution/candidates`（status/search/分页）、`GET /{id}`、`POST /{id}/validate|publish|reject|rollback`。验证/发布裁决须由后端评估回归驱动（§5.5 安全边界不可自改），前端只触发请求。
+      - 未落地前：前端 FEATURE.evolution 降级（404 → EmptyState），无回归。
+
 [open] 2026-08-18 · →后端 | **逐轮 cost 契约扩展**（`message` 封口事件 payload + `Message` REST 加 `cost`）| 期望/实际：
       - 现状：中间轮 `message` 封口载荷无 cost，`Message`/`TokenUsage` 无 cost 字段；仅最终 `done` 带 cost 且不落库 → 逐轮成本不可见、刷新丢失。
       - 修法：`message` 事件 payload 加 `cost`（每轮 emit）；`serialize_message`/`Message` REST 带 `cost` 并逐轮持久化（数据模型 message.token_usage jsonb 已含 cost 字段，只差表面化）。
@@ -413,3 +418,4 @@
 ## 2026-08-18 M6 平台化前端（L3）执行中
 - Task 1: complete (commits 764e302, npx vitest run src/api/evolution.spec.ts src/api/availability.spec.ts → 11 PASS)
 - Task 2: complete (commits 21966f5, typecheck ✓ lint 0err + mock 路由 node fetch 验证全过)
+- Task 3: complete (commits 25d467e, typecheck ✓ lint 0err + DOM 冒烟：5 行/筛选 1 条/抽屉契约字段/0 错误)
