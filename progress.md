@@ -409,3 +409,6 @@
 - 测试：+7 单测（format +2 / MessageBubble +4 / useChatStream +1，含 message 自带 token_usage 优先不覆盖用例）。
 - 验证：typecheck ✓ / lint 0err（3 既有 any）/ **130 单测 PASS** / **21 e2e PASS**（chat-stream 工具卡回归守卫更新注释：默认折叠仍 not.toContainText('6*7')）。
 - 不做（记录）：Ledger 单元格多行展开、collapsedAll 混合态、sticky group 头（轨迹打磨只做两小项）；逐轮 cost 等后端认领。
+
+## 2026-08-18 M6 平台化前端（L3）执行中
+- Task 1: complete (commits 764e302, npx vitest run src/api/evolution.spec.ts src/api/availability.spec.ts → 11 PASS)

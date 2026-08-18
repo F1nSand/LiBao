@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ChatRequest, KbCollection, ToolDefinition } from '@/types'
 import {
   users,
+  candidates,
   DEFAULT_AGENT_ID,
   tools,
   conversations,
@@ -252,6 +253,60 @@ export const mockServer = {
     }
     p = match(pathname, '/users/:id')
     if (method === 'DELETE' && p) return void json(res, ok(null))
+
+    /* ===== 经验候选区（M6 契约提案 docs/06 §5：候选 → 验证 → 批准 → 发布 → 回滚） ===== */
+    if (method === 'GET' && pathname === '/evolution/candidates') {
+      const page = Number(query.get('page') ?? 1)
+      const size = Number(query.get('page_size') ?? 20)
+      const status = query.get('status')
+      const search = query.get('search')?.trim()
+      let list = candidates
+      if (status) list = list.filter((c) => c.status === status)
+      if (search) list = list.filter((c) => c.title.includes(search))
+      return void json(res, ok(paginate(list, page, size)))
+    }
+    p = match(pathname, '/evolution/candidates/:id')
+    if (method === 'GET' && p) {
+      const c = candidates.find((x) => x.id === p!.id)
+      if (!c) return void json(res, fail(40401, '候选不存在'))
+      return void json(res, ok(c))
+    }
+    p = match(pathname, '/evolution/candidates/:id/validate')
+    if (method === 'POST' && p) {
+      const c = candidates.find((x) => x.id === p!.id)
+      if (!c) return void json(res, fail(40401, '候选不存在'))
+      if (c.status !== 'candidate') return void json(res, fail(40020, `状态 ${c.status} 不允许验证`))
+      c.status = 'approved'
+      c.updated_at = isoDate(0)
+      return void json(res, ok(c))
+    }
+    p = match(pathname, '/evolution/candidates/:id/publish')
+    if (method === 'POST' && p) {
+      const c = candidates.find((x) => x.id === p!.id)
+      if (!c) return void json(res, fail(40401, '候选不存在'))
+      if (c.status !== 'approved') return void json(res, fail(40020, `状态 ${c.status} 不允许发布`))
+      c.status = 'published'
+      c.updated_at = isoDate(0)
+      return void json(res, ok(c))
+    }
+    p = match(pathname, '/evolution/candidates/:id/reject')
+    if (method === 'POST' && p) {
+      const c = candidates.find((x) => x.id === p!.id)
+      if (!c) return void json(res, fail(40401, '候选不存在'))
+      if (c.status !== 'candidate') return void json(res, fail(40020, `状态 ${c.status} 不允许拒绝`))
+      c.status = 'rejected'
+      c.updated_at = isoDate(0)
+      return void json(res, ok(c))
+    }
+    p = match(pathname, '/evolution/candidates/:id/rollback')
+    if (method === 'POST' && p) {
+      const c = candidates.find((x) => x.id === p!.id)
+      if (!c) return void json(res, fail(40401, '候选不存在'))
+      if (c.status !== 'published') return void json(res, fail(40020, `状态 ${c.status} 不允许回滚`))
+      c.status = 'rolled_back'
+      c.updated_at = isoDate(0)
+      return void json(res, ok(c))
+    }
 
     /* ===== 会话 / 消息 ===== */
     if (method === 'GET' && pathname === '/conversations') {
