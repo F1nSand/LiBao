@@ -412,3 +412,4 @@
 
 ## 2026-08-18 M6 平台化前端（L3）执行中
 - Task 1: complete (commits 764e302, npx vitest run src/api/evolution.spec.ts src/api/availability.spec.ts → 11 PASS)
+- Task 2: complete (commits 21966f5, typecheck ✓ lint 0err + mock 路由 node fetch 验证全过)

@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useSystemStore } from '@/stores/system'
+import { useEvolutionStore } from '@/stores/evolution'
 import { formatDate } from '@/utils/format'
 import type { SystemLog } from '@/types'
 import TraceTimeline from '@/components/business/TraceTimeline.vue'
 import CostChart from '@/components/business/CostChart.vue'
 import EvalManage from '@/components/system/EvalManage.vue'
+import EvolutionManage from '@/components/system/EvolutionManage.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
-/** 系统监控/日志（docs/02 §4 / docs/03 §5.8）：运行日志 + trace + 评估 + 成本 */
+/** 系统监控/日志（docs/02 §4 / docs/03 §5.8）：运行日志 + trace + 评估 + 成本 + 候选区（M6） */
 const store = useSystemStore()
+const evolStore = useEvolutionStore()
 
 const tab = ref('logs')
 const logsFilter = reactive({ trace_id: '', level: '' })
@@ -43,7 +46,7 @@ function onRowClick(row: SystemLog) {
     <div class="app-page-header">
       <div>
         <h2 class="app-page-title">系统</h2>
-        <p class="app-page-subtitle">运行日志 / trace 全链路 / 评估 / 成本</p>
+        <p class="app-page-subtitle">运行日志 / trace 全链路 / 评估 / 成本 / 候选区</p>
       </div>
     </div>
 
@@ -113,6 +116,14 @@ function onRowClick(row: SystemLog) {
         <CostChart :data="store.cost" />
         </template>
         <EmptyState v-else text="后端暂未实现成本接口" />
+      </el-tab-pane>
+
+      <!-- 候选区（docs/06 §5 契约提案，M6）：持续进化闭环管理 -->
+      <el-tab-pane label="候选区" name="evolution">
+        <template v-if="!evolStore.unavailable">
+        <EvolutionManage />
+        </template>
+        <EmptyState v-else text="后端暂未实现候选区接口" />
       </el-tab-pane>
     </el-tabs>
 
