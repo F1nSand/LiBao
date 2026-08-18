@@ -432,3 +432,4 @@
       - 已就绪：Dockerfile（node:20-alpine → nginx:alpine）、nginx.conf（SSE proxy_buffering off / WS / SPA try_files）、env（dev/e2e/prod）、vite proxy。与 docs/05 §2.3/§4.1 一致。
       - 缺口记录：①无前端 CI（本轮补 .github/workflows/frontend-ci.yml）；②docker-compose 只 db/redis，`nginx.conf` 的 `backend:8000` 无对应 service（compose 在后端仓库，需后端/部署侧协调）；③前端仓库无 git remote，无 staging/prod 流水线（托管后 workflow 即生效）。
 - Task 7: complete (commits c?；typecheck ✓ lint 0err(3 既有 any) / 137 单测 PASS / 23 e2e PASS（+system-evolution + settings-org）/ DOM 手测：候选区状态迁移 候选→已批准→发布 且筛选保持；降级：availability.spec + evolution store spec 覆盖 FEATURE.evolution 打标，真实后端待核验）
+- Gate 修复: complete (commits c?；R1 openDetail 竞态守卫 / S1 动作按钮配置循环 / S2 mock 迁移表 / S3 store Record 映射 / S4 reload 合并 / S5 createForm 工厂 / .mono 样式；typecheck ✓ lint 0err 137 单测 23 e2e 全绿）
