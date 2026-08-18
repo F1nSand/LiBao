@@ -75,6 +75,8 @@ export interface Message {
   attachments?: AttachmentRef[]
   tool_calls?: ToolCallRecord[]
   token_usage?: TokenUsage
+  /** 单条消息成本（¥；契约扩展提案：逐轮 cost 后端 emit/持久化后可用，mock 演示） */
+  cost?: number
   trace_id?: string
   /** 轮次序号（逐轮消息：一轮思考 = 一条消息；同一 turn 内排序用） */
   round?: number

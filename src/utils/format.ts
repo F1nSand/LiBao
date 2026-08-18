@@ -1,4 +1,5 @@
 /** 格式化工具（docs/02 §3 utils/） */
+import type { TokenUsage } from '@/types'
 
 export function formatBytes(bytes: number | undefined | null): string {
   if (bytes == null) return '-'
@@ -31,6 +32,22 @@ export function formatTime(ms: number | undefined | null): string {
 export function truncate(s: string | undefined | null, max = 40): string {
   if (!s) return ''
   return s.length > max ? `${s.slice(0, max)}…` : s
+}
+
+/** token 用量摘要（气泡 usage footer / 轨迹台账）：total_tokens 优先，否则 prompt/completion */
+export function formatTokens(u: TokenUsage | undefined | null): string {
+  if (!u) return ''
+  if (u.total_tokens != null) return `${u.total_tokens} tok`
+  const p = u.prompt_tokens ?? 0
+  const c = u.completion_tokens ?? 0
+  return `${p}/${c} tok`
+}
+
+/** 成本（¥）：≥0.01 两位小数，更小保留四位（避免 ¥0.00 丢失信息）；与 SystemView/CostChart 币种一致 */
+export function formatCost(c: number | undefined | null): string {
+  if (c == null) return ''
+  const s = c >= 0.01 ? c.toFixed(2) : c.toFixed(4)
+  return `¥${s}`
 }
 
 function safeJson(v: unknown): string {

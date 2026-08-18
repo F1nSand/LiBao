@@ -14,7 +14,7 @@ test.describe('对话流式（核心演示）', () => {
     await expect(page.locator('.markdown-body').first()).toContainText('42', { timeout: 15_000 })
     await expect(page.locator('.tool-card')).toHaveCount(1, { timeout: 10_000 })
     await expect(page.locator('.tool-card').first()).toContainText('完成')
-    // Bug 2 回归守卫：工具卡不得再展示输入参数（calculator input 含表达式）
+    // 回归守卫：工具卡默认折叠，入参（calculator input 含表达式）不直接展示；点「参数」才回放
     await expect(page.locator('.tool-card').first()).not.toContainText('6*7')
     // Bug 1 回归守卫：一轮完成后输入框恢复可用
     await expect(page.locator('.composer textarea')).toBeEnabled({ timeout: 10_000 })

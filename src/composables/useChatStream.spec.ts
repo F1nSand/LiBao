@@ -105,18 +105,36 @@ describe('useChatStream 状态机', () => {
     await cs.start(chatReq as never)
     chatHandlers!.onEvent(ev('message_start', 1, { message_id: 'm1', agent_id: 'a', conversation_id: 'c', task_id: 't1' }))
     chatHandlers!.onEvent(ev('token', 2, { text: '检索中' }))
-    chatHandlers!.onEvent(ev('message', 3, { message: { id: 'm1', conversation_id: 'c', role: 'assistant', content: '检索中', tool_calls: [], created_at: 'x' } }))
+    chatHandlers!.onEvent(ev('message', 3, { message: { id: 'm1', conversation_id: 'c', role: 'assistant', content: '检索中', tool_calls: [], created_at: 'x' }, token_usage: { total_tokens: 180 }, cost: 0.0008 }))
     // 轮1 追加 + 段复位，但跨轮上下文保留
     expect(persisted).toHaveLength(1)
     expect(cs.state.segments).toHaveLength(0)
     expect(cs.state.partialText).toBe('')
     expect(cs.state.taskId).toBe('t1')
     expect(cs.state.conversationId).toBe('c')
-    // 下一轮 token + done 追加最后一条
+    // 封口载荷的 token_usage/cost 透传到追加消息
+    const sealed = persisted[0] as { token_usage?: { total_tokens: number }; cost?: number }
+    expect(sealed.token_usage?.total_tokens).toBe(180)
+    expect(sealed.cost).toBe(0.0008)
+    // 下一轮 token + done 追加最后一条（done 顶层 token_usage/cost 兜底附到最终消息）
     chatHandlers!.onEvent(ev('token', 4, { text: '答案' }))
-    chatHandlers!.onEvent(ev('done', 5, { message_id: 'm2', message: { id: 'm2', conversation_id: 'c', role: 'assistant', content: '答案', tool_calls: [], created_at: 'x' } }))
+    chatHandlers!.onEvent(ev('done', 5, { message_id: 'm2', message: { id: 'm2', conversation_id: 'c', role: 'assistant', content: '答案', tool_calls: [], created_at: 'x' }, token_usage: { total_tokens: 84 }, cost: 0.0012 }))
     expect(persisted).toHaveLength(2)
+    const final = persisted[1] as { token_usage?: { total_tokens: number }; cost?: number }
+    expect(final.token_usage?.total_tokens).toBe(84)
+    expect(final.cost).toBe(0.0012)
     expect(cs.state.finished).toBe(true)
+  })
+
+  it('message 封口：message 自带 token_usage/cost 时优先，不被载荷顶层覆盖', async () => {
+    const persisted: unknown[] = []
+    const cs = useChatStream({ onPersistedMessage: (m) => persisted.push(m) })
+    await cs.start(chatReq as never)
+    chatHandlers!.onEvent(ev('message_start', 1, { message_id: 'm1', agent_id: 'a', conversation_id: 'c', task_id: 't1' }))
+    chatHandlers!.onEvent(ev('message', 3, { message: { id: 'm1', conversation_id: 'c', role: 'assistant', content: 'x', token_usage: { total_tokens: 999 }, cost: 0.0099, tool_calls: [], created_at: 'x' }, token_usage: { total_tokens: 180 }, cost: 0.0008 }))
+    const sealed = persisted[0] as { token_usage?: { total_tokens: number }; cost?: number }
+    expect(sealed.token_usage?.total_tokens).toBe(999)
+    expect(sealed.cost).toBe(0.0099)
   })
 
   it('tool_call → 建卡；占位→回填 done', async () => {

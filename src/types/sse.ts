@@ -90,6 +90,8 @@ export interface DonePayload {
 export interface MessageSealPayload {
   message_id?: string
   token_usage?: TokenUsage
+  /** 本轮成本（¥；契约扩展提案，后端实现前 mock 演示，前端防御式渲染） */
+  cost?: number
   message: Message
 }
 

@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import type { TokenUsage } from '@/types'
 import type { TrajectoryCell, TrajectoryTurn } from '@/utils/trajectory'
 import { cellMatches, kindColor, kindLabel } from '@/utils/trajectory'
-import { formatDuration } from '@/utils/format'
+import { formatDuration, formatTokens } from '@/utils/format'
 
 /** 事件台账（docs/02 §6.3）：Turn → Group → Cell；折叠 / 搜索 / 行选中 */
 const props = defineProps<{
@@ -83,13 +82,6 @@ function toggleGroup(t: TrajectoryTurn, step: number) {
   collapsedGroups.value = s
 }
 
-function formatTokens(u: TokenUsage | undefined): string {
-  if (!u) return ''
-  if (u.total_tokens != null) return `${u.total_tokens} tok`
-  const p = u.prompt_tokens ?? 0
-  const c = u.completion_tokens ?? 0
-  return `${p}/${c} tok`
-}
 </script>
 
 <template>

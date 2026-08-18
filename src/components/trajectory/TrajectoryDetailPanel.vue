@@ -73,7 +73,7 @@ const diffSegments = computed(() =>
           </el-tab-pane>
         </template>
 
-        <!-- 工具：入参 / 结果 / Schema / 时序 -->
+        <!-- 工具：入参 / 结果 / 时序（Schema 数据不携带，不设占位 tab） -->
         <template v-else>
           <el-tab-pane label="入参" name="payload">
             <JsonViewer v-if="cell.input !== undefined" :data="cell.input" />
@@ -82,12 +82,6 @@ const diffSegments = computed(() =>
           <el-tab-pane label="结果" name="result">
             <JsonViewer v-if="cell.output !== undefined" :data="cell.output" />
             <div v-else class="tj-placeholder">No result captured</div>
-          </el-tab-pane>
-          <el-tab-pane label="Schema" name="schema">
-            <div class="tj-metrics">
-              <div class="tj-metric"><span class="tj-metric-label">工具</span><span class="tj-metric-value mono">{{ cell.toolName ?? '—' }}</span></div>
-            </div>
-            <div class="tj-placeholder">Schema unavailable（轨迹数据未携带工具 schema）</div>
           </el-tab-pane>
           <el-tab-pane label="时序" name="timing">
             <div class="tj-metrics">

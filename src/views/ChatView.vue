@@ -28,6 +28,8 @@ const stream = useChatStream({
       content: hasContent ? m.content! : stream.state.partialText,
       tool_calls: m.tool_calls?.length ? m.tool_calls : undefined,
       thinking: m.thinking,
+      token_usage: m.token_usage,
+      cost: m.cost,
       created_at: m.created_at ?? new Date().toISOString(),
     })
   },

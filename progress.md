@@ -7,6 +7,11 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[open] 2026-08-18 · →后端 | **逐轮 cost 契约扩展**（`message` 封口事件 payload + `Message` REST 加 `cost`）| 期望/实际：
+      - 现状：中间轮 `message` 封口载荷无 cost，`Message`/`TokenUsage` 无 cost 字段；仅最终 `done` 带 cost 且不落库 → 逐轮成本不可见、刷新丢失。
+      - 修法：`message` 事件 payload 加 `cost`（每轮 emit）；`serialize_message`/`Message` REST 带 `cost` 并逐轮持久化（数据模型 message.token_usage jsonb 已含 cost 字段，只差表面化）。
+      - 前端已就绪：types（`MessageSealPayload.cost`/`Message.cost`）+ mock `sealEvent` 演示 + UI 防御式渲染（气泡 footer `180 tok · ¥0.0008`）。
+
 [done] 2026-08-17 · ←后端 | **thinking 发射 + 持久化 + 逐轮即时落库已实现**（277 测试全绿 + ruff）| 与你契约一致，前端零改动。
       - **thinking 事件**：SSE 每轮 agent_execute 的 reasoning_content 增量发射（payload `{text, ts}`，前端累积到一轮一条）；token/message 仍剥 thinking。
       - **thinking 持久化**：`Message.thinking` 列（迁移 0010）；`serialize_message`/`serialize_trajectory_node` 带 thinking（轨迹单元格附思考）。
@@ -394,3 +399,13 @@
   - 会话加载/切换仍强制滚动到底（messages 引用变化 watch）。
 - 验证：typecheck ✓ / lint 0err / 123 单测 PASS / 21 e2e PASS / DOM 手测（贴底发消息自动跟随 top 滚到新底；滚走 top=0 发消息未拉回、内容增长 h 1749）。
 - 排障：首轮 e2e 大面积失败 = 5173 残留 dev server 被 playwright reuseExistingServer 复用（登录超时），清端口后 21 全绿，非代码问题。
+
+## 2026-08-18 前端遗留收尾（L2）：工具卡参数回放 + 逐轮 token/cost footer + 轨迹打磨 + 修存档
+- 计划：C:\Users\Admin1\.claude\plans\agent-twinkling-lantern.md
+- **A 工具卡参数回放**：ToolCallCard 加 `input/output/durationMs` props + 「参数」toggle（默认折叠，展开后入参/输出走 JsonViewer 或 pre + 耗时）；MessageBubble 透传（流式 `card.structured`、持久化 `fromRecord` 已映射）。
+- **B 逐轮 token_usage footer**（纯前端真实数据）：useChatStream `message`/`done` 事件把载荷顶层 `token_usage`/`cost` 透传到追加消息（message 自带优先不覆盖）；ChatView.onPersistedMessage 补 `token_usage`/`cost`；MessageBubble 气泡下 `.msg-usage`（`formatTokens` + `formatCost`）。
+- **C 逐轮 cost**（契约 [open]）：types `MessageSealPayload.cost`/`Message.cost`；mock `sealEvent` 带 token_usage+cost（附 message 落库镜像后端持久化）；交接板 [open] → 后端（message 封口 payload + serialize_message 加 cost）。UI 防御式。
+- **D 轨迹打磨**：TrajectoryTimeline tooltip 两行（第二行入参摘要，`#content` 插槽 + popper-class + 非 scoped pre-line 样式）；TrajectoryDetailPanel 删 Schema 占位 tab；`formatTokens` 从 TrajectoryLedger 抽到 `utils/format.ts` 共享（Reuse）。
+- 测试：+7 单测（format +2 / MessageBubble +4 / useChatStream +1，含 message 自带 token_usage 优先不覆盖用例）。
+- 验证：typecheck ✓ / lint 0err（3 既有 any）/ **130 单测 PASS** / **21 e2e PASS**（chat-stream 工具卡回归守卫更新注释：默认折叠仍 not.toContainText('6*7')）。
+- 不做（记录）：Ledger 单元格多行展开、collapsedAll 混合态、sticky group 头（轨迹打磨只做两小项）；逐轮 cost 等后端认领。

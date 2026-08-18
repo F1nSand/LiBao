@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 import { streamChatAt, streamTaskResume } from '@/api/sse'
 import type { ChatRequest, SseEnvelope, TokenUsage } from '@/types'
-import type { AgentSwitchPayload, MessageSealPayload, ToolResultPayload } from '@/types'
+import type { AgentSwitchPayload, DonePayload, Message, MessageSealPayload, ToolResultPayload } from '@/types'
 import { flushNow, throttleByRaf } from '@/utils/rAF'
 
 /**
@@ -271,19 +271,37 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
         // 逐轮消息封口（docs/03 §3 多消息扩展）：一轮思考（文本+工具）完成，追加为独立消息 + 复位段
         flushText()
         flushNow()
-        opts.onPersistedMessage?.((p as MessageSealPayload).message)
+        const seal = p as MessageSealPayload
+        // 透传本轮 token_usage/cost（封口载荷顶层字段；message 自带则优先，避免覆盖后端 serialize_message）
+        let msg = seal.message
+        if ((!msg.token_usage && seal.token_usage) || (msg.cost == null && seal.cost != null)) {
+          msg = { ...msg }
+          if (!msg.token_usage && seal.token_usage) msg.token_usage = seal.token_usage
+          if (msg.cost == null && seal.cost != null) msg.cost = seal.cost
+        }
+        opts.onPersistedMessage?.(msg)
         sealRound()
         break
       }
       case 'done': {
         flushText()
         flushNow()
-        state.tokenUsage = p.token_usage
-        state.cost = p.cost
+        const done = p as DonePayload
+        state.tokenUsage = done.token_usage
+        state.cost = done.cost
         state.finished = true
         state.streaming = false
         state.status = 'done'
-        opts.onPersistedMessage?.(p.message)
+        // 同上：done 顶层 token_usage/cost 兜底附到最终消息（仅最终轮有 cost）
+        const m = done.message as Message | undefined
+        if (m && ((!m.token_usage && done.token_usage) || (m.cost == null && done.cost != null))) {
+          const msg = { ...m }
+          if (!msg.token_usage && done.token_usage) msg.token_usage = done.token_usage
+          if (msg.cost == null && done.cost != null) msg.cost = done.cost
+          opts.onPersistedMessage?.(msg)
+        } else {
+          opts.onPersistedMessage?.(done.message)
+        }
         break
       }
       case 'error': {

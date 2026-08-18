@@ -1,4 +1,4 @@
-import type { ChatRequest, Message, SseEnvelope, SseEventType, ToolCallRecord } from '@/types'
+import type { ChatRequest, Message, SseEnvelope, SseEventType, TokenUsage, ToolCallRecord } from '@/types'
 import { delay, randHex, uid } from './util'
 import { DEFAULT_AGENT_ID, messages } from './db'
 
@@ -34,25 +34,31 @@ function tok(text: string, ms = 160): SseScriptItem {
 
 function doneEvent(message: Message, tokenUsage?: Record<string, unknown>): SseScriptItem {
   // 落库：刷新页面/重进会话时从 GET /conversations/{id}/messages 拉取能保留（前端不再 done 后 refresh，改为流式内容补齐 append）
-  if (!messages[message.conversation_id]) messages[message.conversation_id] = []
-  messages[message.conversation_id].push(message)
+  const usage = (tokenUsage ?? { prompt_tokens: 48, completion_tokens: 36, total_tokens: 84 }) as TokenUsage
+  const m = { ...message, token_usage: usage, cost: 0.0012 }
+  if (!messages[m.conversation_id]) messages[m.conversation_id] = []
+  messages[m.conversation_id].push(m)
   return {
     type: 'done',
     payload: {
       message_id: message.id,
-      token_usage: tokenUsage ?? { prompt_tokens: 48, completion_tokens: 36, total_tokens: 84 },
-      cost: 0.0012,
-      message,
+      token_usage: usage,
+      cost: m.cost,
+      message: m,
     },
     delayMs: delay(120),
   }
 }
 
-/** 逐轮消息封口（docs/03 §3 多消息）：一轮思考完成 → message 事件 + 落库（与 doneEvent 同） */
-function sealEvent(message: Message): SseScriptItem {
-  if (!messages[message.conversation_id]) messages[message.conversation_id] = []
-  messages[message.conversation_id].push(message)
-  return { type: 'message', payload: { message }, delayMs: delay(120) }
+/** 逐轮消息封口（docs/03 §3 多消息）：一轮思考完成 → message 事件 + 落库（与 doneEvent 同）。
+ * token_usage/cost 附到 message 上落库（镜像真实后端按轮持久化），并随封口载荷下发。 */
+function sealEvent(message: Message, tokenUsage?: TokenUsage, cost?: number): SseScriptItem {
+  const m = { ...message }
+  if (tokenUsage) m.token_usage = tokenUsage
+  if (cost != null) m.cost = cost
+  if (!messages[m.conversation_id]) messages[m.conversation_id] = []
+  messages[m.conversation_id].push(m)
+  return { type: 'message', payload: { message: m, token_usage: tokenUsage, cost }, delayMs: delay(120) }
 }
 
 /** 简单四则运算（demo 用） */
@@ -169,20 +175,24 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
       delayMs: delay(200),
     },
     // 轮1 封口：thinking + 检索文本 + web_search 工具（独立消息，思考链可见）
-    sealEvent({
-      id: messageId,
-      conversation_id: conversationId,
-      role: 'assistant',
-      content: round1Text,
-      thinking: round1Thinking,
-      attachments: [],
-      tool_calls: [
-        { tool_call_id: toolCallId, tool_name: 'web_search', input: { query: content }, output: { hits: summaryLines.length }, status: 'done', position: 0, duration_ms: 812 },
-      ] satisfies ToolCallRecord[],
-      round: 0,
-      trace_id: `tr_${randHex(12)}`,
-      created_at: now,
-    }),
+    sealEvent(
+      {
+        id: messageId,
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: round1Text,
+        thinking: round1Thinking,
+        attachments: [],
+        tool_calls: [
+          { tool_call_id: toolCallId, tool_name: 'web_search', input: { query: content }, output: { hits: summaryLines.length }, status: 'done', position: 0, duration_ms: 812 },
+        ] satisfies ToolCallRecord[],
+        round: 0,
+        trace_id: `tr_${randHex(12)}`,
+        created_at: now,
+      },
+      { prompt_tokens: 120, completion_tokens: 60, total_tokens: 180 },
+      0.0008,
+    ),
     tok(finalText),
     doneEvent(
       {

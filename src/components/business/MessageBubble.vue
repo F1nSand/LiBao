@@ -5,7 +5,7 @@ import type { StreamState, ToolCallCardState } from '@/composables/useChatStream
 import MarkdownRenderer from '@/components/common/MarkdownRenderer.vue'
 import ToolCallCard from './ToolCallCard.vue'
 import AttachmentBubble from './AttachmentBubble.vue'
-import { toolCallSummary } from '@/utils/format'
+import { formatCost, formatTokens, toolCallSummary } from '@/utils/format'
 
 /**
  * 消息气泡（docs/02 §5.3/§5.4.3）：
@@ -108,6 +108,14 @@ function toggleThinking(i: number): void {
 }
 
 const role = computed(() => (props.stream ? 'assistant' : props.message?.role ?? 'user'))
+
+/** 逐轮 token_usage/cost footer（docs/03 §3 多消息扩展）：仅持久化消息路径，防御式（无数据即空） */
+const usageText = computed(() => {
+  if (props.stream) return ''
+  const tok = formatTokens(props.message?.token_usage)
+  const cost = formatCost(props.message?.cost)
+  return [tok, cost].filter(Boolean).join(' · ')
+})
 </script>
 
 <template>
@@ -134,6 +142,9 @@ const role = computed(() => (props.stream ? 'assistant' : props.message?.role ??
               :tool-name="item.card.tool_name"
               :status="item.card.status"
               :error="item.card.error"
+              :input="item.card.input"
+              :output="item.card.structured"
+              :duration-ms="item.card.durationMs"
             />
             <div v-else-if="item.kind === 'agent'" class="agent-switch">
               <el-icon :size="13"><Switch /></el-icon>
@@ -156,6 +167,7 @@ const role = computed(() => (props.stream ? 'assistant' : props.message?.role ??
         <div v-if="parts.text" class="msg-text">
           <MarkdownRenderer :raw="parts.text.content" :streaming="parts.text.streaming" />
         </div>
+        <div v-if="usageText" class="msg-usage">{{ usageText }}</div>
         <div v-if="!parts.activity.length && !parts.text && !stream" class="msg-empty">…</div>
       </template>
     </div>
@@ -265,5 +277,11 @@ const role = computed(() => (props.stream ? 'assistant' : props.message?.role ??
 }
 .msg-empty {
   color: var(--app-text-muted);
+}
+.msg-usage {
+  font-size: 11px;
+  color: var(--app-text-muted);
+  margin-top: 4px;
+  padding-left: 2px;
 }
 </style>

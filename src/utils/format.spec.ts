@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatBytes, formatDate, formatDuration, toolCallSummary, truncate } from './format'
+import { formatBytes, formatCost, formatDate, formatDuration, formatTokens, toolCallSummary, truncate } from './format'
 
 describe('format 工具', () => {
   it('formatBytes', () => {
@@ -32,5 +32,21 @@ describe('format 工具', () => {
     expect(toolCallSummary('web_search', { query: '什么是 SSE', limit: 5 })).toBe('调用 web_search：什么是 SSE, 5')
     expect(toolCallSummary('time_now', '')).toBe('调用 time_now')
     expect(toolCallSummary('demo', { a: { b: 1 } })).toContain('调用 demo')
+  })
+
+  it('formatTokens：total_tokens 优先，否则 prompt/completion', () => {
+    expect(formatTokens({ total_tokens: 180 })).toBe('180 tok')
+    expect(formatTokens({ prompt_tokens: 120, completion_tokens: 60 })).toBe('120/60 tok')
+    expect(formatTokens(undefined)).toBe('')
+    expect(formatTokens(null)).toBe('')
+  })
+
+  it('formatCost：≥0.01 两位小数，更小四位；无数据显示空', () => {
+    expect(formatCost(0.0012)).toBe('¥0.0012')
+    expect(formatCost(0.0008)).toBe('¥0.0008')
+    expect(formatCost(1.5)).toBe('¥1.50')
+    expect(formatCost(0.01)).toBe('¥0.01')
+    expect(formatCost(null)).toBe('')
+    expect(formatCost(undefined)).toBe('')
   })
 })

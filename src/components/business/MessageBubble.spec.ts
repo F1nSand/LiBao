@@ -79,4 +79,74 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     expect(w.find('.msg-text').text()).toContain('调用 calculator：(3+4)*2-1')
     expect(w.find('.msg-activity .tool-card').exists()).toBe(true)
   })
+
+  it('工具卡：入参/输出/耗时透传，「参数」展开可回放', async () => {
+    const toolMsg: Message = {
+      id: 'm3',
+      conversation_id: 'c1',
+      role: 'assistant',
+      content: '已检索',
+      tool_calls: [
+        {
+          tool_call_id: 'tc1',
+          tool_name: 'web_search',
+          input: { query: 'SSE' },
+          output: { hits: 3 },
+          status: 'done',
+          position: 0,
+          duration_ms: 812,
+        },
+      ],
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const w = mount(MessageBubble, { props: { message: toolMsg } })
+    const card = w.find('.msg-activity .tool-card')
+    expect(card.exists()).toBe(true)
+    // 默认收起：无 .tool-params
+    expect(card.find('.tool-params').exists()).toBe(false)
+    expect(card.find('.tool-toggle').text()).toContain('参数')
+    // 点击展开 → 入参 + 输出 + 耗时可见
+    await card.find('.tool-toggle').trigger('click')
+    expect(card.find('.tool-params').exists()).toBe(true)
+    expect(card.find('.tool-params').text()).toContain('入参')
+    expect(card.find('.tool-params').text()).toContain('输出')
+    expect(card.find('.tool-params').text()).toContain('812ms')
+  })
+
+  it('工具卡：无入参/输出时不显示「参数」toggle', () => {
+    const noParamsMsg: Message = {
+      id: 'm5',
+      conversation_id: 'c1',
+      role: 'assistant',
+      content: '已执行',
+      tool_calls: [
+        { tool_call_id: 'tc1', tool_name: 'some_tool', input: undefined, output: undefined, status: 'done', position: 0 },
+      ],
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const w = mount(MessageBubble, { props: { message: noParamsMsg } })
+    expect(w.find('.tool-toggle').exists()).toBe(false)
+  })
+
+  it('逐轮 token_usage/cost → 回复气泡下方 usage footer', () => {
+    const msg: Message = {
+      id: 'm4',
+      conversation_id: 'c1',
+      role: 'assistant',
+      content: '答案',
+      token_usage: { prompt_tokens: 120, completion_tokens: 60, total_tokens: 180 },
+      cost: 0.0008,
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const w = mount(MessageBubble, { props: { message: msg } })
+    const usage = w.find('.msg-usage')
+    expect(usage.exists()).toBe(true)
+    expect(usage.text()).toContain('180 tok')
+    expect(usage.text()).toContain('¥0.0008')
+  })
+
+  it('无 token_usage/cost 时不渲染 usage footer', () => {
+    const w = mount(MessageBubble, { props: { message: asstMsg } })
+    expect(w.find('.msg-usage').exists()).toBe(false)
+  })
 })

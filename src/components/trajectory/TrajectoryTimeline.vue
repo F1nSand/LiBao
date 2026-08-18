@@ -93,6 +93,8 @@ const spans = computed(() =>
       toolTip: `${kindLabel(c.kind)}${c.toolName ? ` · ${c.toolName}` : ''} · ${formatTime(c.startedAt)}${
         c.durationMs != null ? ` · ${formatDuration(c.durationMs)}` : ''
       }`,
+      // 第二行：tool 单元格展示入参摘要（cell.text 已含工具名 + 截断入参）
+      toolParams: c.kind === 'tool' && c.text ? c.text : undefined,
     }
   }),
 )
@@ -253,8 +255,12 @@ function onKeydown(e: KeyboardEvent) {
             @mousedown.stop
             @click.stop="emit('select', s.index)"
           >
-            <el-tooltip placement="top" :content="s.toolTip">
+            <el-tooltip placement="top" popper-class="tj-tip">
               <div class="tj-span-fill" />
+              <template #content>
+                <div class="tj-tip-line">{{ s.toolTip }}</div>
+                <div v-if="s.toolParams" class="tj-tip-line tj-tip-params">{{ s.toolParams }}</div>
+              </template>
             </el-tooltip>
           </div>
         </div>
@@ -361,5 +367,19 @@ function onKeydown(e: KeyboardEvent) {
   border-left: 1px solid var(--app-primary);
   border-right: 1px solid var(--app-primary);
   pointer-events: none;
+}
+</style>
+
+<!-- el-tooltip popper teleport 到 body，scoped 样式无效 → 非 scoped 块（popper-class="tj-tip"） -->
+<style>
+.tj-tip {
+  line-height: 1.5;
+}
+.tj-tip-params {
+  color: var(--app-text-secondary, #6b7280);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
