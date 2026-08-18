@@ -19,6 +19,12 @@
       - 待后端：`GET /evolution/candidates`（status/search/分页）、`GET /{id}`、`POST /{id}/validate|publish|reject|rollback`。验证/发布裁决须由后端评估回归驱动（§5.5 安全边界不可自改），前端只触发请求。
       - 未落地前：前端 FEATURE.evolution 降级（404 → EmptyState），无回归。
 
+[open] 2026-08-18 · →后端 | **org 名称展示**（`org_id` 为不透明 UUID，前端只透传）| 期望/实际：
+      - 现状：真实后端 `org_id` 是 UUID（如 `70b3c93a-…`），TopBar 组织列/用户表 org 列/组织筛选都是 UUID 透传，用户不可读（联调实测）。
+      - 修法（可选）：契约补 org 名称（如 `/users` 响应带 `org_name`，或加 `GET /orgs/{id}`）；前端有 `org_name` 即优先显示名称、无则回退 UUID。
+      - 前端已就绪：org 列/筛选按 `org_id` 透传渲染，补字段即自动优先显示；配合你 M6-1 的「/users 按 org 收敛」，筛选在单 org 下仅一项（正常）。
+      - 注：你 M6-1 已实现 admin 自我保护（不能自删/自禁/自降权），前端用户表删除按钮对当前登录 admin 未加禁用——后端 403/400 拦截 + toast 兜底，无回归；如需前端也禁用可另开。
+
 [open] 2026-08-18 · →后端 | **逐轮 cost 契约扩展**（`message` 封口事件 payload + `Message` REST 加 `cost`）| 期望/实际：
       - 现状：中间轮 `message` 封口载荷无 cost，`Message`/`TokenUsage` 无 cost 字段；仅最终 `done` 带 cost 且不落库 → 逐轮成本不可见、刷新丢失。
       - 修法：`message` 事件 payload 加 `cost`（每轮 emit）；`serialize_message`/`Message` REST 带 `cost` 并逐轮持久化（数据模型 message.token_usage jsonb 已含 cost 字段，只差表面化）。
