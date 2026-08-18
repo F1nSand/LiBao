@@ -433,3 +433,6 @@
       - 缺口记录：①无前端 CI（本轮补 .github/workflows/frontend-ci.yml）；②docker-compose 只 db/redis，`nginx.conf` 的 `backend:8000` 无对应 service（compose 在后端仓库，需后端/部署侧协调）；③前端仓库无 git remote，无 staging/prod 流水线（托管后 workflow 即生效）。
 - Task 7: complete (commits c?；typecheck ✓ lint 0err(3 既有 any) / 137 单测 PASS / 23 e2e PASS（+system-evolution + settings-org）/ DOM 手测：候选区状态迁移 候选→已批准→发布 且筛选保持；降级：availability.spec + evolution store spec 覆盖 FEATURE.evolution 打标，真实后端待核验）
 - Gate 修复: complete (commits c?；R1 openDetail 竞态守卫 / S1 动作按钮配置循环 / S2 mock 迁移表 / S3 store Record 映射 / S4 reload 合并 / S5 createForm 工厂 / .mono 样式；typecheck ✓ lint 0err 137 单测 23 e2e 全绿）
+- M6 真实后端降级核验: PASS (VITE_USE_MOCK=false :5174 → 后端 :8000)
+      - TopBar org 显示 `管理员 · <uuid>`（真实后端 org_id 是 UUID，非 mock 的 org_1）；/system 候选区 tab → 无 .evolve-table + EmptyState「后端暂未实现候选区接口」；唯一 404 = /evolution/candidates（预期）；/settings 用户表 4 条真实数据 + org 列；0 页面错误。
+      - 备注：真实后端 org_id 为不透明 UUID（非人类可读名），组织筛选/展示是 UUID 透传，非 bug；若后续要「org 名称」需后端/契约补 org 名映射。
