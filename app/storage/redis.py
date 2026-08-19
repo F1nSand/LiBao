@@ -17,6 +17,7 @@ from app.core.config import get_settings
 TASK_QUEUE_KEY = "task:queue"
 TERMINAL_EVENTS = {"done", "error", "cancelled"}
 _IDEM_TTL_S = 3600
+TASK_OWNER_TTL_S = 86400  # task claim TTL：任务最长运行时间；worker 崩溃后自动过期，防 cancel 误路由
 
 _redis: aioredis.Redis | None = None
 
@@ -52,6 +53,14 @@ def notif_channel(user_id: str) -> str:
     return f"notif:user:{user_id}"
 
 
+def task_owner_key(task_id: str) -> str:
+    return f"task:owner:{task_id}"
+
+
+def worker_cancel_channel(instance_id: str) -> str:
+    return f"worker:cancel:{instance_id}"
+
+
 # ---- 任务队列（B1）----
 
 async def enqueue_task(payload: dict) -> bool:
@@ -71,6 +80,36 @@ async def brpop_task(timeout: float = 1.0) -> dict | None:
         return None
     _key, raw = item
     return json.loads(raw)
+
+
+# ---- 任务归属 claim（M6-3：多实例 cancel 路由）----
+
+async def claim_task(task_id: str, instance_id: str) -> None:
+    """worker 消费任务后 claim 归属；TTL 防崩溃残留（SET key value EX ttl）。Redis 不可用 → no-op。"""
+    if _redis is None:
+        return
+    await _redis.set(task_owner_key(task_id), instance_id, ex=TASK_OWNER_TTL_S)
+
+
+async def release_task_claim(task_id: str) -> None:
+    """任务结束/取消清除 claim。Redis 不可用 → no-op。"""
+    if _redis is None:
+        return
+    await _redis.delete(task_owner_key(task_id))
+
+
+async def get_task_owner(task_id: str) -> str | None:
+    """查任务归属实例（cancel 路由）；无/Redis 不可用 → None。"""
+    if _redis is None:
+        return None
+    return await _redis.get(task_owner_key(task_id))
+
+
+async def publish_cancel(instance_id: str, task_id: str) -> None:
+    """向持有实例广播 cancel 信号（PUBLISH worker:cancel:{instance_id}）。Redis 不可用 → no-op。"""
+    if _redis is None:
+        return
+    await _redis.publish(worker_cancel_channel(instance_id), json.dumps({"task_id": task_id}))
 
 
 # ---- 事件广播桥（B2，task/notification 复用）----
