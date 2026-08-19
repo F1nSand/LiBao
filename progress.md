@@ -1,4 +1,24 @@
-# 进度账本 — plan: C:\Users\Admin1\.claude\plans\immutable-inventing-breeze.md（M3）
+# 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-19-m63-multi-instance-deploy.md（M6-3）
+
+## M6-3 多实例任务亲和 + 部署上线（2026-08-19 进行中）
+
+任务清单：
+- [x] T1 instance id + Redis claim/cancel 命名层
+- [x] T2 task_worker 改造（claim + cancel 监听）
+- [x] T3 跨实例 cancel 路由
+- [x] T4 拆独立 worker
+- [x] T5 部署文件
+- [ ] T6 验证 + 收尾
+
+### 执行记录（M6-3）
+- T1 完成（commit a73b6f8）：`app/core/instance.py` get_instance_id（uuid4 进程级单例）+ `app/storage/redis.py` 新增 `task_owner_key`/`worker_cancel_channel`/`claim_task`/`release_task_claim`/`get_task_owner`/`publish_cancel` + `TASK_OWNER_TTL_S=86400`。测试 `test_instance_claim.py` 5 passed。
+- T2 完成（实现 + 测试 1 passed，**未 commit**）：`task_worker.py` `spawn_run` 内 claim 注入 + `cancel_listener`；`test_worker_cancel.py` 1 passed（SlowChatModel 挂起图 → publish_cancel → fut.cancel → claim 清除）。
+- T3 完成（实现，测试待跑）：`task_worker.py` 新增 `route_cancel`（本地 fut.cancel + 查 claim publish_cancel）；`tasks.py` cancel_task 改调 `route_cancel`；`test_cancel_cross_instance.py` 已写（待跑）。
+- T4 完成（实现，测试待跑）：`app/core/bootstrap.py`（init_runtime/cleanup_runtime）+ `app/worker.py`（独立 worker 入口）+ `main.py` lifespan 改用共享初始化、不再启动 task_worker。
+- T5 完成（文件，验证待跑）：`Dockerfile`（backend/worker 共用镜像）+ `.dockerignore` + `docker-compose.yml` 加 backend/worker/frontend（profile app）+ `ci.yml` 加 `docker build .`。
+- ⚠️ **阻塞**：Bash 权限分类器（claude-sonnet-4-6）持续超时，T2 的 commit 及 T3/T4/T5 的测试/ruff/docker 验证无法执行。恢复后需：① commit T2-T5；② 全量 pytest + ruff；③ `docker build .` + `docker compose config`；④ T6 多实例验证。
+
+---
 
 ## M6-2 持续进化闭环·经验候选区（2026-08-18 完成，plan: agent-sparkling-patterson.md，297 测试全绿 + ruff + verify_evolution 8/8）
 

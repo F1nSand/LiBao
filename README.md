@@ -100,17 +100,17 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 | **live-tail 多实例** | 单进程订阅表 | `services/task.py` `_tails` → M4 Redis 广播 |
 | **max_concurrency** ✅ M4 完整版 | 进程内 per-spec Semaphore 已强制（executor 幂等后包重试循环；默认 10） | `tools/executor.py` `_semaphore` |
 | **多确认** | 每节点每轮只确认第一个 require_confirm 工具 | `nodes/tool_execute.py` `confirmed_once` |
-| **任务取消 in-flight** ✅ M4 完整版 | `task_worker._RUNNING` 注册表 + `POST /tasks/{id}/cancel` `fut.cancel()` 真正中断运行中的图 | `orchestration/task_worker.py` |
+| **任务取消 in-flight** ✅ M6-3 跨实例 | `route_cancel`：本地 `fut.cancel()`（Redis 挂降级）+ Redis `task:owner` claim 路由 + `worker:cancel` Pub/Sub 广播到持有实例 | `orchestration/task_worker.py` |
 | **Webhook/事件触发（docs 03 §5.10）** | 4 端点（hooks CRUD + 事件接收）未实现 | `api/routers/hooks.py`（后续） |
 | **事件安全点/裁决器** ✅ M4 完整版最小闭环 | 进程内收件箱 + route 轮边界排空 + 规则裁决（regular 进 context；urgent/light 预留）；`initiate_demo` 占位→回填工具已落地 | `services/events.py` + `nodes/route.py` + `builtin/initiate_demo.py` |
-| **任务亲和调度** | 单实例 MVP 下 worker 天然单消费者（BRPOP）；多实例需实例 id + task:claim + per-instance 队列 | 本轮不做，接缝标注（docs 05） |
+| **任务亲和调度** ✅ M6-3 已实现 | 独立 worker 进程（`python -m app.worker`）+ instance id（uuid4）+ Redis `task:owner` claim（TTL 24h）+ 跨实例 cancel 路由 | `core/instance.py` + `storage/redis.py` + `worker.py` |
 | **agent_switch 持久化** | 纯流式事件，Message 无持久化字段 | 协调项（前端 done 后指示条消失）；需则加 message JSONB 列 |
 | **占位 TTL 看门狗** | `initiate_*` 占位→回填已落地，TTL 超时置失败未做 | `placeholder_events`（task 表）+ 定时器（后续） |
 | **M5 评估/日志** ✅ 完整化 | 配对比较 + 评估集 seed（smoke 8 + m5_core 20 条五层）+ `verify_eval.sh` + CI 门禁；`/system/cost` SQL 聚合 | `services/eval.py` + `scripts/verify_eval.sh` |
 | **hooks/webhook** ✅ M6 前落地 | `webhook_configs` + `/hooks/{tool_id}` 接收（x-hook-token 鉴权 + x-idempotency-key 去重）→ 事件入队安全点消费 | `routers/hooks.py` + `services/webhook.py` |
 | **事件 urgent 档** ✅ M6 前落地 | `arbitrate` 分类，urgent 置顶进 context（紧急优先）；light 预留 | `services/events.py` + `nodes/route.py` |
 | **占位 TTL 看门狗** ✅ M6 前落地 | 占位任务超 TTL 轮边界惰性回填 error；任务表 `placeholder_events` 写端留后续 | `nodes/route.py` `PLACEHOLDER_TTL_S` |
-| **任务亲和调度** | 单实例 MVP 下 worker 天然单消费者（BRPOP）；多实例需实例 id + task:claim + per-instance 队列 | 多实例接缝（M6 部署） |
+| **任务亲和调度** ✅ M6-3 已实现 | 拆独立 worker + claim + 跨实例 cancel；compose 全栈 backend/worker/frontend 用 `--profile app` 启动 | `docker-compose.yml` |
 | **M6 RBAC/进化** | `user.role` 已存 | `api/deps.py` |
 
 其他：Redis 服务已起未用（M4 多实例 SSE 广播 / 任务队列）；CORS 已配 `localhost:5173`。
