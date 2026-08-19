@@ -15,7 +15,7 @@ from app.core.errors import ERR_TASK_NOT_FOUND, AppError
 from app.core.events import sse_emitter
 from app.core.logging import get_trace_id
 from app.orchestration.chat_stream import resume_stream_events
-from app.orchestration.task_worker import running_task, spawn_run
+from app.orchestration.task_worker import route_cancel, spawn_run
 from app.services.agent import AgentService
 from app.services.serializers import serialize_task
 from app.services.task import TaskService, subscribe, unsubscribe
@@ -138,10 +138,8 @@ async def cancel_task(
 ):
     task = await TaskService().get_owned(db, task_id, user.id)
     await TaskService().cancel(db, task)
-    # M4 完整版：真正中断 in-flight 图（CancelledError 沿 graph.astream / LLM ainvoke 传播中止）
-    fut = running_task(str(task.id))
-    if fut is not None and not fut.done():
-        fut.cancel()
+    # M6-3：跨实例 cancel 路由（本地 fut.cancel 降级 + 查 claim 向持有实例广播）
+    await route_cancel(str(task.id))
     return ok()
 
 

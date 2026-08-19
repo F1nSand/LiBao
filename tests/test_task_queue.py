@@ -14,7 +14,7 @@ from app.services.task import TaskService
 from app.services.task_queue import TaskQueueService
 from app.storage.db import init_db, set_sessionmaker
 from app.storage.models import AgentConfig, Org, RunLog, User
-from app.storage.redis import close_redis, get_redis, init_redis
+from app.storage.redis import close_redis, get_redis, get_task_owner, init_redis
 from app.storage.repositories.task import TaskRepository
 from tests.conftest import requires_db, requires_redis
 
@@ -72,6 +72,7 @@ async def test_enqueue_submit_worker_runs_to_done(queue_fixture):
         assert t.status == "done"
         logs = (await session.execute(select(RunLog).where(RunLog.task_id == task_id))).scalars().all()
         assert len(logs) >= 1  # run_log 带 task_id 落库
+    assert await get_task_owner(str(task_id)) is None  # M6-3：done 后 claim 清除
 
 
 async def test_enqueue_resume_denied_cancels(queue_fixture):

@@ -6,13 +6,24 @@ BRPOP timeout=1 让 worker 周期性观察 stop_event，优雅退出（先 stop 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import logging
 import uuid
 from typing import Any
 
+from app.core.instance import get_instance_id
 from app.core.logging import set_trace_id
 from app.orchestration.task_run import resume_task_graph, run_task_graph
-from app.storage.redis import brpop_task
+from app.storage.redis import (
+    brpop_task,
+    claim_task,
+    get_redis,
+    get_task_owner,
+    publish_cancel,
+    release_task_claim,
+    worker_cancel_channel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +54,7 @@ def spawn_run(
     key = str(task_id)
 
     async def _runner() -> None:
+        await claim_task(key, get_instance_id())  # M6-3：进入即 claim 归属（Redis 挂则 no-op）
         try:
             if approved is not None:
                 await resume_task_graph(
@@ -56,6 +68,7 @@ def spawn_run(
                 )
         finally:
             _RUNNING.pop(key, None)
+            await release_task_claim(key)  # M6-3：结束/取消必清 claim
 
     fut = asyncio.create_task(_runner())
     _RUNNING[key] = fut
@@ -96,3 +109,39 @@ async def task_worker(graph: Any, sessionmaker: Any, stop: asyncio.Event) -> Non
         except Exception as exc:  # noqa: BLE001  redis 抖动不退出
             logger.warning("task worker loop error: %s", exc)
             await asyncio.sleep(0.5)
+
+
+async def cancel_listener(instance_id: str) -> None:
+    """监听 worker:cancel:{instance_id}：收到跨实例 cancel 信号 → running_task(task_id).cancel()。
+
+    由调用方 cancel 退出（无终止哨兵——cancel 信号是持续订阅，非一次性）。
+    """
+    r = get_redis()
+    if r is None:
+        return
+    pubsub = r.pubsub()
+    await pubsub.subscribe(worker_cancel_channel(instance_id))
+    try:
+        async for msg in pubsub.listen():
+            if msg.get("type") != "message":
+                continue
+            data = json.loads(msg["data"])
+            fut = running_task(data.get("task_id"))
+            if fut is not None and not fut.done():
+                fut.cancel()
+    finally:
+        with contextlib.suppress(Exception):
+            await pubsub.aclose()
+
+
+async def route_cancel(task_id: str) -> None:
+    """跨实例 cancel 路由（M6-3）：本地 fut.cancel（降级路径）+ 查 claim 向持有实例广播（正常路径）。
+
+    两条路径互斥（任务只在一个进程跑）：本地 fut 存在即降级，claim 存在即 worker 实例。都执行不误伤。
+    """
+    fut = running_task(task_id)
+    if fut is not None and not fut.done():
+        fut.cancel()
+    owner = await get_task_owner(task_id)
+    if owner is not None:
+        await publish_cancel(owner, task_id)
