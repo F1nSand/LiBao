@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # ---- 通用 ----
     app_env: str = "dev"
     debug: bool = True
+    # SQLAlchemy echo 独立于 debug：debug=true 时不再全量刷引擎 SQL 日志（启动同步会打印数千条）。
+    # 需调 SQL 时显式设 SQL_ECHO=true。
+    sql_echo: bool = False
     base_url: str = "/api/v1"
     log_level: str = "INFO"
 

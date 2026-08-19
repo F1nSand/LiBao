@@ -136,23 +136,43 @@ class ToolService:
         """
         repo = ToolDefinitionRepository(db)
         rows = await repo.list_for_org(org_id, limit=10000) if org_id else await repo.list_for_org_all()
+        # MCP 行重建需读 mcp_servers：先批量取齐（一条 IN 查询），避免逐行 N+1（全量启动可达上千行）。
+        servers_by_id = await self._load_mcp_servers(db, [r for r in rows if r.mcp_source])
         for row in rows:
             spec = get_by_name(row.name)
             if spec is not None and org_id is not None:
                 set_enabled(spec.id, row.enabled)
             elif row.mcp_source:
-                await self._sync_mcp_spec(db, row)
+                self._sync_mcp_spec(row, servers_by_id)
 
-    async def _sync_mcp_spec(self, db: AsyncSession, row: ToolDefinition) -> None:
-        """MCP 行重建：读 mcp_servers 配置 → build_mcp_spec 注册 → enabled 跟随 DB 与源状态。"""
+    async def _load_mcp_servers(
+        self, db: AsyncSession, mcp_rows: list[ToolDefinition]
+    ) -> dict[uuid.UUID, Any]:
+        """批量预取 MCP 源行（含软删，语义同 get_by_id_including_deleted），按 server_id 映射。"""
+        from sqlalchemy import select
+
+        from app.storage.models.mcp_server import McpServer
+
+        ids: set[uuid.UUID] = set()
+        for row in mcp_rows:
+            try:
+                ids.add(uuid.UUID(row.mcp_source.removeprefix("mcp:")))
+            except ValueError:
+                continue  # M2：脏 mcp_source 行跳过，不击穿启动
+        if not ids:
+            return {}
+        stmt = select(McpServer).where(McpServer.id.in_(ids))
+        return {s.id: s for s in (await db.execute(stmt)).scalars()}
+
+    def _sync_mcp_spec(self, row: ToolDefinition, servers_by_id: dict[uuid.UUID, Any]) -> None:
+        """MCP 行重建：build_mcp_spec 注册 → enabled 跟随 DB 与源状态（server 已批量预取）。"""
         from app.services.mcp import build_mcp_spec, conn_config_from_server, mcp_spec_id
-        from app.storage.repositories.mcp_server import McpServerRepository
 
         try:
             server_id = uuid.UUID(row.mcp_source.removeprefix("mcp:"))
         except ValueError:
             return  # M2：脏 mcp_source 行跳过，不击穿启动
-        server = await McpServerRepository(db).get_by_id_including_deleted(server_id)
+        server = servers_by_id.get(server_id)
         if server is None:
             return  # 源行彻底缺失：无法重建（spec 缺席 = 不可见）
         usable = row.enabled and server.enabled and server.deleted_at is None

@@ -31,6 +31,6 @@ def get_sessionmaker() -> Any:
 
 def init_db(settings: Settings | None = None) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     settings = settings or get_settings()
-    engine: AsyncEngine = create_async_engine(settings.database_url, echo=settings.debug)
+    engine: AsyncEngine = create_async_engine(settings.database_url, echo=settings.sql_echo)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     return engine, sessionmaker
