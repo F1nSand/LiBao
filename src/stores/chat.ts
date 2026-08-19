@@ -49,6 +49,7 @@ export const useChatStore = defineStore('chat', {
 
     async loadMessages(id: string, page = 1) {
       const res = await listMessages(id, { page, page_size: 50 })
+      if (id !== this.currentId) return // 响应序守卫：快速连点时慢响应不覆盖新选择
       this.currentMessages = res.items
     },
 

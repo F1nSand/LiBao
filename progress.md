@@ -458,3 +458,17 @@
 - 测试：MessageBubble.spec +2（thinking 折叠/展开切换 + 短文本无按钮）；e2e/scroll.spec.ts 新增（c_scroll 新开到底→上滚 200→切走 c_002→切回恢复原位）。
 - 验证：typecheck ✓ / lint 0err(3 既有 any) / **139 单测 PASS** / **24 e2e PASS** / DOM 手测（:5199）：按钮 top-aligned+right-pinned+不在文本底 全 true、padBottom 96px、bufferGap 96、新会话贴底 true、0 错误。
 - 备注：后端 08-18 已实现 经验候选区 + 逐轮 cost（前端零改动，FEATURE.evolution 转正式渲染；逐轮成本真实显示）。真实后端候选区/成本 UI 正式核验留作下轮。
+
+## 2026-08-19 修复：切换会话滚动"闪到中间再滚到底"（L2，仅前端）
+- 计划：C:\Users\Admin1\.claude\plans\vast-wandering-hamster.md
+- 症状：每次进入/切换会话，消息列表瞬间出现在真实高度约 1/3 处（content-visibility 估算 120px/行），再滚到最下方——明显闪跳。
+- 根因：`.msg-row` `content-visibility:auto` 让 `scrollHeight` 按估算逐帧物化；旧 `forceScrollBottom`/`restoreScroll` 的 nextTick+双 rAF+60ms 固定落地打在渲染级联中途，scrollTop 停在估算位置。
+- **修复**（MessageList.vue）：
+  - `scrollToStable(target, hide)` rAF 稳定循环替代固定落地：每帧追目标直到 `scrollHeight` 连续 3 帧稳定（content-visibility 渲染推进 = scrollHeight 变化 → 自动续追；maxFrames 120 兜底；finalize 晚到渲染续追 2 次）。
+  - 切换会话 hide=true：追帧期加 `.msg-list--settling { visibility:hidden }`，最终位置就绪后一次展示——彻底消除可见闪跳。
+  - `onScroll` 判别：循环自身程序化滚动（`scrollTop===lastSetTop`）忽略不记账；用户滚走（偏离）→ `scrollRun++` 作废跑批 + 恢复正常记账/pinned（保住"流式期滚走不拉回"）。`Math.floor` 防浮点 scrollTop mismatch。
+  - `onBeforeUnmount` 作废挂起跑批。
+- **相邻竞态修复**（chat.ts）：`loadMessages` 加响应序守卫 `if (id !== this.currentId) return`——快速连点会话时慢响应不覆盖新选择（也防 scrollPositions 记错 key）。
+- 验证：typecheck ✓ / lint 0err(3 既有 any) / **139 单测 PASS** / **24 e2e PASS**（含 scroll.spec 滚动回归）。
+- 量化手测（:5199）：场景1 进入长会话 settling add@53→remove@127ms、揭示即贴底（距底 gap=0，中间带帧 0）无闪；场景2 上滚 200 切走再回 settling add@49→remove@125ms、揭示 scrollTop=200 全程稳定、恢复原位不闪。
+- 不做（记录）：不引入 ResizeObserver（容器 flex 定高、内容增长不触发；观察最后一行随流式失效）；`scrollPositions`/`pinned` 语义不变。

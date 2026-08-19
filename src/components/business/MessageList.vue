@@ -4,7 +4,7 @@ const scrollPositions = new Map<string, number>()
 </script>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Message } from '@/types'
 import type { StreamState } from '@/composables/useChatStream'
 import MessageBubble from './MessageBubble.vue'
@@ -32,6 +32,12 @@ const pinned = ref(true)
 /** 当前会话 id（滚动位置记账/恢复用）：messages[0].conversation_id 优先 */
 const conversationId = computed(() => props.messages[0]?.conversation_id ?? props.stream?.conversationId ?? '')
 
+/** 滚动跑批状态：scrollRun 令牌作废旧跑批；autoScroll 标记程序化滚动中；settling 隐藏追帧；lastSetTop 供 handler 判别用户滚动 */
+let scrollRun = 0
+let autoScroll = false
+let settling = false
+let lastSetTop = -1
+
 function updatePinned(): void {
   const el = containerRef.value
   if (!el) return
@@ -40,50 +46,99 @@ function updatePinned(): void {
   if (conversationId.value) scrollPositions.set(conversationId.value, el.scrollTop)
 }
 
+/**
+ * scroll 事件：循环自身程序化滚动（scrollTop === lastSetTop）忽略，不记账中间值；
+ * 用户主动滚走（偏离循环目标）→ 作废跑批，恢复正常记账 + pinned 重算（保住"滚走不拉回"）。
+ */
+function onScroll(): void {
+  const el = containerRef.value
+  if (!el) return
+  if (autoScroll) {
+    if (el.scrollTop === lastSetTop) return
+    scrollRun++
+    autoScroll = false
+    if (settling) {
+      settling = false
+      el.classList.remove('msg-list--settling')
+    }
+  }
+  updatePinned()
+}
+
 onMounted(() => {
-  containerRef.value?.addEventListener('scroll', updatePinned, { passive: true })
+  containerRef.value?.addEventListener('scroll', onScroll, { passive: true })
 })
 onBeforeUnmount(() => {
-  containerRef.value?.removeEventListener('scroll', updatePinned)
+  scrollRun++ // 作废挂起跑批
+  containerRef.value?.removeEventListener('scroll', onScroll)
 })
 
 // 内容变化（流式/新消息/完成）：仅当贴底时跟随（保持吸底），滚走则不动
 watch(
   () => [props.messages.length, props.stream?.partialText, props.stream?.finished, props.stream?.interrupted],
   () => {
-    if (pinned.value) forceScrollBottom()
+    if (pinned.value) scrollToStable('bottom')
   },
 )
 
-/** 强制滚动到底。`.msg-row` 用 content-visibility 延迟渲染（scrollHeight 是估算值）→ 双 rAF + timeout 等真实高度后再拉 */
-function forceScrollBottom(): void {
+/**
+ * rAF 稳定循环滚动到目标。`.msg-row` 的 content-visibility 让 scrollHeight 按估算逐帧物化，
+ * 固定 nextTick+双 rAF+timeout 落地会打在级联中途（闪到中间再滚到底）——
+ * 改为每帧追目标，直到 scrollHeight 连续 3 帧稳定（尾部物化）再收尾。
+ * hide=true（切换会话）：追帧期间 visibility:hidden，最终位置就绪后一次展示，消除闪跳。
+ * 用户滚动偏离循环目标时 onScroll 作废跑批。
+ */
+function scrollToStable(target: 'bottom' | number, hide = false): void {
   const el = containerRef.value
   if (!el) return
-  const scroll = () => {
-    el.scrollTop = el.scrollHeight
+  const run = ++scrollRun
+  const maxTop = () => Math.max(0, el.scrollHeight - el.clientHeight)
+  const want = () => (target === 'bottom' ? maxTop() : Math.min(target, maxTop()))
+  if (hide && !settling) {
+    settling = true
+    el.classList.add('msg-list--settling')
   }
-  void nextTick(() => {
-    scroll()
-    requestAnimationFrame(scroll)
-    requestAnimationFrame(scroll)
-    setTimeout(scroll, 60)
-  })
-}
+  autoScroll = true
+  let lastH = -1
+  let stable = 0
+  let frame = 0
+  let recheck = 0
 
-/** 恢复某会话上次滚动位置（与 forceScrollBottom 相同落地节奏：nextTick + 双 rAF + timeout 等真实高度） */
-function restoreScroll(top: number): void {
-  const el = containerRef.value
-  if (!el) return
-  const scroll = () => {
-    el.scrollTop = top
+  const finalize = () => {
+    if (run !== scrollRun) return // 新跑批接管，不动状态
+    if (recheck < 2 && el.scrollHeight !== lastH) {
+      // 晚到图片/懒渲染：续追
+      recheck++
+      lastH = el.scrollHeight
+      requestAnimationFrame(step)
+      return
+    }
+    autoScroll = false
+    lastSetTop = Math.floor(want()) // floor：scrollTop 赋值是整数，避免浮点 mismatch 误判用户滚动
+    el.scrollTop = lastSetTop
+    if (settling) {
+      settling = false
+      el.classList.remove('msg-list--settling')
+    }
+    updatePinned() // 唯一记账时机：最终位置 + 最终 pinned
   }
-  void nextTick(() => {
-    scroll()
-    requestAnimationFrame(scroll)
-    requestAnimationFrame(scroll)
-    setTimeout(scroll, 60)
-    updatePinned()
-  })
+
+  const step = () => {
+    if (run !== scrollRun) return
+    lastSetTop = Math.floor(want())
+    el.scrollTop = lastSetTop
+    const reached =
+      target === 'bottom'
+        ? el.scrollTop + el.clientHeight >= el.scrollHeight - 1
+        : Math.abs(el.scrollTop - want()) <= 1
+    if (reached && el.scrollHeight === lastH) stable++
+    else stable = 0
+    lastH = el.scrollHeight
+    if (stable >= 3 || ++frame >= 120) finalize()
+    else requestAnimationFrame(step)
+  }
+
+  requestAnimationFrame(step)
 }
 
 /** 会话加载/切换（messages 引用替换）：有滚动记录 → 恢复原位；无记录（新/没开过）→ 默认到底；与吸底跟随 watch 并存 */
@@ -94,9 +149,9 @@ watch(
     const saved = conversationId.value ? scrollPositions.get(conversationId.value) : undefined
     if (saved != null) {
       pinned.value = false // 立即取消贴底，防恢复期间被内容 watch 拉回
-      restoreScroll(saved)
+      scrollToStable(saved, true)
     } else {
-      forceScrollBottom()
+      scrollToStable('bottom', true)
     }
   },
   { immediate: true },
@@ -133,6 +188,10 @@ defineExpose({ containerRef })
   padding: 60px 0;
   color: var(--app-text-muted);
   font-size: var(--app-font-size-sm);
+}
+/* 切换会话追帧期隐藏（scrollToStable hide）：最终位置就绪后一次展示，消除"闪到中间再滚到底" */
+.msg-list--settling {
+  visibility: hidden;
 }
 /* 屏外消息跳过渲染（浏览器原生），未渲染时按 ~120px 估算高度，滚动条稳定 */
 .msg-row {
