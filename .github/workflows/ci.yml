@@ -41,6 +41,7 @@ jobs:
       - run: uv run alembic upgrade head
       - run: uv run python -m app.seed
       - run: uv run pytest tests/
+      - run: docker build .  # M6-3：校验镜像可构建（不 push）
 
   # M5 评估回归门禁（docs 06 §7 / docs 05 §3）：改动 agent_config/工具/编排 → 评估回归通过才发布。
   # 用 seed 的 smoke_eval（8 条）控 token 成本；LLM_API_KEY 未配置时该 job 跳过（不阻塞 PR）。

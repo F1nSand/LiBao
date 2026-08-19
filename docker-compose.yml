@@ -1,6 +1,7 @@
-# 开发环境基础设施（docs 05 §2.1）
-# 说明：M0/M1 阶段后端与前端以本地进程运行，compose 只承载后端依赖的两个服务。
-# 注意：LangGraph checkpointer 表由应用 lifespan 的 saver.setup() 创建，与业务表同库。
+# Agent 平台编排（docs 05 §2.1）。
+# - db/redis：开发基础设施（start.sh 默认只起这两个，backend/frontend 以本地进程跑）。
+# - backend/worker/frontend：容器化全栈，用 `docker compose --profile app up -d` 启动（M6-3）。
+# 说明：LangGraph checkpointer 表由应用 lifespan 的 saver.setup() 创建，与业务表同库。
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -29,6 +30,46 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  backend:
+    build: .
+    profiles: ["app"]
+    env_file: .env  # LLM key 等敏感配置从宿主机 .env 注入（.env 不进镜像）
+    environment:
+      # 容器内 DB/Redis 用服务名，覆盖 .env 里的 localhost
+      DATABASE_URL: postgresql+asyncpg://agent:agent@db:5432/agent
+      CHECKPOINT_DSN: postgresql://agent:agent@db:5432/agent
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    profiles: ["app"]
+    command: ["sh", "-c", "uv run python -m app.worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://agent:agent@db:5432/agent
+      CHECKPOINT_DSN: postgresql://agent:agent@db:5432/agent
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build: ../FrontEnd  # 前端 Dockerfile 已是 nginx 静态 + /api 反代（SSE buffering off）
+    profiles: ["app"]
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
 
 volumes:
   pgdata: {}
