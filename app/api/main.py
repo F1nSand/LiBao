@@ -37,13 +37,12 @@ from app.api.routers import (
 from app.api.routers import (
     settings as settings_router,
 )
+from app.core.bootstrap import cleanup_runtime, init_runtime
 from app.core.config import get_settings
 from app.core.errors import ERR_INTERNAL, AppError, http_status_for
 from app.core.logging import set_trace_id, setup_logging
 from app.orchestration.checkpointer import PostgresCheckpointer
 from app.orchestration.graph import build_graph
-from app.storage.db import init_db
-from app.tools.builtin import register_builtin_tools
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -66,58 +65,18 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    register_builtin_tools()
-    engine, sessionmaker = init_db(settings)
-    app.state.engine = engine
-    app.state.sessionmaker = sessionmaker
-    # DB tool_definition.enabled 为事实源 → 启动时同步 registry。
-    # F7：默认组织 enabled 同步（停用状态重启不丢）；I5：全量 MCP 行重建（其他 org 的 MCP 工具不失效）。
-    from app.services.tool import ToolService
-
-    # M3：sessionmaker 桥（kb_search 工具/记忆注入在五层约束下直连存储层）
-    from app.storage.db import set_sessionmaker
-    from app.storage.redis import init_redis
-
-    set_sessionmaker(sessionmaker)
-    # M4：Redis 存储层（任务队列/事件广播/幂等缓存）；连接失败不影响启动（调用方降级）
-    app.state.redis = init_redis(settings)
-    async with sessionmaker() as session:
-        from sqlalchemy import select
-
-        from app.storage.models.org import Org
-
-        org = (
-            await session.execute(select(Org).where(Org.name == "默认组织", Org.deleted_at.is_(None)))
-        ).scalar_one_or_none()
-        if org is not None:
-            await ToolService().sync_registry_from_db(session, org.id)
-            # M6 前：启用 provider → 覆盖 Settings（LLM 即用配置的 provider）
-            from app.services.provider import ProviderService
-
-            await ProviderService().sync_active_to_settings(session, org.id)
-        await ToolService().sync_registry_from_db(session)  # 全量：MCP 行重建（不动已有 spec enabled）
+    runtime = await init_runtime(settings)
+    app.state.engine = runtime.engine
+    app.state.sessionmaker = runtime.sessionmaker
+    app.state.redis = runtime.redis
     # checkpoint 表由 setup() 创建（须在 alembic upgrade head 之后，langgraph#2570 规避）
     async with PostgresCheckpointer(settings.sync_checkpoint_dsn) as saver:
         app.state.checkpointer = saver
         app.state.graph = build_graph(saver)
-        # M4：任务 worker（常驻 BRPOP 消费队列；停止顺序 = set stop → cancel → close redis）
-        from app.orchestration.task_worker import task_worker
-
-        stop_event = asyncio.Event()
-        app.state.task_worker_stop = stop_event
-        app.state.task_worker = asyncio.create_task(task_worker(app.state.graph, sessionmaker, stop_event))
-        logger.info("lifespan ready: graph compiled, checkpointer up, task worker up")
+        # M6-3：task_worker 已拆到独立 worker 进程（python -m app.worker）；backend 只做 API/SSE。
+        logger.info("lifespan ready: graph compiled, checkpointer up")
         yield
-        stop_event.set()
-        app.state.task_worker.cancel()
-        try:
-            await app.state.task_worker
-        except asyncio.CancelledError:
-            pass
-    from app.storage.redis import close_redis
-
-    await close_redis()
-    await engine.dispose()
+    await cleanup_runtime(runtime)
 
 
 def create_app() -> FastAPI:
