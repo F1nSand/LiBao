@@ -22,8 +22,9 @@ from app.tools.filesystem import resolve_workspace_path
 
 
 def workspace_root(workspace_id: uuid.UUID) -> Path:
-    """root_path 托管：{workspaces_root}/{workspace_id}（单一来源，防越权）。"""
-    return Path(get_settings().workspaces_root) / str(workspace_id)
+    """root_path 托管：{workspaces_root}/{workspace_id}（单一来源，防越权）。绝对路径（resolve），
+    避免下游 relative_to/路径校验在相对与绝对之间混用。"""
+    return (Path(get_settings().workspaces_root) / str(workspace_id)).resolve()
 
 
 class WorkspaceService:
