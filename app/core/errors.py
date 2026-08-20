@@ -28,6 +28,7 @@ ERR_HOOK_TOKEN = 40103  # webhook x-hook-token 缺失/不匹配（docs 03 §5.10
 
 # ---- 权限 403xx ----
 ERR_FORBIDDEN = 40301
+ERR_WORKSPACE_PATH_FORBIDDEN = 40302  # 路径越出工作区范围（docs 01 §7.8）
 
 # ---- 未找到 404xx ----
 ERR_CONVERSATION_NOT_FOUND = 40401

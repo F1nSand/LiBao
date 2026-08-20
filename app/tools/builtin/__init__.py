@@ -9,6 +9,7 @@ from app.tools.builtin import (
     demo_notify,
     dispatch_subagent,
     fetch_url,
+    file_ops,
     initiate_demo,
     kb_search,
     load_skill,
@@ -405,6 +406,157 @@ def register_builtin_tools() -> None:
             timeout_ms=180000,  # 嵌套 LLM 循环需放大（默认 30s 会掐断子循环）
             max_concurrency=2,
             handler=dispatch_subagent.dispatch_subagent_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_read_file",
+            name="read_file",
+            description=(
+                "读取工作区内文件内容（路径相对工作区根）。需要查看项目文件内容时使用。"
+                "反例：不要用它访问工作区外路径。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "相对工作区根的文件路径"}},
+                "required": ["path"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=False,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=15000,
+            handler=file_ops.read_file_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_write_file",
+            name="write_file",
+            description=(
+                "写/覆盖工作区内文件（路径相对工作区根，父目录自动创建）。需要创建或修改项目文件时使用。"
+                "反例：不要用它写工作区外路径。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "相对工作区根的文件路径"},
+                    "content": {"type": "string", "description": "文件内容"},
+                },
+                "required": ["path", "content"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=False,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=15000,
+            handler=file_ops.write_file_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_edit_file",
+            name="edit_file",
+            description=(
+                "编辑工作区内文件：把首次出现的 old_str 替换为 new_str（最稳妥的定向修改）。"
+                "需要精确修改文件某处时使用。反例：不要用于整文件重写（用 write_file）。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "相对工作区根的文件路径"},
+                    "old_str": {"type": "string", "description": "要替换的原文片段"},
+                    "new_str": {"type": "string", "description": "替换后的新片段"},
+                },
+                "required": ["path", "old_str", "new_str"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=False,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=15000,
+            handler=file_ops.edit_file_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_glob",
+            name="glob",
+            description=(
+                "按文件名/通配模式搜索工作区内文件（如 '**/*.py'）。需要定位文件时使用。"
+                "反例：不要用它搜索文件内容（用 grep）。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {"pattern": {"type": "string", "description": "通配模式，如 *.py 或 **/*.md"}},
+                "required": ["pattern"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=False,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=10000,
+            handler=file_ops.glob_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_grep",
+            name="grep",
+            description=(
+                "按内容搜索工作区内文件（正则/字面量，返回命中文件+行号+文本）。需要找含某内容的代码/文本时使用。"
+                "反例：不要用它找文件名（用 glob）。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "正则或字面量"},
+                    "path": {"type": "string", "description": "可选：限定搜索的目录/文件（相对工作区根）"},
+                },
+                "required": ["pattern"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=False,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=15000,
+            handler=file_ops.grep_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_bash",
+            name="bash",
+            description=(
+                "在工作区目录内执行 shell 命令（先经语义审查，破坏性/越权/外传命令会被拦截）。"
+                "需要跑脚本/构建/装依赖等无法用文件工具完成的动作时使用。反例：不要用它读写文件（用 read/write_file）。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "要执行的 shell 命令"},
+                    "cwd": {"type": "string", "description": "可选：相对工作区根的工作目录，缺省工作区根"},
+                },
+                "required": ["command"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=False,
+            require_confirm=False,  # 语义审查是动态闸门（非静态确认）
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=130000,
+            handler=file_ops.bash_handler,
             builtin=True,
         )
     )

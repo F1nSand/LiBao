@@ -12,6 +12,7 @@ from contextvars import ContextVar
 from typing import Any
 
 TOOL_ORG_ID: ContextVar[str | None] = ContextVar("tool_org_id", default=None)
+TOOL_WORKSPACE_ROOT: ContextVar[str | None] = ContextVar("tool_workspace_root", default=None)
 
 
 def set_tool_org(org_id: str | None) -> None:
@@ -20,6 +21,14 @@ def set_tool_org(org_id: str | None) -> None:
 
 def get_tool_org() -> str | None:
     return TOOL_ORG_ID.get()
+
+
+def set_tool_workspace_root(root: str | None) -> None:
+    TOOL_WORKSPACE_ROOT.set(root)
+
+
+def get_tool_workspace_root() -> str | None:
+    return TOOL_WORKSPACE_ROOT.get()
 
 
 # subagent 派发上下文：{emit, model_builder?, main_name}。emit 发 agent_switch；
