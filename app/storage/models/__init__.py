@@ -19,6 +19,7 @@ from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
 from app.storage.models.webhook import WebhookConfig
+from app.storage.models.workspace import Workspace
 
 __all__ = [
     "AgentConfig",
@@ -47,4 +48,5 @@ __all__ = [
     "ToolDefinition",
     "User",
     "WebhookConfig",
+    "Workspace",
 ]

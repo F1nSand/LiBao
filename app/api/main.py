@@ -34,6 +34,7 @@ from app.api.routers import (
     tasks,
     tools,
     users,
+    workspaces,
 )
 from app.api.routers import (
     settings as settings_router,
@@ -132,6 +133,7 @@ def create_app() -> FastAPI:
         system.router,
         evolution.router,
         skills.router,
+        workspaces.router,
     ):
         app.include_router(router, prefix=settings.base_url)
 

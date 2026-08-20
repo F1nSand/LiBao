@@ -16,6 +16,7 @@ from app.storage.models.skill import Skill
 from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
+from app.storage.models.workspace import Workspace
 from app.tools.registry import get_by_name
 
 
@@ -125,6 +126,21 @@ def serialize_skill(s: Skill) -> dict[str, Any]:
         "source": s.source,
         "enabled": s.enabled,
         "created_at": _dt(s.created_at),
+    }
+
+
+def serialize_workspace(w: Workspace) -> dict[str, Any]:
+    """工作区序列化（M7-B，docs 03 §5.14 / FrontEnd Workspace）。"""
+    return {
+        "id": str(w.id),
+        "org_id": str(w.org_id),
+        "name": w.name,
+        "description": w.description,
+        "root_path": w.root_path,
+        "system_prompt_fragment": w.system_prompt_fragment,
+        "status": w.status,
+        "created_by": str(w.created_by) if w.created_by else None,
+        "created_at": _dt(w.created_at),
     }
 
 
