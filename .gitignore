@@ -17,3 +17,4 @@ dist/
 # 运行产物
 *.log
 uploads/
+data/
