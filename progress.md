@@ -11,7 +11,7 @@
 - [x] Phase3 T6 workspace 对话 + 项目 agent 组装
 - [x] Phase3 T7 workspace_skill（filesystem skills；mcp_server.workspace_id defer）
 - [x] Phase4 T8 longterm_memory.workspace_id
-- [ ] Phase4 T9 全量回归 + 端到端
+- [x] Phase4 T9 全量回归 + 端到端（345 全绿 + ruff；workspace CRUD/文件 REST 真实 HTTP 冒烟过）
 
 ### 执行记录（M7-B）
 - Phase1（commit 89bc29c）：迁移 0013 `workspaces` 表（org 级：name/description/root_path/system_prompt_fragment/status/created_by）+ WorkspaceService（create 建真实本地目录 `{workspaces_root}/{id}` 托管）+ `/workspaces` CRUD（developer+）+ 错误码 40416/40908 + 配置 workspaces_root/command_review_model。测试 4 项。
