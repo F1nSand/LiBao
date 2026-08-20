@@ -62,7 +62,7 @@ async def create_user(
         role=req.role,
         org_id=user.org_id,  # 统一归入当前管理员组织（跨 org 写入已拒）
     )
-    return ok(serialize_user(created))
+    return ok(serialize_user(created, org_name=await UserService().get_org_name(db, created.org_id)))
 
 
 @router.patch("/users/{user_id}/role")
@@ -72,7 +72,8 @@ async def patch_user_role(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return ok(serialize_user(await UserService().change_role(db, user, user_id, req.role)))
+    target = await UserService().change_role(db, user, user_id, req.role)
+    return ok(serialize_user(target, org_name=await UserService().get_org_name(db, target.org_id)))
 
 
 @router.patch("/users/{user_id}/status")
@@ -82,7 +83,8 @@ async def patch_user_status(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return ok(serialize_user(await UserService().change_enabled(db, user, user_id, req.enabled)))
+    target = await UserService().change_enabled(db, user, user_id, req.enabled)
+    return ok(serialize_user(target, org_name=await UserService().get_org_name(db, target.org_id)))
 
 
 @router.delete("/users/{user_id}")

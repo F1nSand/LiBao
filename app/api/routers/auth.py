@@ -21,12 +21,14 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = await UserService().authenticate(db, req.username, req.password)
     if user is None:
         return fail(ERR_UNAUTHORIZED, "用户名或密码错误")
-    return ok({"token": create_access_token(user), "user": serialize_user(user)})
+    org_name = await UserService().get_org_name(db, user.org_id)
+    return ok({"token": create_access_token(user), "user": serialize_user(user, org_name=org_name)})
 
 
 @router.get("/auth/me")
-async def me(user: User = Depends(get_current_user)):
-    return ok(serialize_user(user))
+async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    org_name = await UserService().get_org_name(db, user.org_id)
+    return ok(serialize_user(user, org_name=org_name))
 
 
 @router.post("/auth/logout")

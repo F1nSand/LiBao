@@ -139,3 +139,15 @@ async def test_list_paged_filters_by_org(user_fixture):
         assert all(u["org_id"] == str(org_a.id) for u in data_a["items"])
         assert admin.username in {u["username"] for u in data_a["items"]}
         assert not any(u["username"].startswith("orgb_") for u in data_a["items"])
+
+
+async def test_list_paged_includes_org_name(user_fixture):
+    """M6 收尾：/users 响应带 org_name（前端 org 列可读名称，回退 UUID）。"""
+    sessionmaker, org, admin, dev = user_fixture
+    svc = UserService()
+    async with sessionmaker() as session:
+        data = await svc.list_paged(session, 1, 100, org_id=org.id)
+        by_username = {u["username"]: u for u in data["items"]}
+        assert by_username[admin.username]["org_name"] == org.name
+        assert by_username[admin.username]["org_id"] == str(org.id)
+        assert "org_name" in by_username[dev.username]  # 所有用户都带 org_name 字段

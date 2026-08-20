@@ -35,9 +35,30 @@ class UserService:
     ) -> dict[str, Any]:
         repo = UserRepository(db)
         items, total = await repo.list_paged(limit=page_size, offset=(page - 1) * page_size, org_id=org_id)
+        org_names = await self._org_names(db, items)
         from app.api.schemas.common import paged
 
-        return paged([serialize_user(u) for u in items], total, page, page_size)
+        return paged([serialize_user(u, org_name=org_names.get(u.org_id)) for u in items], total, page, page_size)
+
+    async def get_org_name(self, db: AsyncSession, org_id: uuid.UUID) -> str | None:
+        """查 org 名称（serialize_user 补 org_name 用）。"""
+        from sqlalchemy import select
+
+        from app.storage.models.org import Org
+
+        return (await db.execute(select(Org.name).where(Org.id == org_id))).scalar_one_or_none()
+
+    async def _org_names(self, db: AsyncSession, users: list[User]) -> dict[uuid.UUID, str]:
+        """批量查 org 名称（list_paged 一条 IN 查询，避免逐用户 N+1）。"""
+        org_ids = {u.org_id for u in users}
+        if not org_ids:
+            return {}
+        from sqlalchemy import select
+
+        from app.storage.models.org import Org
+
+        rows = (await db.execute(select(Org.id, Org.name).where(Org.id.in_(org_ids)))).all()
+        return {oid: name for oid, name in rows}
 
     async def create_user(
         self,

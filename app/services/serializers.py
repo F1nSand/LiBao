@@ -22,13 +22,14 @@ def _dt(value: Any) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def serialize_user(user: User) -> dict[str, Any]:
+def serialize_user(user: User, org_name: str | None = None) -> dict[str, Any]:
     return {
         "id": str(user.id),
         "name": user.name,
         "username": user.username,
         "role": user.role,
         "org_id": str(user.org_id),
+        "org_name": org_name,
         "enabled": user.enabled,
         "created_at": _dt(user.created_at),
     }
