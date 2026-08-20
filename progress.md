@@ -28,10 +28,9 @@
       - `serialize_message`/`Message` REST 带 `cost`（`token_usage.cost` 表面化，缺省 0.0）；逐轮 `_persist_round` 落 `token_usage`（刷新后逐轮成本可见）。
       - 数据来源：agent_execute 每轮把 `token_usage.cost` 随 AIMessage `usage_metadata` 带出 → stream_core 读入轮消息。
 
-[open] 2026-08-18 · →后端 | **org 名称展示**（`org_id` 为不透明 UUID，前端只透传）| 期望/实际：
-      - 现状：真实后端 `org_id` 是 UUID（如 `70b3c93a-…`），TopBar 组织列/用户表 org 列/组织筛选都是 UUID 透传，用户不可读（联调实测）。
-      - 修法（可选）：契约补 org 名称（如 `/users` 响应带 `org_name`，或加 `GET /orgs/{id}`）；前端有 `org_name` 即优先显示名称、无则回退 UUID。
-      - 前端已就绪：org 列/筛选按 `org_id` 透传渲染，补字段即自动优先显示；配合你 M6-1 的「/users 按 org 收敛」，筛选在单 org 下仅一项（正常）。
+[done] 2026-08-19 · ←后端 | **org 名称展示已实现**（`/users` 响应带 `org_name`）| 前端补消费即可。
+      - 后端（commit db73fd5）：`serialize_user` 补 `org_name` 字段；以下全部带真实 org name（如「默认组织」）：`GET /users`（list_paged 批量查，一条 IN 无 N+1）、`POST /auth/login`、`GET /auth/me`、`POST /users`、`PATCH /users/{id}/role`、`PATCH /users/{id}/status`。
+      - 前端待补（我之前交接板「前端已就绪」不准确，实际 TopBar.vue:35 / SettingsView.vue:218 仍是直接显示 `org_id`）：types `User` 加 `org_name?: string`；org 列渲染改 `org_name ?? org_id` 优先显示名称、回退 UUID。
       - 注：你 M6-1 已实现 admin 自我保护（不能自删/自禁/自降权），前端用户表删除按钮对当前登录 admin 未加禁用——后端 403/400 拦截 + toast 兜底，无回归；如需前端也禁用可另开。
 
 [done] 2026-08-18 · →后端 | **逐轮 cost 契约扩展**（前端原始提案）| 后端已实现（见上方 [done] 08-18 逐轮 cost 契约扩展已实现）；前端 types/mock/防御式渲染早已就绪，转正式渲染。
@@ -472,3 +471,20 @@
 - 验证：typecheck ✓ / lint 0err(3 既有 any) / **139 单测 PASS** / **24 e2e PASS**（含 scroll.spec 滚动回归）。
 - 量化手测（:5199）：场景1 进入长会话 settling add@53→remove@127ms、揭示即贴底（距底 gap=0，中间带帧 0）无闪；场景2 上滚 200 切走再回 settling add@49→remove@125ms、揭示 scrollTop=200 全程稳定、恢复原位不闪。
 - 不做（记录）：不引入 ResizeObserver（容器 flex 定高、内容增长不触发；观察最后一行随流式失效）；`scrollPositions`/`pinned` 语义不变。
+
+## 2026-08-20 修复：知识库上传后「状态/分块数/操作」不一致（L2，仅前端 + mock）
+- 计划：C:\Users\Admin1\.claude\plans\vast-wandering-hamster.md
+- 症状：空集合上传卡「已上传」直到刷新；非空集合上传立即「已索引」但 0 chunks、操作只有删除。
+- 根因（真实后端契约 uploaded→chunking→indexing→indexed，字段齐全）：
+  - ① `ChunkStatus.isProcessing` 只认 chunking/indexing，漏 uploaded → uploaded 永不轮询（空集合卡「已上传」）。
+  - ② **el-table 未设 `row-key`，按数组下标 patch，上传 unshift 后新行复用旧行（indexed 种子 doc）的 ChunkStatus 组件实例**，实例 `liveStatus` 还是旧 doc 的 'indexed'（终态→不轮询）→ 新 doc 显示「已索引」+ 自己的 0 chunks（非空集合症状）。
+  - ③ 轮询 live 态只进组件本地，不回写 store 行 → 操作列读陈旧 row.status，只有「删除」。
+- 修复：
+  - `ChunkStatus.vue`：`isProcessing` 加 `uploaded`；轮询结果经 `emit('status-change')` 回传（仅 live 值变化时）。
+  - `KbView.vue`：`<el-table row-key="id">` 按 doc id 键控（杜绝实例复用状态泄漏）；`@status-change="onStatusChange"` → `kb.patchDocument` 合并 live 态进 store 行（操作按钮随已索引响应式出现）。
+  - `stores/kb.ts`：新增 `patchDocument(id, patch)` action。
+  - `mock/server.ts`：上传返回 `status:'uploaded'`（对齐真实后端）+ `simulateKbChain` setTimeout 异步推进 uploaded→chunking→indexing→indexed+chunk_count（正常 ~1s/步、e2e fast ~150ms/步）；reindex 重置 uploaded 走同一链；**顺带修复 multipart 文件名 latin1 乱码**（中文文件名按 UTF-8 还原，真实后端正常）。
+- 测试：+4 单测（ChunkStatus.spec：uploaded 轮询启/停、live 渲染、emit）；+2 e2e（kb.spec：非空/空集合上传不刷新自动收敛 已索引+chunks>0+重索引按钮）。
+- 验证：typecheck ✓ / lint 0err(3 既有 any) / **143 单测 PASS** / **26 e2e PASS**（24 既有 + 2 新增 kb）。
+- 手测（诊断脚本，fast :5198）：上传 → 「已上传0%」→ 3s 内自动「已索引7 chunks」，全程无刷新、无轮询缺失（server 日志确认 status 轮询到位）。
+- 不做（记录）：不把检索 mock 改真实（/kb/search 硬编码片段与本次无关）；不改后端（chunk_count/status 已真实返回）。

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { ChatRequest, KbCollection, ToolDefinition } from '@/types'
+import type { ChatRequest, KbCollection, KbDocument, ToolDefinition } from '@/types'
 import {
   users,
   candidates,
@@ -71,14 +71,16 @@ function readBody(req: IncomingMessage): Promise<ParsedBody> {
         return
       }
       if (ct.includes('multipart/form-data')) {
+        // latin1 逐字节读保位置，再还原 UTF-8：浏览器按 UTF-8 发非 ASCII 文件名（如中文），latin1 直读会乱码
         const text = raw.toString('latin1')
-        const fileMatch = text.match(/filename="([^"]+)"/)
+        const fileMatch = text.match(/filename="([^"]*)"/)
         const nameMatch = text.match(/name="([^"]+)"[^\n]*\n\n([\s\S]*?)\n--/)
+        const decodeName = (s: string | undefined): string => (s ? Buffer.from(s, 'latin1').toString('utf-8') : '')
         resolve({
           files: [
             {
-              name: nameMatch?.[1] ?? 'file',
-              filename: fileMatch?.[1] ?? 'upload.bin',
+              name: decodeName(nameMatch?.[1]) || 'file',
+              filename: decodeName(fileMatch?.[1]) || 'upload.bin',
               mimeType: ct.split(';')[0] ?? 'application/octet-stream',
               size: raw.byteLength,
             },
@@ -164,6 +166,33 @@ function sendSse(
 const isSseAccept = (req: IncomingMessage) => (req.headers.accept ?? '').includes('text/event-stream')
 
 /* ---------- 主入口 ---------- */
+
+/**
+ * mock KB 处理链（对齐真实后端 kb_pipeline）：uploaded→chunking→indexing→indexed。
+ * 正常模式 ~1s/步（demo 可见推进）；e2e fast 模式 ~150ms/步（首轮轮询前收敛到可断言终态）。
+ */
+function simulateKbChain(doc: KbDocument): void {
+  const step = fast() ? 150 : 1000
+  setTimeout(() => {
+    if (doc.status === 'uploaded') {
+      doc.status = 'chunking'
+      doc.progress = 40
+    }
+  }, step)
+  setTimeout(() => {
+    if (doc.status === 'chunking') {
+      doc.status = 'indexing'
+      doc.progress = 70
+    }
+  }, step * 2)
+  setTimeout(() => {
+    if (doc.status === 'indexing') {
+      doc.status = 'indexed'
+      doc.progress = 100
+      doc.chunk_count = Math.max(1, Math.ceil((doc.size || 1024) / 512))
+    }
+  }, step * 3)
+}
 
 export const mockServer = {
   async handle(req: IncomingMessage, res: ServerResponse, _next: () => void): Promise<void> {
@@ -440,8 +469,9 @@ export const mockServer = {
     }
     if (method === 'POST' && p) {
       const file = body.files?.[0]
-      const nd = { id: uid('kbd'), collection_id: p.id, name: file?.filename ?? '文档.md', mime_type: file?.mimeType ?? 'text/markdown', size: file?.size ?? 0, status: 'chunking' as const, chunk_count: 0, progress: 10, created_at: isoDate(0) }
+      const nd = { id: uid('kbd'), collection_id: p.id, name: file?.filename ?? '文档.md', mime_type: file?.mimeType ?? 'text/markdown', size: file?.size ?? 0, status: 'uploaded' as const, chunk_count: 0, progress: 0, created_at: isoDate(0) }
       kbDocuments.unshift(nd)
+      simulateKbChain(nd)
       return void json(res, ok(nd))
     }
     p = match(pathname, '/kb/documents/:id/status')
@@ -453,8 +483,9 @@ export const mockServer = {
     if (method === 'POST' && p) {
       const d = kbDocuments.find((x) => x.id === p!.id)
       if (d) {
-        d.status = 'indexing'
-        d.progress = 40
+        d.status = 'uploaded'
+        d.progress = 0
+        simulateKbChain(d)
       }
       return void json(res, ok(d))
     }

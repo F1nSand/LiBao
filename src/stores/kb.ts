@@ -79,6 +79,10 @@ export const useKbStore = defineStore('kb', {
       await deleteDocument(id)
       if (this.currentCollectionId) await this.listDocuments(this.currentCollectionId)
     },
+    /** 轮询回写行级 live 状态（ChunkStatus status-change），使状态/分块数/操作同源实时收敛 */
+    patchDocument(id: string, patch: Partial<Pick<KbDocument, 'status' | 'chunk_count' | 'progress' | 'error'>>) {
+      this.documents = this.documents.map((d) => (d.id === id ? { ...d, ...patch } : d))
+    },
     async search(req: KbSearchRequest): Promise<KbSearchHit[]> {
       return searchKb(req)
     },

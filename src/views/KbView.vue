@@ -3,7 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useKbStore } from '@/stores/kb'
 import { formatBytes } from '@/utils/format'
-import type { KbSearchHit } from '@/types'
+import type { KbDocumentStatusDetail, KbSearchHit } from '@/types'
 import KbUpload from '@/components/business/KbUpload.vue'
 import ChunkStatus from '@/components/business/ChunkStatus.vue'
 
@@ -46,6 +46,12 @@ async function runSearch() {
     searchLoading.value = false
   }
 }
+
+/** ChunkStatus 轮询回传：合并 live 状态进 store 行（状态/分块数/操作按钮同源实时收敛） */
+function onStatusChange(p: { id: string } & Partial<KbDocumentStatusDetail>) {
+  const { id, ...patch } = p
+  kb.patchDocument(id, patch)
+}
 </script>
 
 <template>
@@ -87,13 +93,13 @@ async function runSearch() {
       <!-- 文档表 -->
       <div class="kb-docs app-card">
         <KbUpload :collection-id="kb.currentCollectionId ?? ''" @uploaded="() => kb.currentCollectionId && kb.listDocuments(kb.currentCollectionId)" />
-        <el-table :data="kb.documents" class="kb-table" size="small">
+        <el-table :data="kb.documents" row-key="id" class="kb-table" size="small">
           <el-table-column prop="name" label="文档" min-width="180" />
           <el-table-column label="大小" width="90">
             <template #default="{ row }">{{ row.size ? formatBytes(row.size) : '-' }}</template>
           </el-table-column>
           <el-table-column label="分块/索引" width="200">
-            <template #default="{ row }"><ChunkStatus :document="row" /></template>
+            <template #default="{ row }"><ChunkStatus :document="row" @status-change="onStatusChange" /></template>
           </el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
