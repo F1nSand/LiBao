@@ -29,6 +29,7 @@ from app.api.routers import (
     kb,
     memory,
     notifications,
+    skills,
     system,
     tasks,
     tools,
@@ -130,6 +131,7 @@ def create_app() -> FastAPI:
         settings_router.router,
         system.router,
         evolution.router,
+        skills.router,
     ):
         app.include_router(router, prefix=settings.base_url)
 

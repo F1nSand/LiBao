@@ -1,6 +1,21 @@
-# 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-19-m63-multi-instance-deploy.md（M6-3）
+# 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-20-m7a-main-agent-skills-mcp.md（M7-A）
 
-## M6-3 多实例任务亲和 + 部署上线（2026-08-19 进行中）
+## M7-A 主 Agent 第三方 Skills + MCP 适配（2026-08-20 进行中）
+
+任务清单：
+- [ ] T1 Skill 实体 + 迁移 0012 + 仓库
+- [ ] T2 SKILL.md 解析 + SkillService + git 导入
+- [ ] T3 Skills API 路由
+- [ ] T4 tl_load_skill meta 工具
+- [ ] T5 Skills 注入主 agent 上下文
+- [ ] T6 MCP 适配确认
+- [ ] T7 测试 + 回归
+
+### 执行记录（M7-A）
+
+---
+
+## M6-3 多实例任务亲和 + 部署上线（2026-08-19 完成）
 
 任务清单：
 - [x] T1 instance id + Redis claim/cancel 命名层
