@@ -1,18 +1,28 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useToolStore } from '@/stores/tool'
 import type { ToolDefinition } from '@/types'
 import ToolTestModal from '@/components/business/ToolTestModal.vue'
 import ToolSearchBar from '@/components/business/ToolSearchBar.vue'
 
-/** 工具管理（docs/02 §4 / docs/03 §5.5）：注册/启用开关/沙盒测试/MCP 源 */
+/** 工具管理（docs/02 §4 / docs/03 §5.5）：注册/启用开关/沙盒测试/MCP 源；元工具（tool_search 等发现层）与常规工具区分 */
 const store = useToolStore()
 
 const activeTool = ref<ToolDefinition | null>(null)
 const testVisible = ref(false)
 const createVisible = ref(false)
 const mcpVisible = ref(false)
+
+/** 类别筛选：全部 / 元工具（平台发现层，tool_search 等常驻）/ 常规工具（经 tool_search 发现） */
+const metaFilter = ref<'all' | 'meta' | 'regular'>('all')
+const filteredTools = computed(() => {
+  const list = store.tools.filter((t) =>
+    metaFilter.value === 'all' ? true : metaFilter.value === 'meta' ? !!t.meta : !t.meta,
+  )
+  if (metaFilter.value === 'all') list.sort((a, b) => Number(!!b.meta) - Number(!!a.meta))
+  return list
+})
 
 const form = reactive({
   name: '',
@@ -110,11 +120,21 @@ async function onDelete(t: ToolDefinition) {
 
     <div class="tool-search-wrap">
       <ToolSearchBar />
+      <el-radio-group v-model="metaFilter" size="small">
+        <el-radio-button value="all">全部</el-radio-button>
+        <el-radio-button value="meta">元工具</el-radio-button>
+        <el-radio-button value="regular">常规工具</el-radio-button>
+      </el-radio-group>
     </div>
 
-    <el-table v-loading="store.loading" :data="store.tools" class="tool-table">
+    <el-table v-loading="store.loading" :data="filteredTools" class="tool-table">
       <el-table-column prop="name" label="名称" min-width="140">
         <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
+      </el-table-column>
+      <el-table-column label="类别" width="100">
+        <template #default="{ row }">
+          <el-tag :type="row.meta ? 'warning' : 'info'" size="small" disable-transitions>{{ row.meta ? '元工具' : '常规工具' }}</el-tag>
+        </template>
       </el-table-column>
       <el-table-column label="类型" width="110">
         <template #default="{ row }"><el-tag size="small">{{ TYPE_LABEL[row.tool_type] ?? row.tool_type }}</el-tag></template>
@@ -182,7 +202,9 @@ async function onDelete(t: ToolDefinition) {
 }
 .tool-search-wrap {
   margin-bottom: 12px;
-  max-width: 360px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .tool-table {
   flex: 1;

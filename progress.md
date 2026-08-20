@@ -32,6 +32,15 @@
       - 后端（commit db73fd5）：`serialize_user` 补 `org_name` 字段；以下全部带真实 org name（如「默认组织」）：`GET /users`（list_paged 批量查，一条 IN 无 N+1）、`POST /auth/login`、`GET /auth/me`、`POST /users`、`PATCH /users/{id}/role`、`PATCH /users/{id}/status`。
       - 前端待补（我之前交接板「前端已就绪」不准确，实际 TopBar.vue:35 / SettingsView.vue:218 仍是直接显示 `org_id`）：types `User` 加 `org_name?: string`；org 列渲染改 `org_name ?? org_id` 优先显示名称、回退 UUID。
       - 注：你 M6-1 已实现 admin 自我保护（不能自删/自禁/自降权），前端用户表删除按钮对当前登录 admin 未加禁用——后端 403/400 拦截 + toast 兜底，无回归；如需前端也禁用可另开。
+      - ✅ 前端已消费（2026-08-20）：types `User` 加 `org_name?: string`；TopBar/SettingsView org 列与组织筛选改 `org_name ?? org_id`；mock 用户加 org_name 演示（默认组织/组织二）；TopBar.spec +1、settings-org e2e 改断言名称。
+
+[open] 2026-08-20 · →后端 | **工具区分元工具：`ToolDefinition` 补 `meta` 字段 + `/tools/search` 排除 meta** | 前端已就绪，等后端补字段即生效。
+      - 需求：工具管理页要区分「元工具」（tool_search/kb_search 等平台发现层，模型侧常驻、无需 tool_search 发现）与「常规工具」（经 tool_search 发现）。
+      - 后端现状：`registry`/`Tool` 模型已有 `meta: bool`（tool_search、kb_search 已 `meta=True`），但 **`serialize_tool_definition` 未带出** → API 响应无 meta，前端无法区分。
+      - 要求（docs 03 §5.5 已记「字段补充 2026-08-20 前端提案」）：
+        1. `serialize_tool_definition` 加 `"meta": spec.meta if spec else False`（`GET /tools`、`GET /tools/{id}`、`POST /tools` 响应均带）。
+        2. `GET /tools/search` 排除 `meta=True` 工具（tool_search 不返回自身/其他元工具）。
+      - 前端已就绪：`ToolDefinition.meta?: boolean` + ToolsView「类别」标签（元工具/常规工具）+ 筛选（全部/元工具/常规）+ 全部时元工具置顶；mock 种子 tl_tool_search(meta:true) + search 排除 meta；e2e tools-meta.spec 覆盖。
 
 [done] 2026-08-18 · →后端 | **逐轮 cost 契约扩展**（前端原始提案）| 后端已实现（见上方 [done] 08-18 逐轮 cost 契约扩展已实现）；前端 types/mock/防御式渲染早已就绪，转正式渲染。
 
@@ -488,3 +497,12 @@
 - 验证：typecheck ✓ / lint 0err(3 既有 any) / **143 单测 PASS** / **26 e2e PASS**（24 既有 + 2 新增 kb）。
 - 手测（诊断脚本，fast :5198）：上传 → 「已上传0%」→ 3s 内自动「已索引7 chunks」，全程无刷新、无轮询缺失（server 日志确认 status 轮询到位）。
 - 不做（记录）：不把检索 mock 改真实（/kb/search 硬编码片段与本次无关）；不改后端（chunk_count/status 已真实返回）。
+
+## 2026-08-20 org_name 消费 + 工具页元工具/常规工具区分（L2，前端 + mock + 契约交接）
+- **① 前端消费 org_name**（后端 08-19 已实现，前端待补）：types `User` 加 `org_name?: string`；TopBar 角色行、SettingsView 用户表 org 列与组织筛选改 `org_name ?? org_id`（名称优先、回退 UUID）；mock 用户加 org_name（默认组织/组织二）+ 登录/me/users/create 四处序列化补 org_name。TopBar.spec +1（org_name 优先）；settings-org e2e 改断言显示名称。
+- **② 工具页区分元工具/常规工具**（docs 03 §5.5 meta 字段前端提案）：
+  - 需求：工具列表区分「元工具」（tool_search/kb_search 平台发现层，模型侧常驻、无需 tool_search 发现）与「常规工具」（经 tool_search 发现）。
+  - 后端现状：registry/Tool 模型已有 `meta: bool`（tool_search/kb_search 已 meta=True），但 `serialize_tool_definition` 未带出 → API 无 meta；`/tools/search` 未排除 meta。
+  - 前端：`ToolDefinition.meta?: boolean`；ToolsView「类别」列（元工具 warning 标签 / 常规工具 info 标签）+ 筛选（全部/元工具/常规）+ 全部时元工具置顶；mock 加 tl_tool_search(meta:true) 种子 + `/tools/search` 排除 meta。e2e tools-meta.spec（标签/筛选/搜索排除）。
+  - 交接板 [open] →后端：serialize_tool_definition 补 `meta` + `/tools/search` 排除 meta（docs 03 §5.5 已记字段补充）。
+- 验证：typecheck ✓ / lint 0err(3 既有 any) / **144 单测 PASS**（+1 TopBar）/ **27 e2e PASS**（26 既有 + tools-meta；settings-org 改断言）。

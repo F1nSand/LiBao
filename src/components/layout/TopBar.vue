@@ -32,7 +32,7 @@ function onCommand(cmd: string) {
           <el-avatar :size="26" class="user-avatar">{{ user?.name?.[0] ?? '?' }}</el-avatar>
           <div class="user-meta">
             <span class="user-name">{{ user?.name ?? '未登录' }}</span>
-            <span class="user-role">{{ roleLabel }}<template v-if="user?.org_id"> · {{ user.org_id }}</template></span>
+            <span class="user-role">{{ roleLabel }}<template v-if="user?.org_id"> · {{ user.org_name ?? user.org_id }}</template></span>
           </div>
           <el-icon><ArrowDown /></el-icon>
         </div>

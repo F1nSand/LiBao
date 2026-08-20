@@ -33,9 +33,16 @@ const createVisible = ref(false)
 const emptyCreateForm = () => ({ username: '', password: '', name: '', role: 'viewer' as Role, org_id: 'org_1' })
 const createForm = reactive(emptyCreateForm())
 
-/** 组织筛选（数据隔离：客户端过滤，不改 listUsers 契约；org_id 来自 mock/真实用户数据） */
+/** 组织筛选（数据隔离：客户端过滤，不改 listUsers 契约；org_name 有则优先显示名称，回退 UUID） */
 const orgFilter = ref('all')
-const orgOptions = computed(() => [...new Set(users.value.map((u) => u.org_id).filter((v): v is string => !!v))])
+const orgOptions = computed(() => {
+  const map = new Map<string, string>()
+  for (const u of users.value) {
+    if (!u.org_id) continue
+    if (!map.has(u.org_id)) map.set(u.org_id, u.org_name ?? u.org_id)
+  }
+  return [...map.entries()].map(([value, label]) => ({ value, label }))
+})
 const filteredUsers = computed(() =>
   orgFilter.value === 'all' ? users.value : users.value.filter((u) => u.org_id === orgFilter.value),
 )
@@ -208,15 +215,15 @@ async function onDeleteHook(toolId: string) {
           <div class="users-toolbar">
             <el-select v-model="orgFilter" size="small" style="width: 130px">
               <el-option label="全部组织" value="all" />
-              <el-option v-for="org in orgOptions" :key="org" :label="org" :value="org" />
+              <el-option v-for="org in orgOptions" :key="org.value" :label="org.label" :value="org.value" />
             </el-select>
             <el-button type="primary" :icon="'Plus'" @click="createVisible = true">新建用户</el-button>
           </div>
           <el-table :data="filteredUsers" v-loading="loading" size="small">
             <el-table-column prop="username" label="用户名" width="140" />
             <el-table-column prop="name" label="姓名" width="140" />
-            <el-table-column prop="org_id" label="组织" width="100">
-              <template #default="{ row }"><span class="mono">{{ row.org_id ?? '—' }}</span></template>
+            <el-table-column prop="org_id" label="组织" width="120">
+              <template #default="{ row }"><span class="mono">{{ row.org_name ?? row.org_id ?? '—' }}</span></template>
             </el-table-column>
             <el-table-column label="角色" width="160">
               <template #default="{ row }">

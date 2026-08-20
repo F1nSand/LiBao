@@ -35,6 +35,7 @@ export interface User {
   username?: string
   role: Role
   org_id?: string
+  org_name?: string
   enabled?: boolean
   created_at?: string
 }
@@ -185,6 +186,8 @@ export interface ToolDefinition {
   params_schema?: Record<string, unknown>
   tool_type: ToolType
   enabled: boolean
+  /** 平台元工具（如 tool_search/kb_search）：模型侧常驻、无需 tool_search 发现，API 序列化带出 */
+  meta?: boolean
   require_confirm?: boolean
   sandbox?: 'none' | 'docker' | 'microvm'
   timeout_ms?: number

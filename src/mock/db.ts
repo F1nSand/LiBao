@@ -17,12 +17,12 @@ import { isoDate } from './util'
 /** Mock 种子数据（内存态，dev 重启即重置） */
 
 export const users: Array<User & { password: string }> = [
-  { id: 'u_admin', username: 'admin', password: 'admin123', name: '管理员', role: 'admin', org_id: 'org_1', enabled: true, created_at: isoDate(60) },
-  { id: 'u_dev', username: 'dev', password: 'dev123', name: '开发者', role: 'developer', org_id: 'org_1', enabled: true, created_at: isoDate(55) },
-  { id: 'u_viewer', username: 'viewer', password: 'viewer123', name: '访客', role: 'viewer', org_id: 'org_1', enabled: true, created_at: isoDate(50) },
+  { id: 'u_admin', username: 'admin', password: 'admin123', name: '管理员', role: 'admin', org_id: 'org_1', org_name: '默认组织', enabled: true, created_at: isoDate(60) },
+  { id: 'u_dev', username: 'dev', password: 'dev123', name: '开发者', role: 'developer', org_id: 'org_1', org_name: '默认组织', enabled: true, created_at: isoDate(55) },
+  { id: 'u_viewer', username: 'viewer', password: 'viewer123', name: '访客', role: 'viewer', org_id: 'org_1', org_name: '默认组织', enabled: true, created_at: isoDate(50) },
   // org_2（多租户数据隔离演示：组织筛选可切到第二组织）
-  { id: 'u_dev2', username: 'dev2', password: 'dev2123', name: '开发者二组', role: 'developer', org_id: 'org_2', enabled: true, created_at: isoDate(40) },
-  { id: 'u_view2', username: 'viewer2', password: 'viewer2123', name: '访客二组', role: 'viewer', org_id: 'org_2', enabled: true, created_at: isoDate(35) },
+  { id: 'u_dev2', username: 'dev2', password: 'dev2123', name: '开发者二组', role: 'developer', org_id: 'org_2', org_name: '组织二', enabled: true, created_at: isoDate(40) },
+  { id: 'u_view2', username: 'viewer2', password: 'viewer2123', name: '访客二组', role: 'viewer', org_id: 'org_2', org_name: '组织二', enabled: true, created_at: isoDate(35) },
 ]
 
 // 单通用 Agent 模型：chat/conversation/task 固定用组织默认通用 Agent（无 /agents 端点）
@@ -36,6 +36,7 @@ export const tools: ToolDefinition[] = [
     params_schema: { type: 'object', properties: {}, required: [] },
     tool_type: 'perception',
     enabled: true,
+    meta: false,
     require_confirm: false,
     sandbox: 'none',
     timeout_ms: 5000,
@@ -51,6 +52,7 @@ export const tools: ToolDefinition[] = [
     params_schema: { type: 'object', properties: { expression: { type: 'string', description: '数学表达式' } }, required: ['expression'] },
     tool_type: 'execution',
     enabled: true,
+    meta: false,
     require_confirm: true,
     sandbox: 'none',
     timeout_ms: 5000,
@@ -66,6 +68,7 @@ export const tools: ToolDefinition[] = [
     params_schema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', default: 5 } }, required: ['query'] },
     tool_type: 'perception',
     enabled: true,
+    meta: false,
     require_confirm: false,
     sandbox: 'docker',
     timeout_ms: 30_000,
@@ -73,6 +76,22 @@ export const tools: ToolDefinition[] = [
     mcp_source: null,
     idempotent: true,
     created_at: isoDate(180),
+  },
+  {
+    id: 'tl_tool_search',
+    name: 'tool_search',
+    description: '工具发现元工具：搜索工具目录定位可用工具（模型侧常驻，无需再经工具发现）。',
+    params_schema: { type: 'object', properties: { query: { type: 'string', description: '搜索关键词' } }, required: ['query'] },
+    tool_type: 'perception',
+    enabled: true,
+    meta: true,
+    require_confirm: false,
+    sandbox: 'none',
+    timeout_ms: 5000,
+    max_concurrency: 10,
+    mcp_source: null,
+    idempotent: true,
+    created_at: isoDate(170),
   },
 ]
 

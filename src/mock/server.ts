@@ -244,11 +244,11 @@ export const mockServer = {
       const u = users.find((x) => x.username === username && x.password === password)
       // 业务错误走信封（HTTP 200 + code!=0），前端按 ApiError.code 分支提示
       if (!u) return void json(res, fail(40101, '用户名或密码错误'))
-      return void json(res, ok({ token: signMockToken(u), user: { id: u.id, name: u.name, role: u.role, org_id: u.org_id } }))
+      return void json(res, ok({ token: signMockToken(u), user: { id: u.id, name: u.name, role: u.role, org_id: u.org_id, org_name: u.org_name } }))
     }
     if (method === 'POST' && pathname === '/auth/logout') return void json(res, ok(null))
     if (method === 'GET' && pathname === '/auth/me') {
-      const u = { id: user!.id, name: user!.name, role: user!.role, org_id: user!.org_id }
+      const u = { id: user!.id, name: user!.name, role: user!.role, org_id: user!.org_id, org_name: user!.org_name }
       return void json(res, ok(u))
     }
 
@@ -256,14 +256,14 @@ export const mockServer = {
     if (method === 'GET' && pathname === '/users') {
       const page = Number(query.get('page') ?? 1)
       const size = Number(query.get('page_size') ?? 20)
-      const items = users.map((u) => ({ id: u.id, username: u.username, name: u.name, role: u.role, org_id: u.org_id, enabled: u.enabled }))
+      const items = users.map((u) => ({ id: u.id, username: u.username, name: u.name, role: u.role, org_id: u.org_id, org_name: u.org_name, enabled: u.enabled }))
       return void json(res, ok(paginate(items, page, size)))
     }
     if (method === 'POST' && pathname === '/users') {
       const b = body.json ?? {}
-      const nu = { id: uid('u'), username: b.username, password: b.password ?? 'pass123', name: b.name ?? b.username, role: b.role ?? 'viewer', org_id: b.org_id, enabled: true, created_at: isoDate(0) }
+      const nu = { id: uid('u'), username: b.username, password: b.password ?? 'pass123', name: b.name ?? b.username, role: b.role ?? 'viewer', org_id: b.org_id, org_name: b.org_name, enabled: true, created_at: isoDate(0) }
       users.push(nu)
-      const u = { id: nu.id, username: nu.username, name: nu.name, role: nu.role, org_id: nu.org_id, enabled: nu.enabled }
+      const u = { id: nu.id, username: nu.username, name: nu.name, role: nu.role, org_id: nu.org_id, org_name: nu.org_name, enabled: nu.enabled }
       return void json(res, ok(u))
     }
     let p = match(pathname, '/users/:id/role')
@@ -422,7 +422,8 @@ export const mockServer = {
     }
     if (method === 'GET' && pathname === '/tools/search') {
       const q = (query.get('q') ?? '').toLowerCase()
-      const hits = tools.filter((t) => t.name.includes(q) || (t.description ?? '').toLowerCase().includes(q))
+      // 排除元工具：tool_search 发现的是 domain 工具，不返回自身/其他 meta
+      const hits = tools.filter((t) => !t.meta && (t.name.includes(q) || (t.description ?? '').toLowerCase().includes(q)))
       return void json(res, ok(hits.map((t) => ({ id: t.id, name: t.name, description: t.description, enabled: t.enabled }))))
     }
     if (method === 'POST' && pathname === '/tools/mcp/register') {
