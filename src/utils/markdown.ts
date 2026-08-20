@@ -71,8 +71,19 @@ export function splitStreamingText(raw: string): { stable: string; tail: string 
   return { stable: raw.slice(0, idx + 1), tail: raw.slice(idx + 1) }
 }
 
-/** 流式渲染：stable 走 markdown 管线；tail 为原始末行（模板插值自动转义，安全模型不变） */
+/** 是否处于未闭合代码围栏（`^\s*``` ` 行数为奇数 → 围栏内）。围栏内时 tail 必须留在代码块里，否则末行逃逸成纯文本。 */
+export function inOpenFence(raw: string): boolean {
+  let count = 0
+  for (const line of raw.split('\n')) {
+    if (/^\s*```/.test(line)) count++
+  }
+  return count % 2 === 1
+}
+
+/** 流式渲染：stable 走 markdown 管线；tail 为原始末行（模板插值自动转义，安全模型不变）。
+ * 代码围栏内时整段一起渲染（markdown-it 未闭合围栏 → 完整代码块，末行留在块内，不逃逸）。 */
 export function renderStreamingMarkdown(raw: string): { html: string; tail: string } {
+  if (inOpenFence(raw)) return { html: renderMarkdown(raw), tail: '' }
   const { stable, tail } = splitStreamingText(raw)
   return { html: renderMarkdown(stable), tail }
 }

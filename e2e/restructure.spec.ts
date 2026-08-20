@@ -29,13 +29,13 @@ test.describe('布局重构', () => {
     await login(page)
     await expect(page.locator('.settings-popover')).toBeHidden()
 
-    // 点设置弹气泡（admin 全 5 项）
+    // 点设置弹气泡（admin 全 4 项，任务已删）
     await page.locator('.settings-toggle').click()
-    await expect(page.locator('.settings-popover .sub-item')).toHaveCount(5)
+    await expect(page.locator('.settings-popover .sub-item')).toHaveCount(4)
 
-    // 点子项 → 跳转 /tasks 且设置按钮高亮
-    await page.locator('.settings-popover .sub-item', { hasText: '任务' }).click()
-    await expect(page).toHaveURL(/\/tasks/)
+    // 点子项 → 跳转 /tools 且设置按钮高亮
+    await page.locator('.settings-popover .sub-item', { hasText: '工具' }).click()
+    await expect(page).toHaveURL(/\/tools/)
     await expect(page.locator('.settings-toggle')).toHaveClass(/active/)
   })
 })

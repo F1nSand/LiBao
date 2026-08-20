@@ -7,6 +7,17 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[open] 2026-08-20 · ←后端 | **M7-A：主 Agent 第三方 Skills 适配（后端先行，前端随后补 Skills 管理页）** | 契约如下，前端可先就绪 types/mock/UI，不阻塞后端。
+      - 后端本轮交付：
+        - `skill` 实体（org 级）：`{id, org_id, name, description(路由描述), body(SKILL.md 正文), source(manual|git), enabled, created_at}`
+        - `POST /api/v1/skills` 手动创建 `{name, description, body}`
+        - `POST /api/v1/skills/import` `{url}` git 导入（clone → 解析 SKILL.md → 存）
+        - `GET /api/v1/skills`（分页，含 enabled）/ `GET /api/v1/skills/{id}` / `PATCH /api/v1/skills/{id}`（改 + enabled 开关）/ `DELETE /api/v1/skills/{id}`（软删）
+        - 主 agent 自动使用 org 内 enabled skills：路由描述进 system_prompt 前缀；正文经内置 meta 工具 `tl_load_skill(name)` 按需取回（LLM 侧自动可见，无需 tool_search 发现）
+        - MCP 工具已 org 级可用（主 agent 工具集已含），本轮只确认链路，不改契约
+      - 前端建议补（后续，非本轮阻塞）：Settings 或独立「Skills 管理」页——列表/手动创建/git 导入/启用开关/删除；types `Skill` + `api/skill.ts` + mock。与工具页同模式（默认关闭、developer+）。
+      - 计划：`docs/plans/2026-08-20-m7a-main-agent-skills-mcp.md`（后端 L2）
+
 [done] 2026-08-18 · ←后端 | **M6-1 RBAC + 数据隔离已落地**（285 测试全绿 + verify 14/8/6）| 与你的前端守卫完全对齐，前端零改动。
       - **角色守卫后端兜底**：tools/kb → developer+；settings/system/evals/hooks管理/users → admin；health + hooks 公开收包 → 公开。此前这些只有前端路由守卫，API 直调可绕过，现已后端强制（40301）。
       - **Eval 运行/结果 org 隔离**：跨 org run 返回 40414「不存在或无权访问」（HTTP 200 + 信封 code）。
@@ -34,13 +45,9 @@
       - 注：你 M6-1 已实现 admin 自我保护（不能自删/自禁/自降权），前端用户表删除按钮对当前登录 admin 未加禁用——后端 403/400 拦截 + toast 兜底，无回归；如需前端也禁用可另开。
       - ✅ 前端已消费（2026-08-20）：types `User` 加 `org_name?: string`；TopBar/SettingsView org 列与组织筛选改 `org_name ?? org_id`；mock 用户加 org_name 演示（默认组织/组织二）；TopBar.spec +1、settings-org e2e 改断言名称。
 
-[open] 2026-08-20 · →后端 | **工具区分元工具：`ToolDefinition` 补 `meta` 字段 + `/tools/search` 排除 meta** | 前端已就绪，等后端补字段即生效。
-      - 需求：工具管理页要区分「元工具」（tool_search/kb_search 等平台发现层，模型侧常驻、无需 tool_search 发现）与「常规工具」（经 tool_search 发现）。
-      - 后端现状：`registry`/`Tool` 模型已有 `meta: bool`（tool_search、kb_search 已 `meta=True`），但 **`serialize_tool_definition` 未带出** → API 响应无 meta，前端无法区分。
-      - 要求（docs 03 §5.5 已记「字段补充 2026-08-20 前端提案」）：
-        1. `serialize_tool_definition` 加 `"meta": spec.meta if spec else False`（`GET /tools`、`GET /tools/{id}`、`POST /tools` 响应均带）。
-        2. `GET /tools/search` 排除 `meta=True` 工具（tool_search 不返回自身/其他元工具）。
-      - 前端已就绪：`ToolDefinition.meta?: boolean` + ToolsView「类别」标签（元工具/常规工具）+ 筛选（全部/元工具/常规）+ 全部时元工具置顶；mock 种子 tl_tool_search(meta:true) + search 排除 meta；e2e tools-meta.spec 覆盖。
+[done] 2026-08-20 · ←后端 | **工具区分元工具已实现**（`ToolDefinition.meta` + `/tools/search` 排除 meta）| 前端补字段即生效。
+      - 后端（commit e835fac）：`serialize_tool_definition` 加 `"meta": spec.meta if spec else False`（`GET /tools`、`GET /tools/{id}`、`POST /tools` 响应均带）；`GET /tools/search` 排除 `meta=True` 工具（tool_search/kb_search 平台发现层不自发现）。
+      - 前端已就绪（你已写 types/mock/UI/e2e），补字段即生效：`ToolDefinition.meta?: boolean` + ToolsView「类别」标签 + 筛选 + 元工具置顶。
 
 [done] 2026-08-18 · →后端 | **逐轮 cost 契约扩展**（前端原始提案）| 后端已实现（见上方 [done] 08-18 逐轮 cost 契约扩展已实现）；前端 types/mock/防御式渲染早已就绪，转正式渲染。
 
@@ -506,3 +513,12 @@
   - 前端：`ToolDefinition.meta?: boolean`；ToolsView「类别」列（元工具 warning 标签 / 常规工具 info 标签）+ 筛选（全部/元工具/常规）+ 全部时元工具置顶；mock 加 tl_tool_search(meta:true) 种子 + `/tools/search` 排除 meta。e2e tools-meta.spec（标签/筛选/搜索排除）。
   - 交接板 [open] →后端：serialize_tool_definition 补 `meta` + `/tools/search` 排除 meta（docs 03 §5.5 已记字段补充）。
 - 验证：typecheck ✓ / lint 0err(3 既有 any) / **144 单测 PASS**（+1 TopBar）/ **27 e2e PASS**（26 既有 + tools-meta；settings-org 改断言）。
+
+## 2026-08-20 五连改（L3）：删任务入口 / 精简系统页 / 多流会话 / 滚动根因 / 长代码块（纯前端，已提交 d8ccdf7 后续未提交）
+- 计划：C:\Users\Admin1\.claude\plans\vast-wandering-hamster.md
+- **A 删「设置栏」任务入口 + 死代码**：routes.ts 删 /tasks 菜单项/SETTINGS_ROUTES/路由；删 TasksView/TaskList/TaskDetail/stores/task/api/task（api/index.ts 去 task 导出）；保留 mock /tasks + useTaskPoll(KB用)。改 routes.spec/guards.spec（viewer 只剩记忆）/restructure.spec（4 项点工具）。
+- **B 精简设置-系统页**：SystemView 删 el-tabs，运行日志为主体 + 保留 trace 抽屉；删 evals/cost/evolution 三 pane + EvalManage/CostChart/EvolutionManage 孤儿组件；删 e2e/system-evolution.spec；保留 evolution store/api 契约层（有 spec）。
+- **C useChatStream 多流会话隔离（大改）**：按 convId 存 ConvCtx（state/controller/pendingText/timers）；`state` 改 ComputedRef 指向当前会话 entry；`setConversation` 切换（不 reset 后台流）；start/stop/confirmInterrupt 按当前 ctx；ChatView 去 selectionToken reset 改 currentId watch + setConversation，onPersistedMessage 按 conversation_id 守卫（防污染别的会话列表）。单测 +1（多流隔离）。手测：A 流式中切 B 再切回 A → A 的进行中思考/工具可见。
+- **D 滚动条根因（移除 content-visibility 估算）**：`.msg-row` 去 content-visibility/contain-intrinsic-size → scrollHeight 真实；scrollToStable 改「设目标→下一帧读回(post-paint)→稳定3帧」追帧 + `activeRun` 守卫（追帧期间不记账，防初始未渲染态把位置记成 0 污染历史恢复）。根因：①记账污染（初始未渲染记 0 → 恢复读 0 滚到顶）；②浏览器 paint commit 重置 scrollTop（同步读回误判稳定）。
+- **E 流式长代码块逃出代码块**：`inOpenFence` 检测未闭合围栏，围栏内整段一起渲染（tail 并入代码块不逃逸）；markdown.spec +5 用例。
+- 验证：typecheck ✓ / lint 0err(3 既有 any) / **151 单测 PASS** / **26 e2e PASS**（删 system-evolution 后 27→26；guards/restructure/scroll 更新）。**本轮改动未提交**。

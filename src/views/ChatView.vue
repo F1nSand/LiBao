@@ -16,16 +16,19 @@ import StatusTag from '@/components/common/StatusTag.vue'
 const chat = useChatStore()
 const stream = useChatStream({
   onPersistedMessage: (message) => {
+    // 多流：后台流（其它会话）封口的消息不得 append 进当前会话列表（回该会话时服务端 loadMessages 补齐）
+    const m0 = (message ?? {}) as Partial<Message>
+    if (m0.conversation_id && m0.conversation_id !== chat.currentId) return
     // 用流式状态兜底补齐 done 消息：真实后端 done 的 message 可能缺 content（内容未就绪），
     // 直接 append 会让完成瞬间文本气泡消失。这里补 content，且不再 refreshMessages
     // （刷新按 page1 分页会截断长会话的最新消息）。服务端一致性在重进会话/刷新页面时同步。
-    const m = (message ?? {}) as Partial<Message>
+    const m = m0
     const hasContent = !!(m.content ?? '').trim()
     chat.appendAssistantMessage({
-      id: m.id ?? stream.state.messageId ?? `local_asst_${Date.now()}`,
+      id: m.id ?? stream.state.value.messageId ?? `local_asst_${Date.now()}`,
       conversation_id: m.conversation_id ?? chat.currentId ?? '',
       role: 'assistant',
-      content: hasContent ? m.content! : stream.state.partialText,
+      content: hasContent ? m.content! : stream.state.value.partialText,
       tool_calls: m.tool_calls?.length ? m.tool_calls : undefined,
       thinking: m.thinking,
       token_usage: m.token_usage,
@@ -35,6 +38,9 @@ const stream = useChatStream({
   },
 })
 
+/** 当前查看会话的流式状态（computed；切换会话时 useChatStream.setConversation 指向对应 entry） */
+const currentStream = stream.state
+
 const input = ref('')
 const pendingAttachments = reactive<string[]>([])
 const interruptVisible = ref(false)
@@ -42,17 +48,17 @@ const interruptVisible = ref(false)
 /** 会话 | 轨迹 视图切换 */
 const mode = ref<'chat' | 'trajectory'>('chat')
 
-// 侧栏选择会话后复位流式（用 selectionToken 区分：创建会话不递增，避免误杀刚启动的流）
+// 切换会话：流式状态按会话隔离（setConversation 指向该会话 entry，不 reset 后台流；清输入/附件）
 watch(
-  () => chat.selectionToken,
-  () => {
-    stream.reset()
+  () => chat.currentId,
+  (id) => {
+    if (id) stream.setConversation(id)
     resetForNext()
   },
 )
 
-/** 流式中 / 中断等待中禁用输入框（done/error/stop 后自动恢复） */
-const composerDisabled = computed(() => stream.state.streaming || !!stream.state.interrupted)
+/** 流式中 / 中断等待中禁用输入框（done/error/stop 后自动恢复；按会话隔离——仅当前会话有流才禁） */
+const composerDisabled = computed(() => currentStream.value.streaming || !!currentStream.value.interrupted)
 const charCount = computed(() => input.value.length)
 
 function resetForNext() {
@@ -103,7 +109,7 @@ function onAttach(id: string) {
 
 // 中断 → 弹窗
 watch(
-  () => stream.state.interrupted,
+  () => stream.state.value.interrupted,
   (v) => (interruptVisible.value = !!v),
 )
 
@@ -128,13 +134,13 @@ function onKeydown(e: KeyboardEvent) {
           <el-radio-button value="chat">会话</el-radio-button>
           <el-radio-button value="trajectory" :disabled="!chat.currentId">轨迹</el-radio-button>
         </el-radio-group>
-        <StatusTag :status="stream.state.status ?? ''" />
+        <StatusTag :status="currentStream.status ?? ''" />
       </div>
 
       <MessageList
         v-show="mode === 'chat'"
         :messages="chat.currentMessages"
-        :stream="stream.state"
+        :stream="currentStream"
       />
 
       <div v-show="mode === 'chat'" class="composer">
@@ -151,7 +157,7 @@ function onKeydown(e: KeyboardEvent) {
             :disabled="composerDisabled"
             @keydown="onKeydown"
           />
-          <el-button v-if="stream.state.streaming" type="danger" :icon="'VideoPause'" @click="stop">
+          <el-button v-if="currentStream.streaming" type="danger" :icon="'VideoPause'" @click="stop">
             停止
           </el-button>
           <el-button v-else type="primary" :icon="'Promotion'" :disabled="composerDisabled || !input.trim()" @click="send">
@@ -166,7 +172,7 @@ function onKeydown(e: KeyboardEvent) {
       <TrajectoryPanel
         v-if="mode === 'trajectory' && chat.currentId"
         :conversation-id="chat.currentId"
-        :live="stream.state.streaming"
+        :live="currentStream.streaming"
         class="trajectory-panel"
       />
       <el-empty v-if="mode === 'trajectory' && !chat.currentId" description="请先选择会话" :image-size="60" />
@@ -174,7 +180,7 @@ function onKeydown(e: KeyboardEvent) {
 
     <InterruptConfirmDialog
       :visible="interruptVisible"
-      :info="stream.state.interrupted"
+      :info="currentStream.interrupted"
       @confirm="onInterruptConfirm"
     />
   </div>

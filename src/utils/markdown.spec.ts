@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderMarkdown, splitStreamingText, renderStreamingMarkdown, MARKDOWN_WHITELIST } from './markdown'
+import { renderMarkdown, splitStreamingText, renderStreamingMarkdown, inOpenFence, MARKDOWN_WHITELIST } from './markdown'
 
 describe('renderMarkdown 管线', () => {
   it('GFM 表格渲染为 table', () => {
@@ -102,11 +102,43 @@ describe('renderStreamingMarkdown 流式渲染', () => {
     expect(r.html).not.toContain('<script>')
   })
 
-  it('代码围栏未闭合：已完成行进入代码块（语法高亮），末行为 tail', () => {
+  it('代码围栏未闭合：整段一起渲染，末行留在代码块内（不逃逸成纯文本）', () => {
     const r = renderStreamingMarkdown('```js\nconst a = 1\nco')
     expect(r.html).toContain('language-js')
     expect(r.html).toContain('hljs-keyword') // const 被高亮包裹 → 代码块含该行
-    expect(r.tail).toBe('co')
+    expect(r.tail).toBe('') // 末行并入代码块，不再逃逸
+    expect(r.html).toContain('co') // 末行内容在代码块内
+  })
+
+  it('代码围栏已闭合：恢复 stable/tail 拆分（围栏外才按行切）', () => {
+    const r = renderStreamingMarkdown('```js\nconst a = 1\n```\n正文')
+    expect(r.html).toContain('language-js')
+    expect(r.tail).toBe('正文')
+  })
+
+  it('长代码块流式：末行持续留在代码块内', () => {
+    const r = renderStreamingMarkdown('```python\ndef foo():\n    print("x")\n    pri')
+    expect(r.tail).toBe('')
+    expect(r.html).toContain('def')
+    expect(r.html).toContain('pri') // 末行内容在代码块内（高亮 span 会拆 'def foo' 连续性）
+  })
+})
+
+describe('inOpenFence 围栏检测', () => {
+  it('未闭合围栏 → true', () => {
+    expect(inOpenFence('```python\nx')).toBe(true)
+  })
+
+  it('已闭合围栏 → false', () => {
+    expect(inOpenFence('```python\nx\n```')).toBe(false)
+  })
+
+  it('无围栏 → false', () => {
+    expect(inOpenFence('普通文本\n第二行')).toBe(false)
+  })
+
+  it('行内 ``` 不以行首出现不误判', () => {
+    expect(inOpenFence('使用 ```inline``` 标记')).toBe(false)
   })
 })
 

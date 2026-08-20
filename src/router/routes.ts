@@ -16,7 +16,7 @@ export interface MenuItem {
   children?: MenuItem[]
 }
 
-/** 菜单项配置（docs/02 §4）：侧栏菜单；设置项带 children（任务/工具/记忆/系统/设置 子栏） */
+/** 菜单项配置（docs/02 §4）：侧栏菜单；设置项带 children（工具/记忆/系统/设置 子栏） */
 export const menuItems: MenuItem[] = [
   // 工作区（单通用 Agent 后置项目，docs/07）：入口在对话上方，内部设计待定
   { path: '/workspace', title: '工作区', icon: 'Grid' },
@@ -29,7 +29,6 @@ export const menuItems: MenuItem[] = [
     roles: ['admin'],
     children: [
       { path: '/settings', title: '设置', icon: 'Setting', roles: ['admin'] },
-      { path: '/tasks', title: '任务', icon: 'List' },
       { path: '/tools', title: '工具', icon: 'Tools', roles: ['admin', 'developer'] },
       { path: '/memory', title: '记忆', icon: 'Tickets' },
       { path: '/system', title: '系统', icon: 'Odometer', roles: ['admin'] },
@@ -38,7 +37,7 @@ export const menuItems: MenuItem[] = [
 ]
 
 /** 属于「设置」组的路由（子栏在这些页面显示） */
-export const SETTINGS_ROUTES = ['/tasks', '/tools', '/memory', '/system', '/settings']
+export const SETTINGS_ROUTES = ['/tools', '/memory', '/system', '/settings']
 export const isSettingsRoute = (path: string): boolean => SETTINGS_ROUTES.includes(path)
 
 export const routes: RouteRecordRaw[] = [
@@ -70,12 +69,6 @@ export const routes: RouteRecordRaw[] = [
     name: 'trajectory',
     component: () => import('@/views/TrajectoryView.vue'),
     meta: { title: '对话轨迹', requiresAuth: true } satisfies AppRouteMeta,
-  },
-  {
-    path: '/tasks',
-    name: 'tasks',
-    component: () => import('@/views/TasksView.vue'),
-    meta: { title: '任务', icon: 'List', requiresAuth: true } satisfies AppRouteMeta,
   },
   {
     path: '/tools',

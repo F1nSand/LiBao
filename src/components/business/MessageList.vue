@@ -4,7 +4,7 @@ const scrollPositions = new Map<string, number>()
 </script>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Message } from '@/types'
 import type { StreamState } from '@/composables/useChatStream'
 import MessageBubble from './MessageBubble.vue'
@@ -14,6 +14,9 @@ import MessageBubble from './MessageBubble.vue'
  * 曾因虚拟滚动"实测高度→平均高度→startIndex"反馈循环导致长列表上滚抽搐）。
  * 吸底策略：**贴底跟随**——滚动在最下方时新内容自动追随；滚走则不强制拉回（内容照常生成在下方）。
  * 用滚动事件记录 pinned（真正最下方才贴底），内容变化时 pinned 才跟随——避免内容增长后误判"不在底部"。
+ *
+ * 2026-08-20：移除 .msg-row 的 content-visibility（scrollHeight 估算导致间歇不贴底/位置漂移），
+ * 滚动改为确定性（scrollHeight 真实，nextTick + rAF 一次落地即可）。
  */
 const props = defineProps<{ messages: Message[]; stream?: StreamState | null }>()
 
@@ -32,45 +35,25 @@ const pinned = ref(true)
 /** 当前会话 id（滚动位置记账/恢复用）：messages[0].conversation_id 优先 */
 const conversationId = computed(() => props.messages[0]?.conversation_id ?? props.stream?.conversationId ?? '')
 
-/** 滚动跑批状态：scrollRun 令牌作废旧跑批；autoScroll 标记程序化滚动中；settling 隐藏追帧；lastSetTop 供 handler 判别用户滚动 */
+/** 滚动跑批令牌：内容再次变化时作废旧 nextTick/rAF，防旧回调覆盖新目标 */
 let scrollRun = 0
-let autoScroll = false
-let settling = false
-let lastSetTop = -1
+/** 当前活跃追帧 run；-1 = 无（追帧期间不记账中间 scrollTop，防初始未渲染态把位置记成 0 污染历史恢复） */
+let activeRun = -1
 
 function updatePinned(): void {
   const el = containerRef.value
   if (!el) return
   pinned.value = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_TOLERANCE
-  // 滚动即记账：切走再回时恢复原位
-  if (conversationId.value) scrollPositions.set(conversationId.value, el.scrollTop)
-}
-
-/**
- * scroll 事件：循环自身程序化滚动（scrollTop === lastSetTop）忽略，不记账中间值；
- * 用户主动滚走（偏离循环目标）→ 作废跑批，恢复正常记账 + pinned 重算（保住"滚走不拉回"）。
- */
-function onScroll(): void {
-  const el = containerRef.value
-  if (!el) return
-  if (autoScroll) {
-    if (el.scrollTop === lastSetTop) return
-    scrollRun++
-    autoScroll = false
-    if (settling) {
-      settling = false
-      el.classList.remove('msg-list--settling')
-    }
-  }
-  updatePinned()
+  // 滚动即记账：切走再回时恢复原位（追帧期间跳过，最终位置由 finalize 记）
+  if (activeRun === -1 && conversationId.value) scrollPositions.set(conversationId.value, el.scrollTop)
 }
 
 onMounted(() => {
-  containerRef.value?.addEventListener('scroll', onScroll, { passive: true })
+  containerRef.value?.addEventListener('scroll', updatePinned, { passive: true })
 })
 onBeforeUnmount(() => {
   scrollRun++ // 作废挂起跑批
-  containerRef.value?.removeEventListener('scroll', onScroll)
+  containerRef.value?.removeEventListener('scroll', updatePinned)
 })
 
 // 内容变化（流式/新消息/完成）：仅当贴底时跟随（保持吸底），滚走则不动
@@ -82,63 +65,38 @@ watch(
 )
 
 /**
- * rAF 稳定循环滚动到目标。`.msg-row` 的 content-visibility 让 scrollHeight 按估算逐帧物化，
- * 固定 nextTick+双 rAF+timeout 落地会打在级联中途（闪到中间再滚到底）——
- * 改为每帧追目标，直到 scrollHeight 连续 3 帧稳定（尾部物化）再收尾。
- * hide=true（切换会话）：追帧期间 visibility:hidden，最终位置就绪后一次展示，消除闪跳。
- * 用户滚动偏离循环目标时 onScroll 作废跑批。
+ * 滚动到目标并稳定：scrollHeight 真实（无 content-visibility），但新内容在 paint commit 时会重置 scrollTop——
+ * 用「位置稳定性」追帧（scrollTop 停在目标处连续 3 帧才停，自然跨过 paint），最多 30 帧兜底。
  */
-function scrollToStable(target: 'bottom' | number, hide = false): void {
+function scrollToStable(target: 'bottom' | number): void {
   const el = containerRef.value
   if (!el) return
   const run = ++scrollRun
-  const maxTop = () => Math.max(0, el.scrollHeight - el.clientHeight)
-  const want = () => (target === 'bottom' ? maxTop() : Math.min(target, maxTop()))
-  if (hide && !settling) {
-    settling = true
-    el.classList.add('msg-list--settling')
-  }
-  autoScroll = true
-  let lastH = -1
   let stable = 0
   let frame = 0
-  let recheck = 0
-
+  activeRun = run
   const finalize = () => {
-    if (run !== scrollRun) return // 新跑批接管，不动状态
-    if (recheck < 2 && el.scrollHeight !== lastH) {
-      // 晚到图片/懒渲染：续追
-      recheck++
-      lastH = el.scrollHeight
-      requestAnimationFrame(step)
-      return
+    if (run === activeRun) {
+      activeRun = -1
+      updatePinned() // 最新追帧结束：记最终位置 + 重算 pinned
     }
-    autoScroll = false
-    lastSetTop = Math.floor(want()) // floor：scrollTop 赋值是整数，避免浮点 mismatch 误判用户滚动
-    el.scrollTop = lastSetTop
-    if (settling) {
-      settling = false
-      el.classList.remove('msg-list--settling')
-    }
-    updatePinned() // 唯一记账时机：最终位置 + 最终 pinned
   }
-
+  // 每轮：设目标 → 下一帧读回（post-paint，反映是否被浏览器 paint commit 重置）→ 稳定 3 帧才停
   const step = () => {
     if (run !== scrollRun) return
-    lastSetTop = Math.floor(want())
-    el.scrollTop = lastSetTop
-    const reached =
-      target === 'bottom'
-        ? el.scrollTop + el.clientHeight >= el.scrollHeight - 1
-        : Math.abs(el.scrollTop - want()) <= 1
-    if (reached && el.scrollHeight === lastH) stable++
-    else stable = 0
-    lastH = el.scrollHeight
-    if (stable >= 3 || ++frame >= 120) finalize()
-    else requestAnimationFrame(step)
+    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight)
+    const top = target === 'bottom' ? maxTop : Math.min(target, maxTop)
+    el.scrollTop = top
+    requestAnimationFrame(() => {
+      if (run !== scrollRun) return
+      const still = Math.abs(el.scrollTop - top) <= 1
+      if (still) stable++
+      else stable = 0
+      if (stable >= 3 || ++frame >= 30) finalize()
+      else step()
+    })
   }
-
-  requestAnimationFrame(step)
+  void nextTick(() => step())
 }
 
 /** 会话加载/切换（messages 引用替换）：有滚动记录 → 恢复原位；无记录（新/没开过）→ 默认到底；与吸底跟随 watch 并存 */
@@ -149,9 +107,9 @@ watch(
     const saved = conversationId.value ? scrollPositions.get(conversationId.value) : undefined
     if (saved != null) {
       pinned.value = false // 立即取消贴底，防恢复期间被内容 watch 拉回
-      scrollToStable(saved, true)
+      scrollToStable(saved)
     } else {
-      scrollToStable('bottom', true)
+      scrollToStable('bottom')
     }
   },
   { immediate: true },
@@ -188,14 +146,5 @@ defineExpose({ containerRef })
   padding: 60px 0;
   color: var(--app-text-muted);
   font-size: var(--app-font-size-sm);
-}
-/* 切换会话追帧期隐藏（scrollToStable hide）：最终位置就绪后一次展示，消除"闪到中间再滚到底" */
-.msg-list--settling {
-  visibility: hidden;
-}
-/* 屏外消息跳过渲染（浏览器原生），未渲染时按 ~120px 估算高度，滚动条稳定 */
-.msg-row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
 }
 </style>
