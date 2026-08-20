@@ -127,6 +127,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=30000,
             handler=kb_search.kb_search_handler,
+            meta=True,  # 平台元工具：RAG 检索始终对 LLM 可见（超限模式常驻注入，同 tool_search）
             builtin=True,
         )
     )

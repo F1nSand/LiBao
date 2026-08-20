@@ -11,12 +11,14 @@ from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.embeddings import EmbeddingService
+from app.core.rerank import RerankService
 from app.storage.models.kb import KbChunk, KbCollection, KbDocument
 
 logger = logging.getLogger(__name__)
 
 _CJK = re.compile(r"([一-鿿])")
 _RRF_K = 60  # 倒数排名融合常数（docs 01 §9.1）
+_RERANK_CANDIDATES = 20  # rerank 粗排候选数（RRF 取 top 20 → Cross-Encoder 精排 → top_k）
 
 
 def space_cjk(text: str) -> str:
@@ -214,10 +216,11 @@ class KbRepository:
         top_k: int = 5,
         hybrid: dict | None = None,
         embedder: EmbeddingService | None = None,
+        reranker: RerankService | None = None,
     ) -> list[dict]:
-        """双通道 → RRF 融合（k=60）→ top_k。服务层与 kb_search 工具共用单一来源。
+        """双通道 → RRF 融合（k=60）→ Cross-Encoder 精排 → top_k。服务层与 kb_search 工具共用单一来源。
 
-        rerank_score 恒 null（Cross-Encoder 为 M4 接缝）；语义通道故障静默降级 bm25-only。
+        语义通道故障静默降级 bm25-only；rerank 故障静默降级 RRF 顺序（不击穿检索）。
         """
         if not query.strip():
             return []
@@ -244,14 +247,28 @@ class KbRepository:
                 texts.setdefault(cid, text)
         if not scores:
             return []
-        ranked = sorted(scores.items(), key=lambda kv: -kv[1])[:top_k]
+        # RRF 粗排 → 候选池 → Cross-Encoder 精排 → top_k（候选 ≤ top_k 或 rerank 故障则回退 RRF 顺序）
+        candidates = sorted(scores.items(), key=lambda kv: -kv[1])[: _RERANK_CANDIDATES]
+        rerank_scores: dict[uuid.UUID, float] = {}
+        if len(candidates) > top_k:
+            try:
+                reranker = reranker or RerankService()
+                docs = [texts[cid] for cid, _ in candidates]
+                scored = await reranker.rerank(query, docs, top_n=top_k)  # [(原 index, score)] 降序
+                ranked = [(candidates[i][0], scores[candidates[i][0]]) for i, _ in scored]
+                rerank_scores = {candidates[i][0]: round(s, 4) for i, s in scored}
+            except Exception as exc:  # noqa: BLE001  rerank 故障 → 降级 RRF 顺序（不击穿检索）
+                logger.warning("rerank degraded to RRF order: %s", exc)
+                ranked = candidates[:top_k]
+        else:
+            ranked = candidates[:top_k]
         sources = await self.chunk_sources([cid for cid, _ in ranked])
         return [
             {
                 "chunk_id": str(cid),
                 "text": texts[cid],
                 "score": round(score, 4),
-                "rerank_score": None,
+                "rerank_score": rerank_scores.get(cid),
                 "source": sources.get(str(cid), {}),
             }
             for cid, score in ranked

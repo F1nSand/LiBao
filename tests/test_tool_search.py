@@ -82,6 +82,16 @@ def test_build_tools_over_limit_two_stage(monkeypatch):
     assert [a["function"]["name"] for a in aci] == ["tool_search", "time_now"]
 
 
+def test_build_tools_over_limit_injects_meta_kb_search(monkeypatch):
+    """M6 收尾：kb_search 是 meta 工具，超限模式常驻注入（RAG 始终可见，无需 tool_search 发现）。"""
+    s = get_settings()
+    monkeypatch.setattr(s, "aci_full_limit", 1)
+    aci = build_agent_tools(["tl_time_now", "tl_kb_search"], [])
+    names = [a["function"]["name"] for a in aci]
+    assert "tool_search" in names and "kb_search" in names  # 两个 meta 工具都常驻
+    assert "time_now" not in names  # 非 meta 且未选中 → 不注入
+
+
 def test_build_tools_selected_filtered(monkeypatch):
     s = get_settings()
     monkeypatch.setattr(s, "aci_full_limit", 1)

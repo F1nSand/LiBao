@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 32
     embedding_timeout_s: int = 60
 
+    # ---- M3 Rerank（SiliconFlow，复用 embedding 的 base_url/api_key，同一家供应商）----
+    rerank_model: str = "Qwen/Qwen3-Reranker-0.6B"
+
     # ---- M3 记忆 ----
     memory_inject_limit: int = 5  # 每轮注入卡片上限（docs 01 §8.2）
     memory_card_max_chars: int = 500  # 单卡片注入序列化上限

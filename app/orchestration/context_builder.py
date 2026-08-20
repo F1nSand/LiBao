@@ -34,7 +34,14 @@ def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = No
     specs = _authorized_specs(tool_ids, id_set)
     if len(specs) <= get_settings().aci_full_limit:
         return [s.aci() for s in sorted(specs, key=lambda s: s.id)]
+    # 平台元工具常驻（超限模式）：tool_search 无条件 + specs 内其他 meta（如 kb_search，RAG 始终可见）
+    always = []
     tool_search = get("tl_tool_search")
+    if tool_search is not None and tool_search.enabled:
+        always.append(tool_search)
+    for s in sorted(specs, key=lambda s: s.id):
+        if s.meta and s.enabled and s.id != "tl_tool_search":
+            always.append(s)
     chosen = [
         s
         for n in (selected_names or [])
@@ -42,8 +49,7 @@ def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = No
         and agent_can_use(s, id_set)
         and not s.meta
     ]
-    aci = [tool_search.aci()] if tool_search is not None and tool_search.enabled else []
-    return aci + [s.aci() for s in sorted(chosen, key=lambda s: s.id)]
+    return [s.aci() for s in always] + [s.aci() for s in sorted(chosen, key=lambda s: s.id)]
 
 
 def build_context(state: AgentState) -> list[BaseMessage]:

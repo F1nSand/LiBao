@@ -188,3 +188,47 @@ async def test_archived_and_indexing_invisible(kb_search_fixture):
         )
         # archived 文档的 chunk 不可见（即使 bm25 命中"寒冷"）
         assert all("寒冷" not in h["text"] for h in hits)
+
+
+class ReorderReranker:
+    """固定重排：把候选 index 1 排到最前（模拟 rerank 精排改变 RRF 顺序）。"""
+
+    async def rerank(self, query: str, documents: list[str], top_n: int) -> list[tuple[int, float]]:
+        n = min(top_n, len(documents))
+        order = [1, 0] + list(range(2, n))  # index 1 优先
+        return [(order[i], 0.9 - i * 0.1) for i in range(n)]
+
+
+class FailingReranker:
+    async def rerank(self, query: str, documents: list[str], top_n: int) -> list[tuple[int, float]]:
+        raise RuntimeError("rerank down")
+
+
+async def test_rerank_reorders_top(kb_search_fixture, monkeypatch):
+    """rerank 精排生效：候选 2（天气/股票）、top_k=1，rerank 把股票（index 1）排前 + 填 rerank_score。"""
+    sessionmaker, user, coll_id, coll_b_id = kb_search_fixture
+    svc = KbService()
+    monkeypatch.setattr("app.storage.repositories.kb.EmbeddingService", lambda: NearEmbedder())
+    monkeypatch.setattr("app.storage.repositories.kb.RerankService", lambda: ReorderReranker())
+    async with sessionmaker() as session:
+        hits = await svc.search(session, user, coll_ids=[coll_id], query="天气", top_k=1,
+            hybrid={"semantic": 1, "bm25": 1},
+        )
+    assert len(hits) == 1
+    assert "股票" in hits[0]["text"]  # rerank 把 index 1（股票）排到最前
+    assert hits[0]["rerank_score"] is not None  # rerank_score 已填充
+
+
+async def test_rerank_failure_degrades_to_rrf(kb_search_fixture, monkeypatch):
+    """rerank 故障 → 静默降级 RRF 顺序（天气语义最近排前，rerank_score 为 None）。"""
+    sessionmaker, user, coll_id, coll_b_id = kb_search_fixture
+    svc = KbService()
+    monkeypatch.setattr("app.storage.repositories.kb.EmbeddingService", lambda: NearEmbedder())
+    monkeypatch.setattr("app.storage.repositories.kb.RerankService", lambda: FailingReranker())
+    async with sessionmaker() as session:
+        hits = await svc.search(session, user, coll_ids=[coll_id], query="天气", top_k=1,
+            hybrid={"semantic": 1, "bm25": 1},
+        )
+    assert len(hits) == 1
+    assert "天气" in hits[0]["text"]  # RRF 顺序：doc1 语义最近
+    assert hits[0]["rerank_score"] is None  # 降级回退，不填 rerank_score
