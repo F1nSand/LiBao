@@ -16,6 +16,7 @@ from langgraph.types import Command
 
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
 from app.services.notification import maybe_notify_from_tool_results
+from app.services.skill import SkillService
 from app.services.task import TaskService, push_event
 from app.services.tool import ToolService
 from app.storage.repositories.agent import AgentRepository
@@ -167,12 +168,17 @@ async def run_task_graph(
             await TaskService().set_running(db, task)
             user_id = str(task.user_id) if task.user_id else None
             enabled_tool_ids = await ToolService().enabled_tool_ids(db, agent.org_id)
+            enabled_skills = await SkillService().enabled_skill_routes(db, agent.org_id)
         await _run_graph_common(
             graph=graph,
             sessionmaker=sessionmaker,
             task_id=task_id,
             initial=build_initial_state(
-                agent, _task_input_text(task.input), user_id=user_id, enabled_tool_ids=enabled_tool_ids
+                agent,
+                _task_input_text(task.input),
+                user_id=user_id,
+                enabled_tool_ids=enabled_tool_ids,
+                enabled_skills=enabled_skills,
             ),
             trace_id=trace_id,
             model_override=model_override,

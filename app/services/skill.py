@@ -66,6 +66,11 @@ class SkillService:
 
         return paged([serialize_skill(s) for s in items], total, page, page_size)
 
+    async def enabled_skill_routes(self, db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, str]]:
+        """本组织已启用 skills 的路由描述（主 agent 注入静态前缀，镜像 tools enabled_tool_ids）。"""
+        rows = await SkillRepository(db).list_enabled(org_id)
+        return [{"name": s.name, "description": s.description} for s in rows]
+
     async def get_in_org(self, db: AsyncSession, org_id: uuid.UUID, skill_id: str) -> Skill:
         """按 id 或 name 解析（REST 用 id；tl_load_skill 用 name）。org 隔离。"""
         repo = SkillRepository(db)

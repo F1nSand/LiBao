@@ -560,6 +560,7 @@ async def main() -> None:
             "tl_demo_notify",
             "tl_tool_search",
             "tl_kb_search",
+            "tl_load_skill",
             "tl_fetch_url",
             "tl_analyze_image",
             "tl_dispatch_subagent",

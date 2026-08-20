@@ -11,6 +11,7 @@ from app.tools.builtin import (
     fetch_url,
     initiate_demo,
     kb_search,
+    load_skill,
     time_now,
     tool_search,
     unit_converter,
@@ -104,8 +105,7 @@ def register_builtin_tools() -> None:
             description=(
                 "检索知识库（RAG）：按自然语言查询返回匹配的知识片段（含来源文档）。"
                 "需要依据知识库内容回答时使用。反例：不要用它回答与知识库无关的问题。"
-            ),
-            params_schema={
+            ),            params_schema={
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "自然语言检索问题"},
@@ -128,6 +128,33 @@ def register_builtin_tools() -> None:
             timeout_ms=30000,
             handler=kb_search.kb_search_handler,
             meta=True,  # 平台元工具：RAG 检索始终对 LLM 可见（超限模式常驻注入，同 tool_search）
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_load_skill",
+            name="load_skill",
+            description=(
+                "加载指定 skill 的完整操作步骤（正文）。当需要某 skill 的详细流程/步骤时，"
+                "按 skill 名调用此工具取回正文（skill 名见 system_prompt 中「可用 Skills」列表）。"
+                "反例：不要用它执行动作或回答与 skill 无关的问题。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "skill 名称（见 system_prompt 中可用 Skills 列表）"},
+                },
+                "required": ["name"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=True,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=5000,
+            handler=load_skill.load_skill_handler,
+            meta=True,  # 平台元工具：skill 正文加载始终对 LLM 可见（渐进式披露，docs 01 §4.2.1）
             builtin=True,
         )
     )

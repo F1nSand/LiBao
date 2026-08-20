@@ -66,12 +66,22 @@ def _build_round_message(round_data: dict[str, Any], tool_results: list[dict[str
     }
 
 
+def skills_route_section(skills: list[dict[str, str]] | None) -> str:
+    """enabled skills 路由描述段（M7-A）：name+description 注入静态前缀；正文经 load_skill 按需取回。"""
+    if not skills:
+        return ""
+    lines = ["", "## 可用 Skills（需要某 skill 的完整步骤时，用 load_skill(name) 取正文）"]
+    lines += [f"- {s['name']}: {s['description']}" for s in skills]
+    return "\n".join(lines)
+
+
 def build_initial_state(
     agent: Any,
     content: str,
     user_id: str | None = None,
     org_id: str | None = None,
     enabled_tool_ids: list[str] | None = None,
+    enabled_skills: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。
 
@@ -84,12 +94,16 @@ def build_initial_state(
     seed_tools = set(agent.tools or [])
     if enabled_tool_ids:
         seed_tools |= set(enabled_tool_ids)
+    system_prompt = agent.system_prompt
+    route = skills_route_section(enabled_skills)
+    if route:
+        system_prompt = f"{system_prompt}\n{route}"
     return {
         "messages": [HumanMessage(content=content)],
         "agent_config": {
             "name": agent.name,
             "model": agent.model,
-            "system_prompt": agent.system_prompt,
+            "system_prompt": system_prompt,
             "tools": sorted(seed_tools),  # 确定性排序（前缀稳定；启停实时生效）
             "max_steps": agent.max_steps,
             "org_id": org_id or str(getattr(agent, "org_id", "") or ""),
