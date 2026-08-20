@@ -41,6 +41,7 @@ class LongTermMemory(BaseModel, Base):
     __tablename__ = "longterm_memory"
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)  # 工作区记忆（M7-B）
     card_type: Mapped[str] = mapped_column(String(16), nullable=False)  # json_card | note
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

@@ -40,9 +40,13 @@ async def memory_inject_node(state: AgentState, config: Optional[RunnableConfig]
     trace_id = (config or {}).get("configurable", {}).get("trace_id")
     start = time.perf_counter()
     try:
+        agent_cfg = state.get("agent_config", {}) or {}
+        ws_id = agent_cfg.get("workspace_id")
         async with sessionmaker() as db:
             cards = await MemoryRepository(db).list_cards(
-                uuid.UUID(user_id), limit=get_settings().memory_inject_limit
+                uuid.UUID(user_id),
+                limit=get_settings().memory_inject_limit,
+                workspace_id=uuid.UUID(ws_id) if ws_id else None,
             )
             refs = [_card_ref(c, get_settings().memory_card_max_chars) for c in cards]
     except Exception:  # noqa: BLE001  注入故障不击穿对话

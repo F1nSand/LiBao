@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion, MemoryTrace
@@ -75,9 +75,11 @@ class MemoryRepository:
         tags: list[str] | None = None,
         importance: float = 0.0,
         source: str = "manual",
+        workspace_id: uuid.UUID | None = None,
     ) -> LongTermMemory:
         card = LongTermMemory(
             user_id=user_id,
+            workspace_id=workspace_id,
             card_type=card_type,
             title=title,
             content=content,
@@ -113,13 +115,21 @@ class MemoryRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def list_cards(self, user_id: uuid.UUID, *, limit: int = 100) -> list[LongTermMemory]:
-        stmt = (
-            select(LongTermMemory)
-            .where(LongTermMemory.user_id == user_id, LongTermMemory.deleted_at.is_(None))
-            .order_by(LongTermMemory.importance.desc(), LongTermMemory.created_at.desc())
-            .limit(limit)
+    async def list_cards(
+        self, user_id: uuid.UUID, *, limit: int = 100, workspace_id: uuid.UUID | None = None
+    ) -> list[LongTermMemory]:
+        stmt = select(LongTermMemory).where(
+            LongTermMemory.user_id == user_id, LongTermMemory.deleted_at.is_(None)
         )
+        # M7-B 工作区记忆隔离：普通对话只取个人记忆（workspace_id IS NULL）；
+        # 工作区对话取（工作区记忆 ∪ 个人记忆）
+        if workspace_id is None:
+            stmt = stmt.where(LongTermMemory.workspace_id.is_(None))
+        else:
+            stmt = stmt.where(
+                or_(LongTermMemory.workspace_id == workspace_id, LongTermMemory.workspace_id.is_(None))
+            )
+        stmt = stmt.order_by(LongTermMemory.importance.desc(), LongTermMemory.created_at.desc()).limit(limit)
         return list((await self.session.execute(stmt)).scalars())
 
     async def soft_delete(self, card: LongTermMemory) -> None:

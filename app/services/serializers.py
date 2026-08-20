@@ -229,6 +229,7 @@ def serialize_longterm(card: LongTermMemory) -> dict[str, Any]:
         "body": card.content,
         "tags": card.tags or [],
         "importance": card.importance,
+        "workspace_id": str(card.workspace_id) if card.workspace_id else None,  # 工作区记忆（M7-B）
         "created_at": _dt(card.created_at),
         "updated_at": _dt(card.updated_at),
     }
