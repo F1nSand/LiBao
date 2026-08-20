@@ -15,6 +15,8 @@
         - 文件（资源管理器）：`GET /workspaces/{id}/files?path=` 列目录（{name,path,is_dir,size}）/ `GET /files/content?path=` 读（限 50K）/ `POST /files` 写 `{path,content}` / `DELETE /files?path=` 删（目录删除暂不支持）
         - 工作区对话：`POST /chat/stream` 带 `workspace_id`（或 `POST /conversations` 建带 workspace_id 的会话）→ 项目级 agent = 主 agent + system_prompt_fragment + 文件工具（read_file/write_file/edit_file/glob/grep/bash，bash 走 LLM 语义审查）
       - 前端建议补：工作区页气泡网格（一泡一个工作区 + 新建/编辑气泡内容）+ 工作区内部 = 对话/轨迹复用 + 资源管理器侧栏（文件树 + 预览 + 引用文件）
+      - ✅ 前端已补（2026-08-20）：`/workspace` 气泡网格（新建/编辑/进入/归档）+ `/workspace/:id` 内部页（左文件树资源管理器 el-tree 懒加载 + 右工作区对话 = 独立 useChatStream 实例 + 工作区会话列表 + 引用文件 file_refs + 会话|轨迹）；types `Workspace/WorkspaceFile` + `api/workspace.ts` + mock（workspaces CRUD + files + conversations workspace_id 过滤）+ `FEATURE.workspaces` 降级。单测 +13 / e2e +2。
+      - 契约确认请求 →后端：`GET /conversations` 不带 `workspace_id` 时是否排除工作区会话？前端 mock 按「排除」处理（保证 /chat 全局列表不含工作区对话）；若真实后端包含工作区会话请告知，前端再对齐。
       - 计划：`docs/plans/2026-08-20-m7b-workspace.md`（后端 L3，Phase 1/2/T6 已完，T7 workspace_skill/T8 记忆隔离待续）
 
 [open] 2026-08-20 · ←后端 | **M7-A：主 Agent 第三方 Skills 适配（后端先行，前端随后补 Skills 管理页）** | 契约如下，前端可先就绪 types/mock/UI，不阻塞后端。

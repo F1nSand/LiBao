@@ -6,7 +6,12 @@ export interface PageParams {
   page_size?: number
 }
 
-export function listConversations(params: PageParams = {}) {
+/** 会话列表查询参数（M7-B：workspace_id 过滤工作区会话） */
+export interface ConversationQuery extends PageParams {
+  workspace_id?: string
+}
+
+export function listConversations(params: ConversationQuery = {}) {
   return httpGet<Paged<Conversation>>('/conversations', { params })
 }
 

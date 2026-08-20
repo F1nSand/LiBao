@@ -23,6 +23,7 @@ export const FEATURE = {
   providers: 'settings.providers',
   evolution: 'evolution',
   skills: 'skills',
+  workspaces: 'workspaces',
 } as const
 export type Feature = (typeof FEATURE)[keyof typeof FEATURE]
 
@@ -42,6 +43,7 @@ const FEATURE_ROUTES: Array<[RegExp, Feature]> = [
   [/^\/settings\/providers/, FEATURE.providers],
   [/^\/evolution/, FEATURE.evolution],
   [/^\/skills/, FEATURE.skills],
+  [/^\/workspaces/, FEATURE.workspaces],
 ]
 
 const unavailable = ref<Record<string, boolean>>({})

@@ -12,6 +12,8 @@ import type {
   Task,
   ToolDefinition,
   User,
+  Workspace,
+  WorkspaceFile,
 } from '@/types'
 import { isoDate } from './util'
 
@@ -101,6 +103,9 @@ export const conversations: Conversation[] = [
   { id: 'c_002', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '什么是 SSE', status: 'active', max_messages: 1000, last_message_at: isoDate(30), created_at: isoDate(90) },
   { id: 'c_long', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '长会话（轨迹分页演示）', status: 'active', max_messages: 1000, last_message_at: isoDate(20), created_at: isoDate(180) },
   { id: 'c_scroll', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '滚动测试长会话', status: 'active', max_messages: 1000, last_message_at: isoDate(4), created_at: isoDate(200) },
+  // 工作区会话（M7-B）：GET /conversations 无 workspace_id 时排除，只在工作区页可见
+  { id: 'c_ws1', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '工作区：产品文档', status: 'active', max_messages: 1000, workspace_id: 'ws_001', last_message_at: isoDate(6), created_at: isoDate(30) },
+  { id: 'c_ws2', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '工作区：数据管线', status: 'active', max_messages: 1000, workspace_id: 'ws_002', last_message_at: isoDate(3), created_at: isoDate(20) },
 ]
 
 export const messages: Record<string, Message[]> = {
@@ -163,6 +168,38 @@ export const messages: Record<string, Message[]> = {
       created_at: isoDate(24 - i * 2),
     }
   }),
+  // 工作区会话消息（M7-B）
+  c_ws1: [
+    {
+      id: 'mws_1',
+      conversation_id: 'c_ws1',
+      role: 'user',
+      content: '总结一下 README 的要点',
+      attachments: [],
+      tool_calls: [],
+      created_at: isoDate(6),
+    },
+    {
+      id: 'mws_2',
+      conversation_id: 'c_ws1',
+      role: 'assistant',
+      content: 'README 包含「快速开始」与「常见问题」两个模块。',
+      attachments: [],
+      tool_calls: [],
+      created_at: isoDate(5),
+    },
+  ],
+  c_ws2: [
+    {
+      id: 'mws2_1',
+      conversation_id: 'c_ws2',
+      role: 'user',
+      content: 'pipeline.py 做什么？',
+      attachments: [],
+      tool_calls: [],
+      created_at: isoDate(3),
+    },
+  ],
 }
 
 /** Skills 种子（M7-A 契约，交接板 2026-08-20；org 级、默认关闭，与工具同模式） */
@@ -188,6 +225,39 @@ export const skills: Skill[] = [
     created_at: isoDate(80),
   },
 ]
+
+/** Workspaces 种子（M7-B 契约，交接板 2026-08-20；org 级、active） */
+export const workspaces: Workspace[] = [
+  { id: 'ws_001', org_id: 'org_1', name: '产品文档', description: '产品文档与入门指南写作工作区', status: 'active', created_by: 'u_admin', created_at: isoDate(90) },
+  { id: 'ws_002', org_id: 'org_1', name: '数据管线', description: '数据采集与清洗管线开发', status: 'active', created_by: 'u_admin', created_at: isoDate(60) },
+]
+
+/** 工作区文件树（扁平 list，path 相对 root 含层级；列目录按父路径过滤） */
+export const workspaceFiles: Record<string, WorkspaceFile[]> = {
+  ws_001: [
+    { name: 'README.md', path: 'README.md', is_dir: false, size: 320 },
+    { name: 'docs', path: 'docs', is_dir: true, size: 0 },
+    { name: 'docs/入门指南.md', path: 'docs/入门指南.md', is_dir: false, size: 1280 },
+    { name: 'docs/API 参考.md', path: 'docs/API 参考.md', is_dir: false, size: 2400 },
+    { name: 'src', path: 'src', is_dir: true, size: 0 },
+    { name: 'src/main.py', path: 'src/main.py', is_dir: false, size: 640 },
+  ],
+  ws_002: [
+    { name: 'pipeline.py', path: 'pipeline.py', is_dir: false, size: 1500 },
+    { name: 'data', path: 'data', is_dir: true, size: 0 },
+    { name: 'data/input.json', path: 'data/input.json', is_dir: false, size: 800 },
+  ],
+}
+
+/** 文件正文（key = `workspaceId|path`；读超 50K 截断） */
+export const workspaceFileContents: Record<string, string> = {
+  'ws_001|README.md': '# 产品文档工作区\n\n这是示例 README，供工作区文件引用测试。\n\n- 快速开始\n- 常见问题\n',
+  'ws_001|docs/入门指南.md': '# 入门指南\n\n1. 安装依赖\n2. 初始化配置\n3. 启动服务\n',
+  'ws_001|docs/API 参考.md': '# API 参考\n\n`GET /api/v1/workspaces` 列出工作区。\n',
+  'ws_001|src/main.py': 'def main():\n    print("hello workspace")\n\nif __name__ == "__main__":\n    main()\n',
+  'ws_002|pipeline.py': 'def run():\n    # 数据清洗管线\n    pass\n',
+  'ws_002|data/input.json': '{\n  "source": "mock",\n  "rows": 128\n}\n',
+}
 
 export const tasks: Task[] = [
   {

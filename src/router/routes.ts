@@ -59,6 +59,12 @@ export const routes: RouteRecordRaw[] = [
     meta: { title: '工作区', icon: 'Grid', requiresAuth: true } satisfies AppRouteMeta,
   },
   {
+    path: '/workspace/:id',
+    name: 'workspace-detail',
+    component: () => import('@/views/WorkspaceDetailView.vue'),
+    meta: { title: '工作区', requiresAuth: true } satisfies AppRouteMeta,
+  },
+  {
     path: '/chat',
     name: 'chat',
     component: () => import('@/views/ChatView.vue'),

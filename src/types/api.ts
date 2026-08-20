@@ -76,6 +76,8 @@ export interface Message {
   role: MessageRole
   content: string
   attachments?: AttachmentRef[]
+  /** 工作区文件引用（docs/03 §5.2：相对 root_path，后端读内容注入上下文，带来源标记 + 大小上限） */
+  file_refs?: FileRef[]
   tool_calls?: ToolCallRecord[]
   token_usage?: TokenUsage
   /** 单条消息成本（¥；契约扩展提案：逐轮 cost 后端 emit/持久化后可用，mock 演示） */
@@ -139,6 +141,8 @@ export interface Conversation {
   title: string
   status: string
   max_messages?: number
+  /** 工作区会话（M7-B，docs/03 §5.2）；null/缺省 = 普通对话 */
+  workspace_id?: string
   last_message_at?: string
   created_at: string
 }
@@ -147,16 +151,61 @@ export interface ChatMessageInput {
   content: string
   role: 'user'
   attachments?: string[]
+  /** 工作区文件引用（docs/03 §5.2：相对 root_path，后端读内容注入上下文） */
+  file_refs?: FileRef[]
 }
 
 export interface ChatRequest {
   conversation_id: string | null
+  workspace_id?: string | null
   message: ChatMessageInput
   stream: true
 }
 
 export interface CreateConversationRequest {
   title: string
+  /** 工作区会话（M7-B）：null/缺省 = 普通对话 */
+  workspace_id?: string
+}
+
+/** ---------- 工作区（M7-B，docs/03 §5.14 / docs/04 §3.11 / 交接板 2026-08-20） ---------- */
+export interface FileRef {
+  /** 相对 root_path 的文件路径（服务端强制 realpath 校验，防越权） */
+  path: string
+}
+
+export interface Workspace {
+  id: string
+  org_id?: string
+  name: string
+  description?: string
+  /** 本地文件夹绝对路径（后端托管，前端不可指定） */
+  root_path?: string
+  /** 项目级 agent 附加 prompt 片段（追加在主 agent system_prompt 后） */
+  system_prompt_fragment?: string
+  status: 'active' | 'archived'
+  created_by?: string
+  created_at: string
+}
+
+/** 文件树节点（一层；path 相对 root，父路径 = 去掉末段） */
+export interface WorkspaceFile {
+  name: string
+  path: string
+  is_dir: boolean
+  size?: number
+}
+
+export interface CreateWorkspaceRequest {
+  name: string
+  description?: string
+  system_prompt_fragment?: string
+}
+
+export interface UpdateWorkspaceRequest {
+  name?: string
+  description?: string
+  system_prompt_fragment?: string
 }
 
 /** ---------- 任务 ---------- */

@@ -31,6 +31,12 @@ function pick(paths: string[]): MenuItem[] {
     )
 }
 
+/** 菜单项高亮：/workspace/:id 命中「工作区」入口 */
+function isActive(item: MenuItem): boolean {
+  if (route.path === item.path) return true
+  return item.path === '/workspace' && route.path.startsWith('/workspace/')
+}
+
 /** 顶部：工作区（对话上方）+ 对话 */
 const topItems = computed(() => pick(['/workspace', '/chat']))
 /** 底部：知识库 */
@@ -65,7 +71,7 @@ const settingsChildren = computed(() => {
         :key="item.path"
         :to="item.path"
         class="nav-item"
-        :class="{ active: route.path === item.path }"
+        :class="{ active: isActive(item) }"
         :title="collapsed ? item.title : undefined"
       >
         <el-icon :size="18"><component :is="item.icon" /></el-icon>
@@ -81,7 +87,7 @@ const settingsChildren = computed(() => {
         :key="item.path"
         :to="item.path"
         class="nav-item"
-        :class="{ active: route.path === item.path }"
+        :class="{ active: isActive(item) }"
         :title="collapsed ? item.title : undefined"
       >
         <el-icon :size="18"><component :is="item.icon" /></el-icon>

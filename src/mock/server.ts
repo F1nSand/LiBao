@@ -1,11 +1,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { ChatRequest, KbCollection, KbDocument, Skill, ToolDefinition } from '@/types'
+import type { ChatRequest, KbCollection, KbDocument, Skill, ToolDefinition, Workspace } from '@/types'
 import {
   users,
   candidates,
   DEFAULT_AGENT_ID,
   tools,
   skills,
+  workspaces,
+  workspaceFiles,
+  workspaceFileContents,
   conversations,
   messages,
   tasks,
@@ -206,7 +209,7 @@ export const mockServer = {
     if (method === 'POST' && pathname === '/chat/stream') {
       if (!user) return void json(res, fail(40101, '未登录'), 401)
       const chatReq = (body.json ?? {}) as ChatRequest
-      // 新会话：先注册 conversation，保证消息可持久化回读
+      // 新会话：先注册 conversation，保证消息可持久化回读（工作区对话带 workspace_id）
       if (!chatReq.conversation_id) {
         const nc = {
           id: uid('c'),
@@ -215,6 +218,7 @@ export const mockServer = {
           title: (chatReq.message?.content ?? '新会话').slice(0, 20),
           status: 'active',
           max_messages: 1000,
+          workspace_id: chatReq.workspace_id ?? undefined,
           created_at: isoDate(0),
         }
         conversations.unshift(nc)
@@ -228,6 +232,7 @@ export const mockServer = {
         role: 'user',
         content: chatReq.message?.content ?? '',
         attachments: [],
+        file_refs: chatReq.message?.file_refs ?? [],
         tool_calls: [],
         created_at: isoDate(0),
       })
@@ -324,12 +329,16 @@ export const mockServer = {
     if (method === 'GET' && pathname === '/conversations') {
       const page = Number(query.get('page') ?? 1)
       const size = Number(query.get('page_size') ?? 20)
-      const mine = conversations.filter((c) => c.user_id === user!.id)
+      const wsId = query.get('workspace_id')
+      // 按工作区过滤；无参时排除工作区会话（/chat 全局列表不含工作区对话，M7-B）
+      const mine = conversations.filter(
+        (c) => c.user_id === user!.id && (wsId ? c.workspace_id === wsId : !c.workspace_id),
+      )
       return void json(res, ok(paginate(mine, page, size)))
     }
     if (method === 'POST' && pathname === '/conversations') {
       const b = body.json ?? {}
-      const nc = { id: uid('c'), user_id: user!.id, agent_id: DEFAULT_AGENT_ID, title: b.title ?? '新会话', status: 'active', max_messages: 1000, created_at: isoDate(0) }
+      const nc = { id: uid('c'), user_id: user!.id, agent_id: DEFAULT_AGENT_ID, title: b.title ?? '新会话', status: 'active', max_messages: 1000, workspace_id: b.workspace_id ?? undefined, created_at: isoDate(0) }
       conversations.unshift(nc)
       messages[nc.id] = []
       return void json(res, ok(nc))
@@ -360,6 +369,84 @@ export const mockServer = {
       const limit = Number(query.get('limit') ?? 50)
       const { nodes, hasMore } = paginateTrajectory(all, beforeSeq, limit)
       return void json(res, ok({ conversation_id: id, nodes, has_more: hasMore }))
+    }
+
+    /* ===== 工作区（M7-B，docs/03 §5.14 / 交接板 2026-08-20） ===== */
+    if (method === 'GET' && pathname === '/workspaces') {
+      const page = Number(query.get('page') ?? 1)
+      const size = Number(query.get('page_size') ?? 20)
+      const list = workspaces.filter((w) => w.status !== 'archived')
+      return void json(res, ok(paginate(list, page, size)))
+    }
+    if (method === 'POST' && pathname === '/workspaces') {
+      const b = body.json ?? {}
+      const nw = {
+        id: uid('ws'),
+        org_id: user!.org_id ?? 'org_1',
+        name: b.name ?? '未命名工作区',
+        description: b.description ?? '',
+        system_prompt_fragment: b.system_prompt_fragment ?? '',
+        status: 'active',
+        created_by: user!.id,
+        created_at: isoDate(0),
+      } as Workspace
+      workspaces.unshift(nw)
+      workspaceFiles[nw.id] = []
+      return void json(res, ok(nw))
+    }
+    p = match(pathname, '/workspaces/:id')
+    if (method === 'GET' && p) {
+      const w = workspaces.find((x) => x.id === p!.id)
+      if (!w) return void json(res, fail(40401, '工作区不存在'))
+      return void json(res, ok(w))
+    }
+    if (method === 'PATCH' && p) {
+      const w = workspaces.find((x) => x.id === p!.id)
+      if (w) Object.assign(w, body.json)
+      return void json(res, ok(w))
+    }
+    if (method === 'DELETE' && p) {
+      const w = workspaces.find((x) => x.id === p!.id)
+      if (w) w.status = 'archived'
+      return void json(res, ok(null))
+    }
+    /* 工作区文件（path 相对 root；空 path = 顶层，非空 = 直接子项） */
+    p = match(pathname, '/workspaces/:id/files/content')
+    if (method === 'GET' && p) {
+      const path = query.get('path') ?? ''
+      const content = workspaceFileContents[`${p!.id}|${path}`] ?? ''
+      return void json(res, ok({ path, content: content.slice(0, 50_000) }))
+    }
+    p = match(pathname, '/workspaces/:id/files')
+    if (method === 'GET' && p) {
+      const path = query.get('path') ?? ''
+      const files = workspaceFiles[p!.id] ?? []
+      const children = files.filter((f) => {
+        if (!path) return !f.path.includes('/')
+        return f.path.startsWith(`${path}/`) && !f.path.slice(path.length + 1).includes('/')
+      })
+      return void json(res, ok(children))
+    }
+    if (method === 'POST' && p) {
+      const b = body.json ?? {}
+      const path = String(b.path ?? '')
+      const content = String(b.content ?? '')
+      if (!path) return void json(res, fail(40001, '缺少文件路径'))
+      if (!workspaceFiles[p!.id]) workspaceFiles[p!.id] = []
+      const list = workspaceFiles[p!.id]
+      const existing = list.find((f) => f.path === path)
+      if (existing && existing.is_dir) return void json(res, fail(40001, '目录不能写入内容'))
+      if (!existing) list.push({ name: path.split('/').pop() ?? path, path, is_dir: false, size: content.length })
+      workspaceFileContents[`${p!.id}|${path}`] = content
+      return void json(res, ok({ name: path.split('/').pop(), path, is_dir: false, size: content.length }))
+    }
+    if (method === 'DELETE' && p) {
+      const path = query.get('path') ?? ''
+      const list = workspaceFiles[p!.id] ?? []
+      const target = list.find((f) => f.path === path)
+      if (target && target.is_dir) return void json(res, fail(40001, '目录删除暂不支持'))
+      workspaceFiles[p!.id] = list.filter((f) => f.path !== path)
+      return void json(res, ok(null))
     }
 
     /* ===== 任务 ===== */

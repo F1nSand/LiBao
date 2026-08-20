@@ -127,9 +127,15 @@ const usageText = computed(() => {
     </div>
 
     <div class="msg-content">
-      <!-- 用户消息：纯文本 + 附件（独立气泡，不套 .msg-text 助手框） -->
+      <!-- 用户消息：纯文本 + 附件 + 工作区文件引用（独立气泡，不套 .msg-text 助手框） -->
       <template v-if="role === 'user' && message">
         <AttachmentBubble v-if="message.attachments?.length" :refs="message.attachments" />
+        <div v-if="message.file_refs?.length" class="file-refs">
+          <span v-for="fr in message.file_refs" :key="fr.path" class="file-ref-chip" :title="fr.path">
+            <el-icon :size="12"><Document /></el-icon>
+            <span class="mono">{{ fr.path }}</span>
+          </span>
+        </div>
         <div class="user-text">{{ message.content }}</div>
       </template>
 
@@ -203,6 +209,33 @@ const usageText = computed(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+}
+.file-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+  justify-content: flex-end;
+}
+.file-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--app-primary);
+  max-width: 260px;
+}
+.file-ref-chip .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mono {
+  font-family: var(--app-font-mono);
 }
 .user-text {
   background: var(--app-primary);
