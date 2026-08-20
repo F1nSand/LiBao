@@ -103,7 +103,11 @@ def build_initial_state(
     system_prompt = agent.system_prompt
     if workspace and workspace.get("system_prompt_fragment"):
         system_prompt = f"{system_prompt}\n\n[工作区]\n{workspace['system_prompt_fragment']}"
-    route = skills_route_section(enabled_skills)
+    # skills 路由描述：org enabled skills + 工作区 filesystem skills（合并进同一「可用 Skills」段）
+    all_skills = list(enabled_skills or [])
+    if workspace and workspace.get("skills"):
+        all_skills += workspace["skills"]
+    route = skills_route_section(all_skills)
     if route:
         system_prompt = f"{system_prompt}\n{route}"
     return {

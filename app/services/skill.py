@@ -55,6 +55,21 @@ def parse_skill_md(text: str) -> dict[str, str]:
     return {"name": name, "description": description, "body": (m.group(2) or "").strip()}
 
 
+def discover_workspace_skills(root_path: str | Path) -> list[dict[str, str]]:
+    """扫描工作区 skills/*/SKILL.md → 路由描述（name + description）。非法 SKILL.md 跳过。"""
+    skills_dir = Path(root_path) / "skills"
+    out: list[dict[str, str]] = []
+    if not skills_dir.is_dir():
+        return out
+    for md in sorted(skills_dir.glob("*/SKILL.md")):
+        try:
+            parsed = parse_skill_md(md.read_text(encoding="utf-8"))
+        except AppError:
+            continue
+        out.append({"name": parsed["name"], "description": parsed["description"]})
+    return out
+
+
 class SkillService:
     async def list_for_org(
         self, db: AsyncSession, org_id: uuid.UUID, page: int, page_size: int, enabled: bool | None = None

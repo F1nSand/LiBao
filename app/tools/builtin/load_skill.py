@@ -1,30 +1,44 @@
-"""load_skill 内置 meta 工具（M7-A）：按 name 取回启用 skill 的正文（渐进式披露，docs 01 §4.2.1）。
+"""load_skill 内置 meta 工具（M7-A/M7-B）：按 name 取回 skill 正文（渐进式披露，docs 01 §4.2.1）。
 
-五层约束：工具层→存储层经 sessionmaker 桥 + SkillRepository（同 kb_search）。
-org 上下文缺失 / 未命中 → 降级错误结果（不抛，executor 正常打包）。
+优先查 org skills（DB，enabled）；未命中回退查工作区 skills（文件 skills/<name>/SKILL.md）。
+org/工作区上下文缺失 → 降级错误结果（不抛）。
 """
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Any
 
+from app.core.errors import AppError
+from app.services.skill import parse_skill_md
 from app.storage.db import get_sessionmaker
 from app.storage.repositories.skill import SkillRepository
-from app.tools.context import get_tool_org
+from app.tools.context import get_tool_org, get_tool_workspace_root
 
 
 async def load_skill_handler(name: str) -> dict[str, Any]:
+    # ① org skills（DB，enabled）
     org_id = get_tool_org()
-    if not org_id:
-        return {"error": "缺少组织上下文"}
-    sessionmaker = get_sessionmaker()
-    if sessionmaker is None:
-        return {"error": "skill 服务不可用"}
-    try:
-        async with sessionmaker() as db:
-            skill = await SkillRepository(db).get_by_org_name(uuid.UUID(org_id), name)
-    except Exception as exc:  # noqa: BLE001  加载故障不击穿工具调用
-        return {"error": f"加载失败: {str(exc)[:300]}"}
-    if skill is None or not skill.enabled:
-        return {"error": f"skill {name} 不存在或未启用"}
-    return {"name": skill.name, "description": skill.description, "body": skill.body}
+    if org_id:
+        sessionmaker = get_sessionmaker()
+        if sessionmaker is not None:
+            try:
+                async with sessionmaker() as db:
+                    skill = await SkillRepository(db).get_by_org_name(uuid.UUID(org_id), name)
+                if skill is not None and skill.enabled:
+                    return {"name": skill.name, "description": skill.description, "body": skill.body}
+            except Exception:  # noqa: BLE001  加载故障不击穿工具调用
+                pass
+    # ② 工作区 skills（文件 skills/<name>/SKILL.md）
+    root = get_tool_workspace_root()
+    if root:
+        p = Path(root) / "skills" / name / "SKILL.md"
+        if p.is_file():
+            try:
+                parsed = parse_skill_md(p.read_text(encoding="utf-8"))
+            except AppError:
+                pass
+            else:
+                if parsed["name"] == name:
+                    return {"name": name, "description": parsed["description"], "body": parsed["body"]}
+    return {"error": f"skill {name} 不存在或未启用"}
