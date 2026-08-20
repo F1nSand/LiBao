@@ -9,15 +9,18 @@
 - [x] Phase2 T4 6 内置文件工具 + Bash 语义审查
 - [x] Phase2 T5 文件 REST（资源管理器）
 - [x] Phase3 T6 workspace 对话 + 项目 agent 组装
-- [ ] Phase3 T7 workspace_skill + mcp_server.workspace_id
-- [ ] Phase4 T8 longterm_memory.workspace_id
+- [x] Phase3 T7 workspace_skill（filesystem skills；mcp_server.workspace_id defer）
+- [x] Phase4 T8 longterm_memory.workspace_id
 - [ ] Phase4 T9 全量回归 + 端到端
 
 ### 执行记录（M7-B）
 - Phase1（commit 89bc29c）：迁移 0013 `workspaces` 表（org 级：name/description/root_path/system_prompt_fragment/status/created_by）+ WorkspaceService（create 建真实本地目录 `{workspaces_root}/{id}` 托管）+ `/workspaces` CRUD（developer+）+ 错误码 40416/40908 + 配置 workspaces_root/command_review_model。测试 4 项。
 - Phase2 核心（commit 9a1e298）：`resolve_workspace_path` 路径强限制（realpath 逃逸 40302）+ 6 内置文件工具（read/write/edit/glob/grep/bash，工作区根 ContextVar）+ bash LLM 语义审查（allow/block，审查失败保守 block）+ tool_execute 注入工作区根。测试 7 项。
 - Phase2 T5（commit 6bcf4fa）：`/workspaces/{id}/files` 列表/读 content/写/删（读→组织成员，写删→developer+），复用路径强限制；目录删除暂不支持。测试 +1。
-- Phase3 T6（commit 0034f50）：conversation.workspace_id（迁移 0014）+ ChatRequest.workspace_id → chat.py 解析工作区 → build_initial_state 注入 workspace_root/system_prompt_fragment/文件工具（6 工具 enabled=True 仅工作区注入）。测试 +1。全量 **342 全绿**。
+- Phase3 T6（commit 0034f50）：conversation.workspace_id（迁移 0014）+ ChatRequest.workspace_id → chat.py 解析工作区 → build_initial_state 注入 workspace_root/system_prompt_fragment/文件工具（6 工具 enabled=True 仅工作区注入）。测试 +1。
+- 修复（commit 160cc89）：workspace_root 返回绝对路径（relative_to/路径校验相对绝对混用致 500）；data/ 进 .gitignore。
+- Phase4 T8（commit ce009dd）：longterm_memory.workspace_id（迁移 0015）+ list_cards 按 workspace_id 过滤（普通→个人；工作区→工作区∪个人）+ memory_inject 读 workspace_id。测试 +1。
+- Phase3 T7a（commit 720014d）：discover_workspace_skills（扫描 skills/*/SKILL.md → 路由描述）+ build_initial_state 合并 org+工作区 skills 进前缀 + load_skill 回退（DB 未命中读工作区文件）。测试 +2。**mcp_server.workspace_id（工作区级 MCP）defer**——工作区 agent 复用组织级 MCP 已够 80% 场景。
 
 ---
 

@@ -36,6 +36,13 @@ class NearEmbedder:
         return [1.0] * 1024
 
 
+class _DisableRerank:
+    """rerank 故障降级：让语义排序测试走纯 RRF（余弦）顺序，不受真实 Cross-Encoder API 波动影响。"""
+
+    async def rerank(self, query: str, docs: list, top_n: int) -> list[tuple[int, float]]:
+        raise RuntimeError("rerank disabled in test")
+
+
 @pytest.fixture
 async def kb_search_fixture():
     engine, sessionmaker = init_db()
@@ -131,6 +138,7 @@ async def test_semantic_ranking(kb_search_fixture, monkeypatch):
     sessionmaker, user, coll_id, coll_b_id = kb_search_fixture
     svc = KbService()
     monkeypatch.setattr("app.storage.repositories.kb.EmbeddingService", lambda: NearEmbedder())
+    monkeypatch.setattr("app.storage.repositories.kb.RerankService", _DisableRerank)  # 隔离真实 rerank API
     async with sessionmaker() as session:
         hits = await svc.search(session, user, coll_ids=[coll_id], query="天气", top_k=5,
             hybrid={"semantic": 1, "bm25": 0},  # 纯语义
