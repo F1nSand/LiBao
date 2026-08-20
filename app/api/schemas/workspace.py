@@ -14,3 +14,8 @@ class UpdateWorkspaceRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     system_prompt_fragment: str | None = None
+
+
+class WriteFileRequest(BaseModel):
+    path: str
+    content: str

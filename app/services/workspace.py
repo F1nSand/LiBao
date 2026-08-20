@@ -8,11 +8,17 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.errors import ERR_WORKSPACE_NAME_CONFLICT, ERR_WORKSPACE_NOT_FOUND, AppError
+from app.core.errors import (
+    ERR_WORKSPACE_NAME_CONFLICT,
+    ERR_WORKSPACE_NOT_FOUND,
+    ERR_WORKSPACE_PATH_FORBIDDEN,
+    AppError,
+)
 from app.services.serializers import serialize_workspace
 from app.storage.models.user import User
 from app.storage.models.workspace import Workspace
 from app.storage.repositories.workspace import WorkspaceRepository
+from app.tools.filesystem import resolve_workspace_path
 
 
 def workspace_root(workspace_id: uuid.UUID) -> Path:
@@ -83,3 +89,51 @@ class WorkspaceService:
         await WorkspaceRepository(db).soft_delete(row)
         await db.commit()
         # 本地目录保留（防误删）；归档清理另做
+
+    # ---- 文件（资源管理器，docs 03 §5.14）----
+
+    async def list_files(self, db: AsyncSession, user: User, workspace_id: str, path: str) -> list[dict[str, Any]]:
+        ws = await self.get_in_org(db, user.org_id, workspace_id)
+        root = Path(ws.root_path)
+        target = resolve_workspace_path(root, path or "")
+        if not target.is_dir():
+            raise AppError(ERR_WORKSPACE_PATH_FORBIDDEN, "路径不是目录")
+        entries: list[dict[str, Any]] = []
+        for p in sorted(target.iterdir()):
+            entries.append(
+                {
+                    "name": p.name,
+                    "path": str(p.relative_to(root)),
+                    "is_dir": p.is_dir(),
+                    "size": p.stat().st_size if p.is_file() else 0,
+                }
+            )
+        return entries
+
+    async def read_file_content(self, db: AsyncSession, user: User, workspace_id: str, path: str) -> dict[str, Any]:
+        ws = await self.get_in_org(db, user.org_id, workspace_id)
+        target = resolve_workspace_path(ws.root_path, path)
+        if not target.is_file():
+            raise AppError(ERR_WORKSPACE_PATH_FORBIDDEN, "文件不存在")
+        try:
+            content = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            content = target.read_bytes().decode("utf-8", errors="replace")
+        return {"path": path, "content": content[:50000]}
+
+    async def write_file(
+        self, db: AsyncSession, user: User, workspace_id: str, path: str, content: str
+    ) -> dict[str, Any]:
+        ws = await self.get_in_org(db, user.org_id, workspace_id)
+        target = resolve_workspace_path(ws.root_path, path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content[:100000], encoding="utf-8")
+        return {"path": path, "written": min(len(content), 100000)}
+
+    async def delete_file(self, db: AsyncSession, user: User, workspace_id: str, path: str) -> None:
+        ws = await self.get_in_org(db, user.org_id, workspace_id)
+        target = resolve_workspace_path(ws.root_path, path)
+        if target.is_dir():
+            raise AppError(ERR_WORKSPACE_PATH_FORBIDDEN, "目录删除暂不支持（防误删）")
+        if target.is_file():
+            target.unlink()

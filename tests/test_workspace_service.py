@@ -80,3 +80,23 @@ async def test_soft_delete(workspace_fixture):
         with pytest.raises(AppError) as exc:
             await WorkspaceService().get_in_org(session, user.org_id, str(row.id))
         assert exc.value.code == 40416
+
+
+async def test_file_ops_roundtrip(workspace_fixture):
+    sessionmaker, user, _ = workspace_fixture
+    async with sessionmaker() as session:
+        ws = await WorkspaceService().create(session, user, CreateWorkspaceRequest(name="files"))
+        wid = str(ws.id)
+        await WorkspaceService().write_file(session, user, wid, "a/notes.md", "hello")
+        entries = await WorkspaceService().list_files(session, user, wid, "")
+        assert any(e["name"] == "a" and e["is_dir"] for e in entries)
+        sub = await WorkspaceService().list_files(session, user, wid, "a")
+        assert sub[0]["name"] == "notes.md"
+        out = await WorkspaceService().read_file_content(session, user, wid, "a/notes.md")
+        assert "hello" in out["content"]
+        await WorkspaceService().delete_file(session, user, wid, "a/notes.md")
+        assert not os.path.exists(os.path.join(ws.root_path, "a", "notes.md"))
+        # 越界路径 → 40302
+        with pytest.raises(AppError) as exc:
+            await WorkspaceService().read_file_content(session, user, wid, "../secret.txt")
+        assert exc.value.code == 40302

@@ -4,9 +4,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, require_developer
+from app.api.deps import get_current_user, get_db, require_developer
 from app.api.envelope import ok
-from app.api.schemas.workspace import CreateWorkspaceRequest, UpdateWorkspaceRequest
+from app.api.schemas.workspace import CreateWorkspaceRequest, UpdateWorkspaceRequest, WriteFileRequest
 from app.services.serializers import serialize_workspace
 from app.services.workspace import WorkspaceService
 from app.storage.models.user import User
@@ -63,4 +63,47 @@ async def delete_workspace(
     db: AsyncSession = Depends(get_db),
 ):
     await WorkspaceService().soft_delete(db, user, workspace_id)
+    return ok()
+
+
+# ---- 文件（资源管理器，docs 03 §5.14）：读 → 组织成员；写/删 → developer+ ----
+
+@router.get("/workspaces/{workspace_id}/files")
+async def list_files(
+    workspace_id: str,
+    path: str = Query(""),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return ok(await WorkspaceService().list_files(db, user, workspace_id, path))
+
+
+@router.get("/workspaces/{workspace_id}/files/content")
+async def read_file_content(
+    workspace_id: str,
+    path: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return ok(await WorkspaceService().read_file_content(db, user, workspace_id, path))
+
+
+@router.post("/workspaces/{workspace_id}/files")
+async def write_file(
+    workspace_id: str,
+    req: WriteFileRequest,
+    user: User = Depends(require_developer),
+    db: AsyncSession = Depends(get_db),
+):
+    return ok(await WorkspaceService().write_file(db, user, workspace_id, req.path, req.content))
+
+
+@router.delete("/workspaces/{workspace_id}/files")
+async def delete_file(
+    workspace_id: str,
+    path: str = Query(...),
+    user: User = Depends(require_developer),
+    db: AsyncSession = Depends(get_db),
+):
+    await WorkspaceService().delete_file(db, user, workspace_id, path)
     return ok()
