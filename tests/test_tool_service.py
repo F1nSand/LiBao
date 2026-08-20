@@ -100,3 +100,25 @@ async def test_soft_delete(tool_fixture):
         assert exc.value.code == 40405
         assert get("tl_time_now").enabled is False  # 删除即停用（同步桥）
     set_enabled("tl_time_now", True)
+
+
+async def test_serialize_meta_flag(tool_fixture):
+    """M7 前：serialize_tool_definition 带 meta（元工具标记，前端工具页区分）。"""
+    sessionmaker, user = tool_fixture
+    async with sessionmaker() as session:
+        row = await ToolService().create(session, user, CreateToolRequest(name="time_now"))
+        assert serialize_tool_definition(row)["meta"] is False  # 常规工具
+        row2 = await ToolService().create(session, user, CreateToolRequest(name="kb_search"))
+        assert serialize_tool_definition(row2)["meta"] is True  # 元工具
+
+
+async def test_search_excludes_meta_tools(tool_fixture):
+    """M7 前：/tools/search 排除 meta 工具（tool_search/kb_search 平台发现层不自发现）。"""
+    sessionmaker, user = tool_fixture
+    async with sessionmaker() as session:
+        await ToolService().create(session, user, CreateToolRequest(name="kb_search"))
+        await ToolService().create(session, user, CreateToolRequest(name="kb_query_regular", description="检索"))
+        hits = await ToolService().search(session, user.org_id, "kb")
+        names = {h["name"] for h in hits}
+        assert "kb_search" not in names  # meta 工具排除
+        assert "kb_query_regular" in names  # 常规工具保留

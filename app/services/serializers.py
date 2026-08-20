@@ -108,6 +108,7 @@ def serialize_tool_definition(t: ToolDefinition) -> dict[str, Any]:
         "max_concurrency": t.max_concurrency,
         "mcp_source": t.mcp_source,
         "idempotent": t.idempotent,
+        "meta": spec.meta if spec else False,  # 元工具标记（前端工具页区分元工具/常规工具，docs 03 §5.5）
         "created_at": _dt(t.created_at),
     }
 

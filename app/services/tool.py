@@ -184,8 +184,12 @@ class ToolService:
 
     async def search(self, db: AsyncSession, org_id: uuid.UUID, q: str) -> list[dict[str, Any]]:
         rows = await ToolDefinitionRepository(db).search(org_id, q)
-        # id 派生规则与 serialize_tool_definition 一致（单一来源）
-        return [{k: serialize_tool_definition(t)[k] for k in ("id", "name", "description", "enabled")} for t in rows]
+        # id 派生规则与 serialize_tool_definition 一致（单一来源）；排除 meta 工具（平台发现层不自发现）
+        return [
+            {k: serialize_tool_definition(t)[k] for k in ("id", "name", "description", "enabled")}
+            for t in rows
+            if (spec := get_by_name(t.name)) is None or not spec.meta
+        ]
 
     async def enabled_tool_ids(self, db: AsyncSession, org_id: uuid.UUID) -> list[str]:
         """本组织已启用工具 → registry spec id（MCP/自定义启用即对通用助手开放，org 隔离）。"""
