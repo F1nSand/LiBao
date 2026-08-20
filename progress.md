@@ -1,17 +1,22 @@
 # 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-20-m7a-main-agent-skills-mcp.md（M7-A）
 
-## M7-A 主 Agent 第三方 Skills + MCP 适配（2026-08-20 进行中）
+## M7-A 主 Agent 第三方 Skills + MCP 适配（2026-08-20 完成）
 
 任务清单：
-- [ ] T1 Skill 实体 + 迁移 0012 + 仓库
-- [ ] T2 SKILL.md 解析 + SkillService + git 导入
-- [ ] T3 Skills API 路由
-- [ ] T4 tl_load_skill meta 工具
-- [ ] T5 Skills 注入主 agent 上下文
-- [ ] T6 MCP 适配确认
-- [ ] T7 测试 + 回归
+- [x] T1 Skill 实体 + 迁移 0012 + 仓库
+- [x] T2 SKILL.md 解析 + SkillService + git 导入
+- [x] T3 Skills API 路由
+- [x] T4 tl_load_skill meta 工具
+- [x] T5 Skills 注入主 agent 上下文
+- [x] T6 MCP 适配确认（无新代码：MCP 工具已走 enabled_tool_ids 进主 agent 工具集）
+- [x] T7 测试 + 回归
 
 ### 执行记录（M7-A）
+- T1-T3 完成（commit 32adca3）：迁移 0012 `skills` 表（org 级：name/description/body/source/enabled，默认关闭）+ SkillRepository + SkillService（parse_skill_md frontmatter 校验 I7 + import_from_git：git clone 到临时目录→rglob SKILL.md→单事务入库，重名跳过）+ `/skills` CRUD + import（developer+，`/skills/import` 在 `{skill_id}` 前）+ serialize_skill + 错误码 40024/40025/40415/40907。测试 test_skill_service 8 项全绿。
+- T4-T5 完成（commit 5271a01）：`tl_load_skill` 内置 meta 工具（读 get_tool_org → SkillRepository 取 enabled skill 正文，渐进式披露）；`build_initial_state` 追加 `skills_route_section`（enabled skills name+description）进 system_prompt 静态前缀；seed 挂 tl_load_skill（幂等收敛）；chat/task 三处接线 `SkillService.enabled_skill_routes`。测试 test_skill_injection 4 项全绿。
+- T6：MCP 适配确认——org MCP 工具本就走 `enabled_tool_ids ∪ seed tools` 进主 agent 工具集，本轮零新代码（MCP 提示→skill 模板 defer）。
+- T7：全量 pytest **329 全绿**（+12）+ ruff clean + seed 收敛（默认组织 agent 14 工具含 tl_load_skill）+ HTTP 冒烟（login→create/list/enable/get-by-name 全过）。
+- 前端交接板已置 `[open]`（`/skills` API 契约 + `tl_load_skill` 语义），前端随后补 Skills 管理页。
 
 ---
 
