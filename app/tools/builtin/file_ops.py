@@ -22,6 +22,9 @@ _MAX_READ = 20000
 _MAX_WRITE = 100000
 _MAX_BASH_OUT = 4000
 
+# 工作区文件工具 id 集（build_initial_state 在工作区上下文时注入；默认 enabled=True，仅工作区可见）
+FILE_TOOL_IDS = ("tl_read_file", "tl_write_file", "tl_edit_file", "tl_glob", "tl_grep", "tl_bash")
+
 
 def _root() -> str | None:
     return get_tool_workspace_root()

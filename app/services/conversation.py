@@ -24,9 +24,13 @@ class ConversationService:
 
         return paged([serialize_conversation(c) for c in items], total, page, page_size)
 
-    async def create(self, db: AsyncSession, user: User, agent: AgentConfig, title: str) -> Conversation:
+    async def create(
+        self, db: AsyncSession, user: User, agent: AgentConfig, title: str, workspace_id: uuid.UUID | None = None
+    ) -> Conversation:
         # 调用方负责解析默认通用 Agent（AgentService.get_default），此处不再重复查询
-        conv = await ConversationRepository(db).create(user_id=user.id, agent_id=agent.id, title=title)
+        conv = await ConversationRepository(db).create(
+            user_id=user.id, agent_id=agent.id, title=title, workspace_id=workspace_id
+        )
         await db.commit()
         await db.refresh(conv)
         return conv

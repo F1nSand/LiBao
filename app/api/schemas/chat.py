@@ -27,5 +27,6 @@ class ChatMessageInput(BaseModel):
 
 class ChatRequest(BaseModel):
     conversation_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None  # 工作区对话（M7-B）：项目级 agent + 文件工具
     message: ChatMessageInput
     stream: bool = True

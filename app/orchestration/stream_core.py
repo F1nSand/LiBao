@@ -18,6 +18,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from app.core.errors import ERR_LLM_FAILURE
+from app.tools.builtin.file_ops import FILE_TOOL_IDS
 from app.tools.context import set_dispatch_ctx
 from app.tools.registry import get, get_by_name
 
@@ -82,6 +83,7 @@ def build_initial_state(
     org_id: str | None = None,
     enabled_tool_ids: list[str] | None = None,
     enabled_skills: list[dict[str, str]] | None = None,
+    workspace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。
 
@@ -94,7 +96,13 @@ def build_initial_state(
     seed_tools = set(agent.tools or [])
     if enabled_tool_ids:
         seed_tools |= set(enabled_tool_ids)
+    workspace_root: str | None = None
+    if workspace:
+        seed_tools |= set(FILE_TOOL_IDS)  # 工作区 agent 附加文件工具
+        workspace_root = workspace.get("root_path")
     system_prompt = agent.system_prompt
+    if workspace and workspace.get("system_prompt_fragment"):
+        system_prompt = f"{system_prompt}\n\n[工作区]\n{workspace['system_prompt_fragment']}"
     route = skills_route_section(enabled_skills)
     if route:
         system_prompt = f"{system_prompt}\n{route}"
@@ -107,6 +115,8 @@ def build_initial_state(
             "tools": sorted(seed_tools),  # 确定性排序（前缀稳定；启停实时生效）
             "max_steps": agent.max_steps,
             "org_id": org_id or str(getattr(agent, "org_id", "") or ""),
+            "workspace_id": workspace.get("id") if workspace else None,
+            "workspace_root": workspace_root,
         },
         "user_id": user_id,
         # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs

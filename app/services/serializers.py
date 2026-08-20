@@ -45,6 +45,7 @@ def serialize_conversation(conv: Conversation) -> dict[str, Any]:
         "title": conv.title,
         "status": conv.status,
         "max_messages": conv.max_messages,
+        "workspace_id": str(conv.workspace_id) if conv.workspace_id else None,  # 工作区对话（M7-B）
         "last_message_at": _dt(conv.last_message_at),
         "created_at": _dt(conv.created_at),
     }

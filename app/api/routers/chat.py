@@ -12,6 +12,7 @@ from app.orchestration.chat_stream import chat_stream_events
 from app.services.agent import AgentService
 from app.services.attachment import AttachmentService
 from app.services.conversation import ConversationService
+from app.services.workspace import WorkspaceService
 from app.storage.models.user import User
 
 router = APIRouter()
@@ -28,9 +29,16 @@ async def chat_stream(
     # 单通用 Agent：所有会话固定用组织默认通用 Agent（不接收 agent_id）
     agent = await AgentService().get_default(db, user.org_id)
     if req.conversation_id is None:
-        conversation = await conv_service.create(db, user, agent, "新会话")
+        conversation = await conv_service.create(db, user, agent, "新会话", workspace_id=req.workspace_id)
     else:
         conversation = await conv_service.get_owned(db, req.conversation_id, user.id)
+
+    # M7-B：解析工作区（会话优先，其次请求）→ 项目级 agent + 文件工具
+    workspace = None
+    ws_id = conversation.workspace_id or req.workspace_id
+    if ws_id is not None:
+        ws = await WorkspaceService().get_in_org(db, user.org_id, str(ws_id))
+        workspace = {"id": str(ws.id), "root_path": ws.root_path, "system_prompt_fragment": ws.system_prompt_fragment}
 
     graph = request.app.state.graph
     trace_id = get_trace_id()
@@ -51,6 +59,7 @@ async def chat_stream(
             user=user,
             content=req.message.content,
             attachments=attachments,
+            workspace=workspace,
             trace_id=trace_id,
         ),
         media_type="text/event-stream",

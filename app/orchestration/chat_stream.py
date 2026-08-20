@@ -82,6 +82,7 @@ async def chat_stream_events(
     user: User,
     content: str,
     attachments: list[str] | None = None,
+    workspace: dict[str, Any] | None = None,
     trace_id: str,
     model_override: Any = None,
 ) -> AsyncIterator[str]:
@@ -207,6 +208,7 @@ async def chat_stream_events(
             org_id=str(agent.org_id),
             enabled_tool_ids=await ToolService().enabled_tool_ids(db, agent.org_id),
             enabled_skills=await SkillService().enabled_skill_routes(db, agent.org_id),
+            workspace=workspace,
         ),
         graph_config=graph_config,
         emit=emit,

@@ -43,8 +43,10 @@ class ConversationRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def create(self, *, user_id: uuid.UUID, agent_id: uuid.UUID, title: str) -> Conversation:
-        conv = Conversation(user_id=user_id, agent_id=agent_id, title=title)
+    async def create(
+        self, *, user_id: uuid.UUID, agent_id: uuid.UUID, title: str, workspace_id: uuid.UUID | None = None
+    ) -> Conversation:
+        conv = Conversation(user_id=user_id, agent_id=agent_id, title=title, workspace_id=workspace_id)
         self.session.add(conv)
         return conv
 

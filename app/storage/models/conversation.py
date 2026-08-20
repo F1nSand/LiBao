@@ -27,3 +27,4 @@ class Conversation(BaseModel, Base):
     max_messages: Mapped[int] = mapped_column(Integer, default=1000, nullable=False)
     retention_days: Mapped[int] = mapped_column(Integer, default=180, nullable=False)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)  # 工作区对话（M7-B）

@@ -43,6 +43,25 @@ def test_build_initial_state_injects_skills():
     assert st2["agent_config"]["system_prompt"] == "base-prompt"
 
 
+def test_build_initial_state_with_workspace():
+    """M7-B：工作区对话 → 文件工具注入 + workspace_root + fragment。"""
+    agent = SimpleNamespace(
+        name="通用助手", model="m", system_prompt="base", tools=["tl_time_now"], max_steps=10, org_id=uuid.uuid4()
+    )
+    ws = {"id": "ws-1", "root_path": "/tmp/ws1", "system_prompt_fragment": "你是项目助手"}
+    st = build_initial_state(agent, "hi", workspace=ws)
+    ac = st["agent_config"]
+    assert ac["workspace_id"] == "ws-1"
+    assert ac["workspace_root"] == "/tmp/ws1"
+    assert "项目助手" in ac["system_prompt"]
+    for tid in ("tl_read_file", "tl_write_file", "tl_edit_file", "tl_glob", "tl_grep", "tl_bash"):
+        assert tid in ac["tools"]
+    # 无工作区 → 无 workspace_root / 文件工具
+    st2 = build_initial_state(agent, "hi")
+    assert st2["agent_config"]["workspace_root"] is None
+    assert "tl_bash" not in st2["agent_config"]["tools"]
+
+
 async def test_load_skill_handler():
     register_builtin_tools()
     engine, sessionmaker = init_db()
