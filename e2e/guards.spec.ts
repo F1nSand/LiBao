@@ -20,6 +20,7 @@ test.describe('路由守卫', () => {
     await page.locator('.settings-toggle').click()
     await expect(page.locator('.settings-popover .sub-item', { hasText: '任务' })).toHaveCount(0)
     await expect(page.locator('.settings-popover .sub-item', { hasText: '记忆' })).toHaveCount(1)
+    await expect(page.locator('.settings-popover .sub-item', { hasText: '技能' })).toHaveCount(0)
     await expect(page.locator('.settings-popover .sub-item', { hasText: '系统' })).toHaveCount(0)
     await expect(page.locator('.settings-popover .sub-item', { hasText: '设置' })).toHaveCount(0)
 
@@ -31,5 +32,6 @@ test.describe('路由守卫', () => {
     await page.locator('.settings-toggle').click()
     await expect(page.locator('.settings-popover .sub-item', { hasText: '系统' })).toHaveCount(1)
     await expect(page.locator('.settings-popover .sub-item', { hasText: '设置' })).toHaveCount(1)
+    await expect(page.locator('.settings-popover .sub-item', { hasText: '技能' })).toHaveCount(1)
   })
 })

@@ -18,8 +18,8 @@ describe('menuItems（层级）', () => {
     expect(menuItems.slice(0, 2).map((i) => i.path)).toEqual(['/workspace', '/chat'])
   })
 
-  it('设置项带 children（工具/记忆/系统/设置）', () => {
+  it('设置项带 children（工具/技能/记忆/系统/设置）', () => {
     const settings = menuItems.find((i) => i.path === '/settings')
-    expect(settings?.children?.map((c) => c.path)).toEqual(['/settings', '/tools', '/memory', '/system'])
+    expect(settings?.children?.map((c) => c.path)).toEqual(['/settings', '/tools', '/skills', '/memory', '/system'])
   })
 })

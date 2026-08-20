@@ -1,10 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { ChatRequest, KbCollection, KbDocument, ToolDefinition } from '@/types'
+import type { ChatRequest, KbCollection, KbDocument, Skill, ToolDefinition } from '@/types'
 import {
   users,
   candidates,
   DEFAULT_AGENT_ID,
   tools,
+  skills,
   conversations,
   messages,
   tasks,
@@ -454,6 +455,59 @@ export const mockServer = {
       return void json(res, ok(t))
     }
     if (method === 'DELETE' && p) return void json(res, ok(null))
+
+    /* ===== Skills（M7-A 契约，交接板 2026-08-20：org 级、默认关闭、与工具同模式） ===== */
+    if (method === 'GET' && pathname === '/skills') {
+      const page = Number(query.get('page') ?? 1)
+      const size = Number(query.get('page_size') ?? 20)
+      return void json(res, ok(paginate(skills, page, size)))
+    }
+    if (method === 'POST' && pathname === '/skills') {
+      const ns = {
+        id: uid('sk'),
+        org_id: currentUser(req)?.org_id ?? 'org_1',
+        name: body.json?.name ?? `skill_${randHex(4)}`,
+        description: body.json?.description ?? '',
+        body: body.json?.body ?? '',
+        source: 'manual',
+        enabled: false,
+        created_at: isoDate(0),
+      } as Skill
+      skills.unshift(ns)
+      return void json(res, ok(ns))
+    }
+    if (method === 'POST' && pathname === '/skills/import') {
+      const url = String(body.json?.url ?? '')
+      const repo = url.split('/').filter(Boolean).pop()?.replace(/\.git$/, '') ?? `skill_${randHex(4)}`
+      const ns = {
+        id: uid('sk'),
+        org_id: currentUser(req)?.org_id ?? 'org_1',
+        name: repo,
+        description: `git 导入技能（${url}）`,
+        body: '> 由 git 导入，正文待后端 clone 后解析 SKILL.md（mock 演示）',
+        source: 'git',
+        enabled: false,
+        created_at: isoDate(0),
+      } as Skill
+      skills.unshift(ns)
+      return void json(res, ok(ns))
+    }
+    p = match(pathname, '/skills/:id')
+    if (method === 'GET' && p) {
+      const s = skills.find((x) => x.id === p!.id)
+      if (!s) return void json(res, fail(40401, '技能不存在'))
+      return void json(res, ok(s))
+    }
+    if (method === 'PATCH' && p) {
+      const s = skills.find((x) => x.id === p!.id)
+      if (s) Object.assign(s, body.json)
+      return void json(res, ok(s))
+    }
+    if (method === 'DELETE' && p) {
+      const idx = skills.findIndex((x) => x.id === p!.id)
+      if (idx >= 0) skills.splice(idx, 1)
+      return void json(res, ok(null))
+    }
 
     /* ===== 知识库 ===== */
     if (method === 'GET' && pathname === '/kb/collections') return void json(res, ok(kbCollections))

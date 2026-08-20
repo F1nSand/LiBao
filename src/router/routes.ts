@@ -30,6 +30,7 @@ export const menuItems: MenuItem[] = [
     children: [
       { path: '/settings', title: '设置', icon: 'Setting', roles: ['admin'] },
       { path: '/tools', title: '工具', icon: 'Tools', roles: ['admin', 'developer'] },
+      { path: '/skills', title: '技能', icon: 'Collection', roles: ['admin', 'developer'] },
       { path: '/memory', title: '记忆', icon: 'Tickets' },
       { path: '/system', title: '系统', icon: 'Odometer', roles: ['admin'] },
     ],
@@ -37,7 +38,7 @@ export const menuItems: MenuItem[] = [
 ]
 
 /** 属于「设置」组的路由（子栏在这些页面显示） */
-export const SETTINGS_ROUTES = ['/tools', '/memory', '/system', '/settings']
+export const SETTINGS_ROUTES = ['/tools', '/skills', '/memory', '/system', '/settings']
 export const isSettingsRoute = (path: string): boolean => SETTINGS_ROUTES.includes(path)
 
 export const routes: RouteRecordRaw[] = [
@@ -75,6 +76,12 @@ export const routes: RouteRecordRaw[] = [
     name: 'tools',
     component: () => import('@/views/ToolsView.vue'),
     meta: { title: '工具', icon: 'Tools', requiresAuth: true, roles: ['admin', 'developer'] } satisfies AppRouteMeta,
+  },
+  {
+    path: '/skills',
+    name: 'skills',
+    component: () => import('@/views/SkillsView.vue'),
+    meta: { title: '技能', icon: 'Collection', requiresAuth: true, roles: ['admin', 'developer'] } satisfies AppRouteMeta,
   },
   {
     path: '/kb',

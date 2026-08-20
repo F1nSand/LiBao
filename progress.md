@@ -7,6 +7,16 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[open] 2026-08-20 · ←后端 | **M7-B：工作区后端已落地（workspace + 文件操作 + 项目级 agent）** | 契约如下，前端可先就绪 types/mock/UI。
+      - 后端本轮交付：
+        - `workspace` 实体（org 级）：`{id, org_id, name, description, root_path, system_prompt_fragment, status(active/archived), created_by, created_at}`
+        - `POST /api/v1/workspaces` 建（name/description/system_prompt_fragment）→ 建真实本地目录（root_path 后端托管）
+        - `GET /api/v1/workspaces`（分页）/ `GET /{id}` / `PATCH /{id}`（改 name/description/system_prompt_fragment）/ `DELETE /{id}`（归档）
+        - 文件（资源管理器）：`GET /workspaces/{id}/files?path=` 列目录（{name,path,is_dir,size}）/ `GET /files/content?path=` 读（限 50K）/ `POST /files` 写 `{path,content}` / `DELETE /files?path=` 删（目录删除暂不支持）
+        - 工作区对话：`POST /chat/stream` 带 `workspace_id`（或 `POST /conversations` 建带 workspace_id 的会话）→ 项目级 agent = 主 agent + system_prompt_fragment + 文件工具（read_file/write_file/edit_file/glob/grep/bash，bash 走 LLM 语义审查）
+      - 前端建议补：工作区页气泡网格（一泡一个工作区 + 新建/编辑气泡内容）+ 工作区内部 = 对话/轨迹复用 + 资源管理器侧栏（文件树 + 预览 + 引用文件）
+      - 计划：`docs/plans/2026-08-20-m7b-workspace.md`（后端 L3，Phase 1/2/T6 已完，T7 workspace_skill/T8 记忆隔离待续）
+
 [open] 2026-08-20 · ←后端 | **M7-A：主 Agent 第三方 Skills 适配（后端先行，前端随后补 Skills 管理页）** | 契约如下，前端可先就绪 types/mock/UI，不阻塞后端。
       - 后端本轮交付：
         - `skill` 实体（org 级）：`{id, org_id, name, description(路由描述), body(SKILL.md 正文), source(manual|git), enabled, created_at}`
@@ -16,7 +26,12 @@
         - 主 agent 自动使用 org 内 enabled skills：路由描述进 system_prompt 前缀；正文经内置 meta 工具 `tl_load_skill(name)` 按需取回（LLM 侧自动可见，无需 tool_search 发现）
         - MCP 工具已 org 级可用（主 agent 工具集已含），本轮只确认链路，不改契约
       - 前端建议补（后续，非本轮阻塞）：Settings 或独立「Skills 管理」页——列表/手动创建/git 导入/启用开关/删除；types `Skill` + `api/skill.ts` + mock。与工具页同模式（默认关闭、developer+）。
+      - ✅ 前端已补（2026-08-20）：`/skills` 页（设置组子项，admin+developer）+ types `Skill` + `api/skill.ts` + mock（CRUD+import，DELETE 真删除）+ `FEATURE.skills` 降级 + 单测 8 + e2e 2。已按上契约束实现，与你后端本轮交付对齐。
       - 计划：`docs/plans/2026-08-20-m7a-main-agent-skills-mcp.md`（后端 L2）
+
+[open] 2026-08-20 · →后端 | **docs 同步：/skills 契约入册 + 02/00 过时条目** | 前端已按交接板契约实现 `/skills` 页（M7-A）。
+      - 请把 Skills 契约写入 `docs/03` §5（skill 实体 + `/skills` CRUD + `/skills/import` 小节），`docs/02` §4 页面清单 / §6.2 组件表补「技能 / SkillsView（设置组子项，developer+）」。
+      - 顺带：docs 02 §4 仍列 `/tasks` 任务页 + §6.2 `TaskList/TaskDetail` + §7 `task` store、docs 02 §4 `/system` 仍列 评估/成本/候选区 + §6.2 `EvalManage/CostChart/EvolutionManage`、docs 00 §5（L89）仍提「Agent管理 / 任务」——前端均已删（2026-08-20 五连改），建议同步，避免蓝本与实现漂移。
 
 [done] 2026-08-18 · ←后端 | **M6-1 RBAC + 数据隔离已落地**（285 测试全绿 + verify 14/8/6）| 与你的前端守卫完全对齐，前端零改动。
       - **角色守卫后端兜底**：tools/kb → developer+；settings/system/evals/hooks管理/users → admin；health + hooks 公开收包 → 公开。此前这些只有前端路由守卫，API 直调可绕过，现已后端强制（40301）。
