@@ -48,8 +48,14 @@ async def test_create_workspace_creates_directory(workspace_fixture):
             session, user, CreateWorkspaceRequest(name="proj-a", description="desc")
         )
         assert serialize_workspace(row)["name"] == "proj-a"
-        assert row.root_path == str(tmp / str(row.id))
+        assert row.root_path == str(tmp / f"proj-a-{str(row.id)[:8]}")  # 可读前缀 + uuid 前8
         assert os.path.isdir(row.root_path)  # 真实本地目录已建
+
+
+def test_slugify_name():
+    assert ws_module._slugify_name("GitHub 热点") == "github"  # 中文被剥，保留 ASCII
+    assert ws_module._slugify_name("proj-a") == "proj-a"
+    assert ws_module._slugify_name("热点收集") == "workspace"  # 纯中文兜底
 
 
 async def test_create_duplicate_name_conflict(workspace_fixture):

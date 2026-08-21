@@ -36,6 +36,7 @@ AGENT_SYSTEM_PROMPT = (
     "- 数学计算 → calculator（如 (3+4)*2-1）；日期计算 → datetime_calc（now/add_days/weekday/days_between）；\n"
     "- 单位换算 → unit_converter（长度/重量/温度/速度）；当前时间 → time_now；查天气 → weather（若已启用）；\n"
     "- 联网搜索最新信息 → web_search（若已启用）；抓取具体网页 → fetch_url（若已启用）。\n"
+    "- GitHub 热点/榜单 → github_trending（日/周/月榜）；搜索开源项目 → github_search；查某项目概况 → github_repo。\n"
     "派发后基于 subagent 结论继续回答用户，用中文回答。\n"
     "用户要求发送通知/提醒时使用 demo_notify 工具（该工具为演示人工确认流程：会先请求确认，确认后才真正发送）。"
 )
@@ -554,6 +555,78 @@ async def main() -> None:
             idempotent=False,
             enabled=False,
         )
+        # M8 热点收集：GitHub trending/搜索/详情（默认启用，用户直问即用）
+        await _get_or_create_tool(
+            session,
+            org,
+            name="github_trending",
+            description="抓取 GitHub trending 榜单（日/周/月，可过滤语言）。落库工作区，本地新鲜读缓存。",
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "since": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "monthly"],
+                        "description": "时间范围，默认 daily",
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "可选：编程语言过滤，如 python",
+                    },
+                    "spoken_language": {
+                        "type": "string",
+                        "description": "可选：口语代码，如 zh/en",
+                    },
+                    "refresh": {"type": "boolean", "description": "强制刷新，忽略本地缓存，默认 false"},
+                },
+                "required": [],
+            },
+            tool_type="perception",
+            require_confirm=False,
+            idempotent=False,
+            enabled=True,
+        )
+        await _get_or_create_tool(
+            session,
+            org,
+            name="github_search",
+            description="搜索 GitHub 仓库（官方 API，按 star 排序）。返回仓库名/链接/描述/star/fork/语言/topics。",
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "搜索关键词，如 llm agent framework"},
+                    "limit": {"type": "integer", "description": "返回条数，默认 10，上限 100"},
+                    "language": {
+                        "type": "string",
+                        "description": "可选：编程语言过滤，如 python",
+                    },
+                },
+                "required": ["query"],
+            },
+            tool_type="perception",
+            require_confirm=False,
+            idempotent=False,
+            enabled=True,
+        )
+        await _get_or_create_tool(
+            session,
+            org,
+            name="github_repo",
+            description="获取单个 GitHub 仓库概况（描述/star/fork/语言/topics/license/主页 + 跳转链接）。落库工作区。",
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string", "description": "仓库 owner，如 langchain-ai"},
+                    "repo": {"type": "string", "description": "仓库名，如 langgraph"},
+                    "refresh": {"type": "boolean", "description": "强制刷新，忽略本地缓存，默认 false"},
+                },
+                "required": ["owner", "repo"],
+            },
+            tool_type="perception",
+            require_confirm=False,
+            idempotent=False,
+            enabled=True,
+        )
         # 单通用 Agent：挂齐感知/派发/占位演示/实用工具（fetch_url/analyze_image/weather 默认关，启用后开放）
         agent_tools = [
             "tl_time_now",
@@ -570,6 +643,9 @@ async def main() -> None:
             "tl_unit_converter",
             "tl_weather",
             "tl_web_search",
+            "tl_github_trending",
+            "tl_github_search",
+            "tl_github_repo",
         ]
         agent = await _get_or_create_agent(
             session, org, name=AGENT_NAME, prompt=AGENT_SYSTEM_PROMPT, tool_ids=agent_tools, is_default=True

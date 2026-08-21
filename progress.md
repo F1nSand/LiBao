@@ -62,6 +62,14 @@
 - **验证**：全量 **369 passed / 0 skipped**（redis 端口已恢复映射）+ ruff 干净。
 - **待用户**：`.env` 配 `GITHUB_TOKEN`（用户自行配置）；commit 待确认。
 
+### Part C 补 · 工作区文件夹可读化 + 热点 workspace 配置（2026-08-21，L2，未提交）
+- **文件夹可读化**：`workspace_root(id, name)` 改 `{slug(name)}-{id前8}`（`_slugify_name`：ASCII 保留、中文剥除、纯中文兜底 `workspace`）；仅影响新工作区，存量 UUID 目录不动。test_slugify_name +1，test_create 断言更新。
+- **seed 启用 3 个 GitHub 工具**：`_get_or_create_tool(..., enabled=True)`（github_trending/search/repo）+ `agent_tools` 追加 3 个 tl_github_* + 系统提示词补一行；幂等 re-seed 已跑（v3，DB 确认 3 行 enabled=t）。
+- **配置「GitHub 热点」工作区**：复制 skill 模板 → `data/workspaces/2a9e5854-…/.agent/skills/github-hotspot/SKILL.md`（该工作区对话时自动发现）。
+- **.env**：用户已填 `GITHUB_TOKEN`（ghp_ 前缀），`get_settings().github_token` 读通。
+- **验证**：全量 **370 passed / 0 skipped** + ruff 干净。
+- **待用户**：重启后端（sync_registry 使 spec enabled 跟随 DB）→ 在工作区问「今天 GitHub 有哪些热门项目」实测。
+
 ---
 
 ## M7-A 主 Agent 第三方 Skills + MCP 适配（2026-08-20 完成）

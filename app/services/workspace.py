@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -22,10 +23,17 @@ from app.storage.repositories.workspace import WorkspaceRepository
 from app.tools.filesystem import resolve_workspace_path
 
 
-def workspace_root(workspace_id: uuid.UUID) -> Path:
-    """root_path 托管：{workspaces_root}/{workspace_id}（单一来源，防越权）。绝对路径（resolve），
-    避免下游 relative_to/路径校验在相对与绝对之间混用。"""
-    return (Path(get_settings().workspaces_root) / str(workspace_id)).resolve()
+def _slugify_name(name: str) -> str:
+    """工作区 name → 文件系统安全 slug（保留 ASCII 字母数字，其余转 -；空/纯中文兜底 workspace）。"""
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower()
+    return s or "workspace"
+
+
+def workspace_root(workspace_id: uuid.UUID, name: str = "") -> Path:
+    """root_path 托管：{workspaces_root}/{slug(name)}-{id前8}（可读 + 唯一 + 改名稳定；name 空退化为纯 uuid）。
+    绝对路径（resolve），避免下游 relative_to/路径校验在相对与绝对之间混用。"""
+    dirname = f"{_slugify_name(name)}-{str(workspace_id)[:8]}" if name else str(workspace_id)
+    return (Path(get_settings().workspaces_root) / dirname).resolve()
 
 
 # `.agent/` 骨架模板（M7-B T7a/T8 重定位：项目级能力文件化，Claude Code `.claude/` 同款）。
@@ -104,7 +112,7 @@ class WorkspaceService:
             created_by=user.id,
         )
         await db.flush()
-        root = workspace_root(row.id)
+        root = workspace_root(row.id, req.name)
         root.mkdir(parents=True, exist_ok=True)  # 建真实本地文件夹
         init_agent_skeleton(root)  # 项目级能力 `.agent/` 骨架（M7-B T7a/T8）
         row.root_path = str(root)
