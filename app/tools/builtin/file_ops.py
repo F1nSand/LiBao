@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
 import subprocess
+import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -138,6 +141,56 @@ async def _review_command(command: str) -> dict[str, str]:
     return {"verdict": "allow", "reason": text.strip()[:200]}
 
 
+# Windows 下 Git Bash 可执行文件常见安装路径（shutil.which 未命中时的兜底探测）
+_BASH_CANDIDATES = (
+    "C:/Program Files/Git/bin/bash.exe",
+    "C:/Program Files/Git/usr/bin/bash.exe",
+    "C:/Program Files (x86)/Git/bin/bash.exe",
+)
+
+
+@lru_cache(maxsize=1)
+def _bash_executable() -> str | None:
+    """Windows 上探测 Git Bash（POSIX shell）。命中返回绝对路径，否则 None（降级 cmd）。"""
+    found = shutil.which("bash")
+    if found:
+        return found
+    for p in _BASH_CANDIDATES:
+        if Path(p).exists():
+            return p
+    return None
+
+
+async def _run_shell(command: str, workdir: str) -> subprocess.CompletedProcess:
+    """执行 shell 命令（bash 工具底层）。
+
+    Windows 优先走 Git Bash（POSIX 语义：多行 -c / 引号 / 管道 / && 正确解析，
+    修复 shell=True 走 cmd 时「多行脚本被拆散 → returncode 0 但未执行」）；
+    非 Windows 或探测不到 bash 时降级 shell=True（cmd，维持旧行为）。
+    """
+    bash = _bash_executable() if sys.platform == "win32" else None
+    if bash:
+        return await asyncio.to_thread(
+            subprocess.run,
+            [bash, "-c", command],
+            cwd=workdir,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+    return await asyncio.to_thread(
+        subprocess.run,
+        command,
+        shell=True,
+        cwd=workdir,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+
+
 async def bash_handler(command: str, cwd: str | None = None) -> dict[str, Any]:
     root = _root()
     if not root:
@@ -153,20 +206,20 @@ async def bash_handler(command: str, cwd: str | None = None) -> dict[str, Any]:
     if review["verdict"] == "block":
         return {"error": f"命令被审查拦截: {review['reason']}", "verdict": "block", "reason": review["reason"]}
     try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            command,
-            shell=True,
-            cwd=str(workdir),
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
-        )
+        result = await _run_shell(command, str(workdir))
     except subprocess.TimeoutExpired:
         return {"error": "命令执行超时（120s）"}
-    return {
-        "stdout": result.stdout[-_MAX_BASH_OUT:],
-        "stderr": result.stderr[-2000:],
+    stdout = result.stdout[-_MAX_BASH_OUT:]
+    stderr = result.stderr[-2000:]
+    payload: dict[str, Any] = {
+        "stdout": stdout,
+        "stderr": stderr,
         "returncode": result.returncode,
     }
+    # C：退出码 0 但无输出 → 提示可能未真正执行，引导 LLM 验证副作用（而非盲目重试）
+    if result.returncode == 0 and not stdout.strip() and not stderr.strip():
+        payload["note"] = (
+            "命令退出码 0 但无 stdout/stderr——若预期有输出，可能未真正执行；"
+            "用 read_file 或 `ls` 验证副作用。"
+        )
+    return payload
