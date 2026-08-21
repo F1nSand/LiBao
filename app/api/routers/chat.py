@@ -12,7 +12,7 @@ from app.orchestration.chat_stream import chat_stream_events
 from app.services.agent import AgentService
 from app.services.attachment import AttachmentService
 from app.services.conversation import ConversationService
-from app.services.skill import discover_workspace_skills
+from app.services.skill import discover_workspace_agent
 from app.services.workspace import WorkspaceService
 from app.storage.models.user import User
 
@@ -39,11 +39,15 @@ async def chat_stream(
     ws_id = conversation.workspace_id or req.workspace_id
     if ws_id is not None:
         ws = await WorkspaceService().get_in_org(db, user.org_id, str(ws_id))
+        overlay = discover_workspace_agent(ws.root_path)  # 工作区 `.agent/` 项目级能力叠加
         workspace = {
             "id": str(ws.id),
             "root_path": ws.root_path,
             "system_prompt_fragment": ws.system_prompt_fragment,
-            "skills": discover_workspace_skills(ws.root_path),  # 工作区 filesystem skills 路由描述
+            "skills": overlay["skills"],
+            "agent_md": overlay["agent_md"],
+            "memory": overlay["memory"],
+            "knowledge": overlay["knowledge"],
         }
 
     graph = request.app.state.graph

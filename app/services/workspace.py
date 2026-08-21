@@ -27,6 +27,32 @@ def workspace_root(workspace_id: uuid.UUID) -> Path:
     return (Path(get_settings().workspaces_root) / str(workspace_id)).resolve()
 
 
+# `.agent/` 骨架模板（M7-B T7a/T8 重定位：项目级能力文件化，Claude Code `.claude/` 同款）。
+_AGENT_AGENT_MD = (
+    "# 项目约定\n\n"
+    "<!-- 在此填写本工作区的项目约定 / agent 行为说明；会被注入 agent 的 system prompt（[项目约定] 段）。 -->\n"
+)
+_AGENT_README = (
+    "# .agent 目录\n\n"
+    "本目录是工作区的项目级能力配置，agent 在该工作区工作时自动发现并叠加：\n\n"
+    "- `agent.md`：项目约定（注入 [项目约定] 段）\n"
+    "- `skills/<name>/SKILL.md`：项目级 skills（同名覆盖全局 org skill）\n"
+    "- `memory/*.md`：项目记忆（注入 [项目记忆] 段）\n"
+    "- `knowledge/*.md`：项目知识（注入 [项目知识] 段）\n"
+)
+
+
+def init_agent_skeleton(root: Path) -> None:
+    """在 workspace root 下初始化 `.agent/` 骨架（幂等：已存在不覆盖）。"""
+    agent_dir = root / ".agent"
+    for sub in ("skills", "memory", "knowledge"):
+        (agent_dir / sub).mkdir(parents=True, exist_ok=True)
+    for name, content in (("agent.md", _AGENT_AGENT_MD), ("README.md", _AGENT_README)):
+        p = agent_dir / name
+        if not p.exists():
+            p.write_text(content, encoding="utf-8")
+
+
 class WorkspaceService:
     async def list_for_org(self, db: AsyncSession, org_id: uuid.UUID, page: int, page_size: int) -> dict[str, Any]:
         repo = WorkspaceRepository(db)
@@ -65,6 +91,7 @@ class WorkspaceService:
         await db.flush()
         root = workspace_root(row.id)
         root.mkdir(parents=True, exist_ok=True)  # 建真实本地文件夹
+        init_agent_skeleton(root)  # 项目级能力 `.agent/` 骨架（M7-B T7a/T8）
         row.root_path = str(root)
         await db.commit()
         await db.refresh(row)

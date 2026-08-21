@@ -103,13 +103,22 @@ def build_initial_state(
     system_prompt = agent.system_prompt
     if workspace and workspace.get("system_prompt_fragment"):
         system_prompt = f"{system_prompt}\n\n[工作区]\n{workspace['system_prompt_fragment']}"
-    # skills 路由描述：org enabled skills + 工作区 filesystem skills（合并进同一「可用 Skills」段）
-    all_skills = list(enabled_skills or [])
+    if workspace and workspace.get("agent_md"):
+        system_prompt = f"{system_prompt}\n\n[项目约定]\n{workspace['agent_md']}"
+    # skills 路由描述：org enabled skills ∪ 工作区 filesystem skills；同名工作区（项目级）覆盖全局
+    skills_by_name: dict[str, dict[str, str]] = {s["name"]: s for s in (enabled_skills or [])}
     if workspace and workspace.get("skills"):
-        all_skills += workspace["skills"]
-    route = skills_route_section(all_skills)
+        for s in workspace["skills"]:
+            skills_by_name[s["name"]] = s  # 项目级覆盖全局同名
+    route = skills_route_section(list(skills_by_name.values()))
     if route:
         system_prompt = f"{system_prompt}\n{route}"
+    # 项目记忆 / 项目知识（.agent/memory + knowledge，静态注入一次）
+    for key, label in (("memory", "项目记忆"), ("knowledge", "项目知识")):
+        items = (workspace or {}).get(key) or []
+        if items:
+            blocks = "\n\n".join(f"### {it['name']}\n{it['content']}" for it in items)
+            system_prompt = f"{system_prompt}\n\n[{label}]\n{blocks}"
     return {
         "messages": [HumanMessage(content=content)],
         "agent_config": {

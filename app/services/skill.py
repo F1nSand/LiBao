@@ -56,17 +56,64 @@ def parse_skill_md(text: str) -> dict[str, str]:
 
 
 def discover_workspace_skills(root_path: str | Path) -> list[dict[str, str]]:
-    """扫描工作区 skills/*/SKILL.md → 路由描述（name + description）。非法 SKILL.md 跳过。"""
-    skills_dir = Path(root_path) / "skills"
+    """扫描工作区 skills → 路由描述（name + description）。非法 SKILL.md 跳过。
+
+    M7-B T7a 重定位：优先 `.agent/skills/*/SKILL.md`，兼容旧 `skills/*/SKILL.md`；
+    同名以 `.agent/` 为准（项目级覆盖旧路径）。
+    """
+    root = Path(root_path)
     out: list[dict[str, str]] = []
-    if not skills_dir.is_dir():
-        return out
-    for md in sorted(skills_dir.glob("*/SKILL.md")):
-        try:
-            parsed = parse_skill_md(md.read_text(encoding="utf-8"))
-        except AppError:
+    seen: set[str] = set()
+    for skills_dir in (root / ".agent" / "skills", root / "skills"):
+        if not skills_dir.is_dir():
             continue
-        out.append({"name": parsed["name"], "description": parsed["description"]})
+        for md in sorted(skills_dir.glob("*/SKILL.md")):
+            try:
+                parsed = parse_skill_md(md.read_text(encoding="utf-8"))
+            except AppError:
+                continue
+            if parsed["name"] in seen:
+                continue
+            seen.add(parsed["name"])
+            out.append({"name": parsed["name"], "description": parsed["description"]})
+    return out
+
+
+def _read_md_dir(directory: Path) -> list[dict[str, str]]:
+    """读目录下 *.md → [{name, content}]（静态注入片段；缺目录/非法编码静默跳过）。"""
+    if not directory.is_dir():
+        return []
+    out: list[dict[str, str]] = []
+    for md in sorted(directory.glob("*.md")):
+        try:
+            content = md.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if content:
+            out.append({"name": md.stem, "content": content})
+    return out
+
+
+def discover_workspace_agent(root_path: str | Path) -> dict[str, Any]:
+    """扫描工作区 `.agent/` → 项目级能力叠加（skills 路由 + agent.md + memory + knowledge）。
+
+    M7-B T7a/T8 重定位：agent 运行时 = 全局基座（org skills + 长期记忆 + 知识库 + 工具）
+    + 项目级 `.agent/`（skills/memory/knowledge/agent.md）。此处只发现，注入在 build_initial_state。
+    """
+    root = Path(root_path)
+    agent_dir = root / ".agent"
+    out: dict[str, Any] = {
+        "skills": discover_workspace_skills(root_path),
+        "agent_md": "",
+        "memory": _read_md_dir(agent_dir / "memory"),
+        "knowledge": _read_md_dir(agent_dir / "knowledge"),
+    }
+    agent_md = agent_dir / "agent.md"
+    if agent_md.is_file():
+        try:
+            out["agent_md"] = agent_md.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            pass
     return out
 
 

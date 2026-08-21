@@ -29,6 +29,19 @@
 - **交接板**：FrontEnd/progress.md 三张 open 纸条划 [done] + 回「会话 workspace_id 已对齐，前端零改动」。
 - **遗留（记录不修）**：`mcp_server.workspace_id` defer、工作区端到端联调、run_log org 列、测试污染根治；下一大里程碑 = M8 热点垂直化。
 
+### M7-B T7a/T8 重定位 · `.agent/` 目录机制（2026-08-21，L2，未提交）
+
+交接板 `[open]` →后端 项：工作区项目级能力收敛为 `.agent/` 目录文件化（Claude Code `.claude/` 同款），不做专门 skills/记忆管理 UI。
+
+- **skill 发现迁移**：`discover_workspace_skills` 改扫 `.agent/skills/*/SKILL.md`（优先），兼容旧 `skills/*/SKILL.md`，同名 `.agent/` 优先；新增 `discover_workspace_agent` 一并发现 `agent.md` + `memory/*.md` + `knowledge/*.md`。
+- **注入**：`build_initial_state` 注入 `[项目约定]`（agent.md）/`[项目记忆]`/`[项目知识]` 段；skills 同名去重（项目级覆盖全局 org skill）。
+- **骨架初始化**：`WorkspaceService.create` 调 `init_agent_skeleton` 建 `.agent/`（agent.md 模板 + skills/memory/knowledge 空目录 + README，幂等不覆盖）。
+- **load_skill 回退**：优先 `.agent/skills/<name>/SKILL.md`，兼容旧 `skills/`。
+- **兼容策略**：`workspace_skill` 表从未实现（仅 docs 描述，M7-B T7a 已是纯文件）——纯文件为准，无表废弃；`longterm_memory.workspace_id` 保留（DB 记忆隔离不变）。
+- **docs 同步**（`Desktop/Agent/docs/`，非后端仓库）：docs/00/01/03/04 移除 `workspace_skill` 表描述、补 `.agent/` 机制；docs/03 工作区 skills REST 改文件化 + 补 `/workspaces/{id}/reveal`；docs/02 扫描路径修正。
+- **验证**：`test_workspace_agent` +8（发现/`.agent/` 优先级/骨架幂等/注入/同名覆盖）；全量 **339 通过 + 18 跳过**（skip 全是 redis 容器 6379 未发布宿主机，环境问题与本改动无关）+ ruff 干净。
+- **待做**：Part B `POST /workspaces/{id}/reveal`（L1）、Part C GitHub 热点收集渠道（L2）；commit 待用户确认。
+
 ---
 
 ## M7-A 主 Agent 第三方 Skills + MCP 适配（2026-08-20 完成）
