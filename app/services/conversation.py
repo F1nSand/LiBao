@@ -16,10 +16,19 @@ from app.storage.repositories.message import MessageRepository
 
 
 class ConversationService:
-    async def list(self, db: AsyncSession, user_id: uuid.UUID, page: int, page_size: int) -> dict[str, Any]:
+    async def list(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        page: int,
+        page_size: int,
+        workspace_id: uuid.UUID | None = None,
+    ) -> dict[str, Any]:
         repo = ConversationRepository(db)
-        items = await repo.list_by_user(user_id, limit=page_size, offset=(page - 1) * page_size)
-        total = await repo.count_by_user(user_id)
+        items = await repo.list_by_user(
+            user_id, limit=page_size, offset=(page - 1) * page_size, workspace_id=workspace_id
+        )
+        total = await repo.count_by_user(user_id, workspace_id=workspace_id)
         from app.api.schemas.common import paged
 
         return paged([serialize_conversation(c) for c in items], total, page, page_size)

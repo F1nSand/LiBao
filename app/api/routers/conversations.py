@@ -21,10 +21,11 @@ router = APIRouter()
 async def list_conversations(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    workspace_id: uuid.UUID | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    data = await ConversationService().list(db, user.id, page, page_size)
+    data = await ConversationService().list(db, user.id, page, page_size, workspace_id=workspace_id)
     return ok(data)
 
 
@@ -35,7 +36,7 @@ async def create_conversation(
     db: AsyncSession = Depends(get_db),
 ):
     agent = await AgentService().get_default(db, user.org_id)
-    conv = await ConversationService().create(db, user, agent, req.title)
+    conv = await ConversationService().create(db, user, agent, req.title, workspace_id=req.workspace_id)
     return ok(serialize_conversation(conv))
 
 

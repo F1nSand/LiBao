@@ -15,7 +15,12 @@ class ConversationRepository:
         self.session = session
 
     async def list_by_user(
-        self, user_id: uuid.UUID, *, limit: int = 50, offset: int = 0
+        self,
+        user_id: uuid.UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        workspace_id: uuid.UUID | None = None,
     ) -> list[Conversation]:
         stmt = (
             select(Conversation)
@@ -24,13 +29,24 @@ class ConversationRepository:
             .limit(limit)
             .offset(offset)
         )
+        # M7-B：workspace_id=None → 只取普通会话（排除工作区会话）；有值 → 只取该工作区会话
+        stmt = stmt.where(
+            Conversation.workspace_id.is_(None)
+            if workspace_id is None
+            else Conversation.workspace_id == workspace_id
+        )
         return list((await self.session.execute(stmt)).scalars())
 
-    async def count_by_user(self, user_id: uuid.UUID) -> int:
+    async def count_by_user(self, user_id: uuid.UUID, *, workspace_id: uuid.UUID | None = None) -> int:
         stmt = (
             select(func.count())
             .select_from(Conversation)
             .where(Conversation.user_id == user_id, Conversation.deleted_at.is_(None))
+        )
+        stmt = stmt.where(
+            Conversation.workspace_id.is_(None)
+            if workspace_id is None
+            else Conversation.workspace_id == workspace_id
         )
         return int((await self.session.execute(stmt)).scalar_one())
 
