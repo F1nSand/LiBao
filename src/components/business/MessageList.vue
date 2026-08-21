@@ -56,13 +56,17 @@ onBeforeUnmount(() => {
   containerRef.value?.removeEventListener('scroll', updatePinned)
 })
 
-// 内容变化（流式/新消息/完成）：仅当贴底时跟随（保持吸底），滚走则不动
-watch(
-  () => [props.messages.length, props.stream?.partialText, props.stream?.finished, props.stream?.interrupted],
-  () => {
-    if (pinned.value) scrollToStable('bottom')
-  },
+// 内容版本号：覆盖消息追加 + 流式文本 + 工具/thinking/agent 段插入 + 完成/中断。
+// 之前只监听 partialText/messages.length，漏了 segments（thinking/工具卡/agent_switch 段插入时
+// scrollHeight 增长但 watch 不触发 → 流式中工具卡出现时滚动滞后一帧）。
+const contentVersion = computed(
+  () =>
+    `${props.messages.length}|${props.stream?.segments.length ?? 0}|${props.stream?.partialText?.length ?? 0}|${props.stream?.finished ?? false}|${props.stream?.interrupted ?? false}`,
 )
+// 内容变化（流式/新消息/工具段/完成）：仅当贴底时跟随（保持吸底），滚走则不动
+watch(contentVersion, () => {
+  if (pinned.value) scrollToStable('bottom')
+})
 
 /**
  * 滚动到目标并稳定：scrollHeight 真实（无 content-visibility），但新内容在 paint commit 时会重置 scrollTop——
