@@ -7,6 +7,17 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+[open] 2026-08-21 · →后端 | **工作区项目级能力收敛：`.agent/` 目录机制（M7-B T7a/T8 重定位）** | 用户决策：不做工作区 skills/记忆管理 UI；项目级能力改为工作区 `.agent/` 目录文件化（Claude Code `.claude/` 同款），agent 工作于该工作区时自动发现并叠加。
+      - **能力模型**：agent 运行时 = 全局基座（org skills + 长期记忆 + 知识库 + 工具）+ 项目级 `.agent/`（skills/ + memory/ + knowledge/）；**项目级覆盖全局同名**；工具暂不含（后续扩展）。
+      - **`.agent/` 结构**：`agent.md`（项目约定 / system_prompt 片段）+ `skills/<name>/SKILL.md` + `memory/*.md` + `knowledge/*.md`。
+      - **前端承诺**：`POST /workspaces` 契约不变（**不做 git_url 字段**，改为 `.agent/` 自动初始化）；**无新增 UI**；`.agent/` 作为普通目录出现在文件树（用户可直接编辑）。docs/02 前端蓝本已更新 §4.2。
+      - **请后端实现**：
+        1. 创建 workspace 时在 root_path 下初始化 `.agent/` 骨架（agent.md 模板 + skills/memory/knowledge 空目录 + README 说明）；
+        2. memory/knowledge 的 `.agent/` 自动发现与注入（skills 已由 `discover_workspace_skills` 扫 `skills/*/SKILL.md`；扩展扫 `memory/*.md`、`knowledge/*.md`）；
+        3. 优先级：项目级覆盖全局同名；
+        4. 已落地 `workspace_skill` 表 / `longterm_memory.workspace_id` 兼容策略（`.agent/` 文件为准，表作存储层兼容或逐步废弃，请后端拍板）；
+        5. docs 00/01/03/04 同步本机制。
+
 [open] 2026-08-21 · →后端 | **POST /workspaces/{id}/reveal（OS 打开 root_path 本地文件夹）** | 工作区资源管理器「打开本地文件夹」按钮（M7-B 增强，用户需求）。
       - 前端已实现：api `revealWorkspace` + mock 路由（POST → ok(null)）+ 404 降级（isNotImplementedError → toast + 复制 root_path）；`FEATURE.workspaces.reveal` 独立降级（防 404 误标整个 workspaces 不可用）。
       - 请后端实现：`POST /api/v1/workspaces/{id}/reveal`，workspace 存在校验（40401）+ OS 打开 root_path 所在文件夹（Windows `os.startfile` / Linux `xdg-open`），仅 developer+；`Workspace.root_path` 字段已在契约。未实现时前端自动降级复制路径，不阻塞。
