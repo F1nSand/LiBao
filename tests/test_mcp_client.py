@@ -43,7 +43,7 @@ def test_derive_server_name_url():
 
 def test_derive_server_name_command():
     # 去已知前缀 token，取剩余 token 的 basename
-    assert derive_server_name("npx @modelcontextprotocol/server-everything") == "server-everything"
+    assert derive_server_name("npx @modelcontextprotocol/server-everything") == "server_everything"
     assert derive_server_name("python examples/mcp_demo_server.py") == "mcp_demo_server"
     assert derive_server_name("uv run demo_server") == "demo_server"
 
@@ -55,7 +55,7 @@ def test_derive_server_name_fallback():
 def test_slugify():
     assert slugify("Add Numbers!") == "add_numbers_"
     assert slugify("  UPPER Case  ") == "upper_case"  # 首尾空白 strip
-    assert slugify("a-b_c") == "a-b_c"  # 保留 - _
+    assert slugify("a-b_c") == "a_b_c"  # 连字符转 _
 
 
 # ---- 连接 / 工具发现 / 调用（fake session 注入）----

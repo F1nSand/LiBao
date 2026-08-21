@@ -82,9 +82,9 @@ def derive_server_name(url_or_command: str) -> str:
 
 
 def slugify(s: str) -> str:
-    """slug 化：strip 后小写 + 仅保留 [a-z0-9_-]，其余转 _。"""
+    """slug 化：strip 后小写 + 仅保留 [a-z0-9_]，其余（含连字符）转 _。"""
     s = s.strip()
-    return "".join(ch.lower() if ch.isalnum() or ch in "-_" else "_" for ch in s)
+    return "".join(ch.lower() if ch.isalnum() else "_" for ch in s)
 
 
 def extract_text(result: Any) -> str:
