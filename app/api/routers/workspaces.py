@@ -66,6 +66,17 @@ async def delete_workspace(
     return ok()
 
 
+@router.post("/workspaces/{workspace_id}/reveal")
+async def reveal_workspace(
+    workspace_id: str,
+    user: User = Depends(require_developer),
+    db: AsyncSession = Depends(get_db),
+):
+    """OS 打开工作区本地文件夹（docs 03 §5.14）。存在校验 40416 + developer+。"""
+    await WorkspaceService().reveal(db, user, workspace_id)
+    return ok()
+
+
 # ---- 文件（资源管理器，docs 03 §5.14）：读 → 组织成员；写/删 → developer+ ----
 
 @router.get("/workspaces/{workspace_id}/files")

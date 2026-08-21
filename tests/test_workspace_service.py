@@ -100,3 +100,17 @@ async def test_file_ops_roundtrip(workspace_fixture):
         with pytest.raises(AppError) as exc:
             await WorkspaceService().read_file_content(session, user, wid, "../secret.txt")
         assert exc.value.code == 40302
+
+
+async def test_reveal(workspace_fixture, monkeypatch):
+    sessionmaker, user, _ = workspace_fixture
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(ws_module, "_open_folder", lambda p: captured.setdefault("path", p))
+    async with sessionmaker() as session:
+        row = await WorkspaceService().create(session, user, CreateWorkspaceRequest(name="reveal-me"))
+        await WorkspaceService().reveal(session, user, str(row.id))
+        assert captured["path"] == row.root_path
+        # 不存在 → 40416
+        with pytest.raises(AppError) as exc:
+            await WorkspaceService().reveal(session, user, str(uuid.uuid4()))
+        assert exc.value.code == 40416

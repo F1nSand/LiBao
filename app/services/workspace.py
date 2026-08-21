@@ -1,6 +1,7 @@
 """工作区领域服务（M7-B，docs 03 §5.14）。root_path 后端托管；本地文件夹随 create 创建。"""
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,20 @@ def init_agent_skeleton(root: Path) -> None:
         p = agent_dir / name
         if not p.exists():
             p.write_text(content, encoding="utf-8")
+
+
+def _open_folder(path: str) -> None:
+    """OS 打开本地文件夹（Windows os.startfile / macOS open / Linux xdg-open）。"""
+    import os
+    import subprocess
+    import sys
+
+    if sys.platform == "win32":
+        os.startfile(path)  # noqa: S606  打开本地目录，非 shell 命令
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
 
 
 class WorkspaceService:
@@ -165,3 +180,11 @@ class WorkspaceService:
             raise AppError(ERR_WORKSPACE_PATH_FORBIDDEN, "目录删除暂不支持（防误删）")
         if target.is_file():
             target.unlink()
+
+    async def reveal(self, db: AsyncSession, user: User, workspace_id: str) -> None:
+        """OS 打开 root_path 所在文件夹（M7-B 增强，docs 03 §5.14）。存在校验 + org 隔离，仅 developer+。"""
+        ws = await self.get_in_org(db, user.org_id, workspace_id)
+        root = Path(ws.root_path)
+        if not root.is_dir():
+            raise AppError(ERR_WORKSPACE_NOT_FOUND, "工作区目录不存在")
+        await asyncio.to_thread(_open_folder, str(root))
