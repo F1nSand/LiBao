@@ -9,6 +9,7 @@ import time
 
 import pytest
 
+from app.core.config import get_settings
 from app.tools import executor
 from app.tools.registry import ToolSpec
 from app.tools.sandbox import SandboxLevel
@@ -28,6 +29,20 @@ def _spec(**kw) -> ToolSpec:
     }
     base.update(kw)
     return ToolSpec(**base)
+
+
+def test_summarize_dict_not_truncated_at_500():
+    """修复回归：dict 输出不再被截断到 500 字符，而是按 tool_result_max_chars 上限。"""
+    big = {"items": [{"name": f"item-{i}", "desc": "x" * 100} for i in range(20)]}
+    summary = executor._summarize(big)
+    assert len(summary) > 500  # 不再截断到 500
+    assert len(summary) <= get_settings().tool_result_max_chars
+    assert "item-19" in summary  # 末尾条目对 LLM 可见
+
+
+def test_summarize_str_passthrough():
+    long_str = "hello" * 1000  # 5000 字符
+    assert executor._summarize(long_str) == long_str  # str 原样透传，不截断
 
 
 async def test_retry_success_after_two_failures():

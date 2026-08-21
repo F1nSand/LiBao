@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     fetch_url_denylist: list[str] = []  # 出站黑名单（默认空 = 全放行）；精确域名或 *.example.com 通配
     fetch_url_max_chars: int = 8000
 
+    # ---- 工具结果摘要（executor._summarize）----
+    # dict/list 输出 json 化后截断到此上限；str 输出原样透传不截断
+    tool_result_max_chars: int = 8000
+
     # ---- M7-B 工作区 ----
     workspaces_root: str = "data/workspaces"  # 本地文件夹根（root_path 托管于此；MVP 单节点共享）
     command_review_model: str = ""  # Bash 命令语义审查模型（缺省复用主 LLM）

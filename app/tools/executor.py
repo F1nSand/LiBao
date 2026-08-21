@@ -16,6 +16,7 @@ from typing import Any
 
 from jsonschema import ValidationError, validate
 
+from app.core.config import get_settings
 from app.storage.redis import get_redis, idem_get, idem_set
 from app.tools.registry import ToolSpec
 from app.tools.sandbox import SandboxLevel
@@ -203,7 +204,7 @@ async def _call_with_timeout(handler: Any, input: dict[str, Any], timeout_sec: f
 
 
 def _summarize(output: Any) -> str:
-    """工具结果文本摘要（tool_result.summary）。简单结构即 json 化，超阈值截断。"""
+    """工具结果文本摘要（tool_result.summary）。str 原样透传；dict/list json 化后截断到上限。"""
     if output is None:
         return ""
     if isinstance(output, str):
@@ -212,4 +213,4 @@ def _summarize(output: Any) -> str:
         text = json.dumps(output, ensure_ascii=False)
     except (TypeError, ValueError):
         text = str(output)
-    return text[:500]
+    return text[: get_settings().tool_result_max_chars]
