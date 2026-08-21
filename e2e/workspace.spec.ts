@@ -104,4 +104,22 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
     await page.locator('.rm-head-right button[title^="打开本地文件夹"]').click()
     await expect(page.locator('.el-message__content').filter({ hasText: '已请求在本地打开文件夹' })).toBeVisible()
   })
+
+  test('详情页：.agent/ 项目级能力目录（skills/记忆/知识库，docs/02 §4.2）', async ({ page }) => {
+    await login(page)
+    await page.goto('/workspace')
+    await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
+    await expect(page).toHaveURL(/\/workspace\/ws_001/)
+
+    const tree = page.locator('.rm-tree-wrap')
+    // 根层出现 .agent/ 目录（项目级能力文件化，文件树直接可见可编辑，无管理 UI）
+    const agentRow = tree.locator('.el-tree-node__content').filter({ hasText: '.agent' }).first()
+    await expect(agentRow).toBeVisible()
+    // 展开 .agent/ → agent.md + skills/memory/knowledge 子目录
+    await agentRow.locator('.el-tree-node__expand-icon').click()
+    await expect(tree.locator('.el-tree-node__content', { hasText: 'agent.md' })).toBeVisible()
+    await expect(tree.locator('.el-tree-node__content', { hasText: 'skills' })).toBeVisible()
+    await expect(tree.locator('.el-tree-node__content', { hasText: 'memory' })).toBeVisible()
+    await expect(tree.locator('.el-tree-node__content', { hasText: 'knowledge' })).toBeVisible()
+  })
 })
