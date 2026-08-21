@@ -1,6 +1,8 @@
 """M8 热点收集：github_hotspot 服务 + 工具（格式化/落库/新鲜度/降级）。monkeypatch 隔离网络。"""
 from __future__ import annotations
 
+import httpx
+
 from app.services import github_hotspot as gh
 from app.tools.builtin import github_hotspot as gh_tools
 from app.tools.context import set_tool_workspace_root
@@ -111,7 +113,11 @@ async def test_trending_handler_fallback(tmp_path, monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("blocked")
 
+    async def _approx_error(*a, **k):
+        return {"error": "approx unavailable"}
+
     monkeypatch.setattr(gh, "fetch_trending", _boom)
+    monkeypatch.setattr(gh, "search_trending_approx", _approx_error)
     set_tool_workspace_root(str(tmp_path))
     try:
         out = await gh_tools.tl_github_trending_handler("daily", refresh=True)
@@ -126,7 +132,11 @@ async def test_trending_handler_error_no_cache(tmp_path, monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("blocked")
 
+    async def _approx_error(*a, **k):
+        return {"error": "approx unavailable"}
+
     monkeypatch.setattr(gh, "fetch_trending", _boom)
+    monkeypatch.setattr(gh, "search_trending_approx", _approx_error)
     set_tool_workspace_root(str(tmp_path))
     try:
         out = await gh_tools.tl_github_trending_handler("daily", refresh=True)
@@ -157,3 +167,100 @@ async def test_repo_handler_persist(tmp_path, monkeypatch):
     assert out["from_cache"] is False
     assert "o/r" in out["markdown"]
     assert gh.read_repo_file(tmp_path, "o", "r") is not None
+
+
+async def test_search_trending_approx_mapping(monkeypatch):
+    async def _fake_request(path, params=None):
+        assert "search/repositories" in path
+        return {
+            "ok": True,
+            "data": {
+                "items": [
+                    {
+                        "full_name": "a/b",
+                        "html_url": "https://github.com/a/b",
+                        "description": "d",
+                        "stargazers_count": 10,
+                        "forks_count": 2,
+                        "language": "Go",
+                    }
+                ]
+            },
+            "via_mirror": True,
+        }
+
+    monkeypatch.setattr(gh, "_api_request", _fake_request)
+    r = await gh.search_trending_approx(days=7)
+    assert r["approx"] is True
+    assert r["items"][0]["fullname"] == "a/b"
+    assert r["items"][0]["stars"] == 10
+    assert r["items"][0]["current_period_stars"] == 0  # 搜索 API 无周期增量
+
+
+async def test_trending_handler_approx_fallback(tmp_path, monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("blocked")
+
+    async def _fake_approx(days=7, language=None):
+        return {
+            "items": [
+                {
+                    "fullname": "x/y",
+                    "url": "https://github.com/x/y",
+                    "description": "d",
+                    "language": "Rust",
+                    "stars": 9,
+                    "forks": 1,
+                    "current_period_stars": 0,
+                }
+            ],
+            "approx": True,
+            "days": days,
+            "via_mirror": True,
+        }
+
+    monkeypatch.setattr(gh, "fetch_trending", _boom)
+    monkeypatch.setattr(gh, "search_trending_approx", _fake_approx)
+    set_tool_workspace_root(str(tmp_path))
+    try:
+        out = await gh_tools.tl_github_trending_handler("daily", refresh=True)
+    finally:
+        set_tool_workspace_root(None)
+    assert out["approx"] is True
+    assert "近似榜" in out["markdown"]
+    assert "x/y" in out["markdown"]
+    assert gh.read_trending_file(tmp_path, "daily") is not None  # 近似榜也落库
+
+
+async def test_api_request_mirror_fallback(monkeypatch):
+    monkeypatch.setattr(gh, "_headers", lambda: {"X-Mode": "direct"})
+    monkeypatch.setattr(gh, "_anon_headers", lambda: {"X-Mode": "mirror"})
+    monkeypatch.setattr(gh, "_mirror", lambda: "https://mirror/")
+
+    class _FakeResp:
+        def __init__(self, status, data=None):
+            self.status_code = status
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    class _FakeClient:
+        def __init__(self, headers, timeout, proxy=None):
+            self._mode = headers.get("X-Mode")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, params=None):
+            if self._mode == "direct":
+                raise httpx.ConnectError("blocked")  # 直连被墙
+            return _FakeResp(200, {"total_count": 0, "items": []})
+
+    monkeypatch.setattr(gh.httpx, "AsyncClient", _FakeClient)
+    r = await gh._api_request("/search/repositories", {"q": "x"})
+    assert r["ok"] is True
+    assert r["via_mirror"] is True

@@ -54,23 +54,57 @@ def _proxy_env():
                 os.environ[k] = v
 
 
+def _mirror() -> str:
+    """GitHub 镜像前缀（直连失败时匿名兜底）。空串/None = 禁用镜像。"""
+    m = (get_settings().github_mirror or "").strip().rstrip("/")
+    return f"{m}/" if m else ""
+
+
+def _anon_headers() -> dict[str, str]:
+    """匿名 headers：镜像兜底不带 token（防泄漏给第三方）。"""
+    return {"Accept": "application/vnd.github+json", "User-Agent": "agent-backend"}
+
+
+async def _api_request(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """GET 官方 API（path 如 /search/repositories）：直连（带 token）→ 网络失败/5xx 经镜像（匿名）。
+
+    返回 {'ok': bool, 'data'?, 'via_mirror'?, 'status'?, 'error'?}。
+    """
+    url = f"{_GITHUB_API}{path}"
+    try:
+        async with httpx.AsyncClient(headers=_headers(), timeout=15.0, proxy=_proxy()) as client:
+            resp = await client.get(url, params=params)
+        if resp.status_code == 200:
+            return {"ok": True, "data": resp.json()}
+        if resp.status_code in (401, 403, 404):
+            return {"ok": False, "status": resp.status_code, "error": _api_error(resp)}
+    except httpx.HTTPError:
+        pass  # 直连网络失败 → 走镜像兜底
+    mirror = _mirror()
+    if mirror:
+        try:
+            async with httpx.AsyncClient(headers=_anon_headers(), timeout=15.0) as client:
+                mresp = await client.get(mirror + url, params=params)
+            if mresp.status_code == 200:
+                return {"ok": True, "data": mresp.json(), "via_mirror": True}
+            return {"ok": False, "status": mresp.status_code, "error": _api_error(mresp)}
+        except httpx.HTTPError:
+            pass
+    return {"ok": False, "error": "GitHub API 网络失败（直连与镜像均不可达，国内可能需代理）"}
+
+
 # ---- GitHub 官方 REST API（搜索 / 详情）----
 
 
 async def search_repos(query: str, limit: int = 10, language: str | None = None) -> dict[str, Any]:
-    """GET /search/repositories → 项目列表（含 html_url 跳转链接）。"""
+    """GET /search/repositories → 项目列表（含 html_url 跳转链接）。直连失败经镜像匿名兜底。"""
     q = f"{query} language:{language}" if language else query
-    url = f"{_GITHUB_API}/search/repositories"
-    try:
-        async with httpx.AsyncClient(headers=_headers(), timeout=15.0, proxy=_proxy()) as client:
-            resp = await client.get(
-                url, params={"q": q, "per_page": min(limit, 100), "sort": "stars", "order": "desc"}
-            )
-    except httpx.HTTPError as exc:
-        return {"error": f"GitHub API 网络失败（国内可能需代理）: {str(exc)[:120]}"}
-    if resp.status_code != 200:
-        return {"error": _api_error(resp)}
-    data = resp.json()
+    r = await _api_request(
+        "/search/repositories", {"q": q, "per_page": min(limit, 100), "sort": "stars", "order": "desc"}
+    )
+    if not r["ok"]:
+        return {"error": r["error"]}
+    data = r["data"]
     items = [
         {
             "full_name": it["full_name"],
@@ -85,24 +119,21 @@ async def search_repos(query: str, limit: int = 10, language: str | None = None)
         for it in data.get("items", [])
     ]
     result: dict[str, Any] = {"items": items, "total": data.get("total_count", 0)}
-    if not get_settings().github_token:
+    if r.get("via_mirror"):
+        result["note"] = "经镜像获取（匿名）"
+    elif not get_settings().github_token:
         result["note"] = "未配置 GITHUB_TOKEN，匿名配额 60 req/h"
     return result
 
 
 async def get_repo(owner: str, repo: str) -> dict[str, Any]:
-    """GET /repos/{owner}/{repo} → 项目概况（含 html_url 跳转链接）。"""
-    url = f"{_GITHUB_API}/repos/{owner}/{repo}"
-    try:
-        async with httpx.AsyncClient(headers=_headers(), timeout=15.0, proxy=_proxy()) as client:
-            resp = await client.get(url)
-    except httpx.HTTPError as exc:
-        return {"error": f"GitHub API 网络失败（国内可能需代理）: {str(exc)[:120]}"}
-    if resp.status_code != 200:
-        return {"error": _api_error(resp)}
-    it = resp.json()
+    """GET /repos/{owner}/{repo} → 项目概况（含 html_url 跳转链接）。直连失败经镜像匿名兜底。"""
+    r = await _api_request(f"/repos/{owner}/{repo}")
+    if not r["ok"]:
+        return {"error": r["error"]}
+    it = r["data"]
     lic = it.get("license") or {}
-    return {
+    result: dict[str, Any] = {
         "full_name": it["full_name"],
         "html_url": it["html_url"],
         "description": it.get("description") or "",
@@ -116,6 +147,35 @@ async def get_repo(owner: str, repo: str) -> dict[str, Any]:
         "homepage": it.get("homepage") or "",
         "pushed_at": it.get("pushed_at") or "",
     }
+    if r.get("via_mirror"):
+        result["note"] = "经镜像获取（匿名）"
+    return result
+
+
+async def search_trending_approx(days: int = 7, limit: int = 25, language: str | None = None) -> dict[str, Any]:
+    """trending 近似（官方 API，可经镜像）：近 N 天新建 + star 排序。非 GitHub 官方 trending 算法。"""
+    from datetime import timedelta
+
+    since = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
+    q = f"created:>{since}" + (f" language:{language}" if language else "")
+    r = await _api_request(
+        "/search/repositories", {"q": q, "per_page": min(limit, 100), "sort": "stars", "order": "desc"}
+    )
+    if not r["ok"]:
+        return {"error": r["error"]}
+    items = [
+        {
+            "fullname": it["full_name"],
+            "url": it["html_url"],
+            "description": it.get("description") or "",
+            "language": it.get("language") or "",
+            "stars": it.get("stargazers_count", 0),
+            "forks": it.get("forks_count", 0),
+            "current_period_stars": 0,  # 搜索 API 无周期增量；近似榜用总 star 排序
+        }
+        for it in r["data"].get("items", [])
+    ]
+    return {"items": items, "approx": True, "days": days, "via_mirror": bool(r.get("via_mirror"))}
 
 
 def _api_error(resp: httpx.Response) -> str:

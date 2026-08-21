@@ -11,6 +11,8 @@ from typing import Any
 from app.services import github_hotspot as gh
 from app.tools.context import get_tool_workspace_root
 
+_SINCE_DAYS = {"daily": 1, "weekly": 7, "monthly": 30}
+
 
 async def tl_github_trending_handler(
     since: str = "daily", language: str | None = None, spoken_language: str | None = None, refresh: bool = False
@@ -21,10 +23,24 @@ async def tl_github_trending_handler(
         md = gh.read_trending_file(root, since)
         if md is not None:
             return {"since": since, "from_cache": True, "markdown": md}
-    # ② 实时抓取
+    # ② 实时抓取（gtrending 爬 github.com/trending）
     try:
         repos = await asyncio.to_thread(gh.fetch_trending, since, language, spoken_language)
-    except Exception as exc:  # noqa: BLE001  反爬/网络失败 → 本地兜底
+    except Exception as exc:  # noqa: BLE001  被墙/反爬 → ③ API 近似榜 → ④ 本地旧缓存
+        approx = await gh.search_trending_approx(days=_SINCE_DAYS.get(since, 7), language=language)
+        if "error" not in approx:
+            md = f"> 近似榜（非 GitHub 官方 trending：直连被墙，近 {approx['days']} 天新建 + star 排序）\n\n"
+            md += gh.format_trending_md(approx["items"], since, language)
+            payload: dict[str, Any] = {
+                "since": since,
+                "count": len(approx["items"]),
+                "from_cache": False,
+                "approx": True,
+                "markdown": md,
+            }
+            if root:
+                payload["path"] = gh.persist_trending(root, since, md)
+            return payload
         if root:
             md = gh.read_trending_file(root, since)
             if md is not None:
