@@ -11,7 +11,7 @@ import {
 } from '@/api/workspace'
 import { isNotImplementedError } from '@/utils/http-envelope'
 import { useTaskPoll } from '@/composables/useTaskPoll'
-import { refreshExpandedTree } from '@/utils/workspace-tree'
+import { collectLoadedPaths, refreshExpandedTree, signatureOf } from '@/utils/workspace-tree'
 import type { WorkspaceFile } from '@/types'
 
 /**
@@ -42,11 +42,31 @@ onMounted(() => {
     .catch(() => undefined) // 预取失败不阻塞（降级路径再查）
 })
 
-/** 轮询刷新：保展开文件树 + 预览安全重读（e2e fast 模式缩短间隔，见 .env.e2e） */
+/** 数据变化检测缓存：各可见层签名（对比通过则跳过刷新，消除无谓重建导致的文件树闪烁） */
+const layerSignatures = new Map<string, string>()
+let cacheInitialized = false
+
+/** 轮询刷新：先只读可见层对比签名，全部无变化 → 零 DOM 操作跳过；有变化才保展开重建 + 预览安全重读（e2e fast 模式缩短间隔，见 .env.e2e） */
 async function refreshAll() {
   const tree = treeRef.value
   if (!tree) return
-  await refreshExpandedTree(tree)
+  let changed = false
+  for (const path of collectLoadedPaths(tree)) {
+    const files = await listWorkspaceFiles(props.workspaceId, path).catch(() => null)
+    if (!files) continue
+    const sig = signatureOf(files)
+    if (!cacheInitialized) {
+      layerSignatures.set(path, sig)
+    } else if (layerSignatures.has(path) && layerSignatures.get(path) !== sig) {
+      layerSignatures.set(path, sig)
+      changed = true
+    } else if (!layerSignatures.has(path)) {
+      layerSignatures.set(path, sig) // 新展开层首次仅缓存，不触发重建
+    }
+  }
+  cacheInitialized = true
+  if (changed) await refreshExpandedTree(tree)
+  // 预览安全重读（用户编辑中不覆盖）
   if (previewVisible.value && !previewDirty.value && !previewFocused.value && previewPath.value) {
     try {
       const res = await readWorkspaceFile(props.workspaceId, previewPath.value)

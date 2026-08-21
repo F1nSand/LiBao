@@ -25,6 +25,7 @@ export interface TreeNodeLike {
   loaded: boolean
   loading: boolean
   expanded: boolean
+  isLeaf?: boolean
   loadData?: (cb?: () => void) => void
   expand?: (cb?: () => void) => void
   eachNode?: (cb: (node: TreeNodeLike) => void) => void
@@ -74,4 +75,21 @@ export async function refreshExpandedTree(tree: ElTreeLike): Promise<boolean> {
   } finally {
     tree.__refreshing = false
   }
+}
+
+/**
+ * 收集可见层路径：根层（''）+ 所有已加载非叶节点（轮询数据变化检测用）。
+ * 轮询只需对比这些层的数据（未加载/未展开的层不在视野内，无刷新价值）。
+ */
+export function collectLoadedPaths(tree: ElTreeLike): string[] {
+  const paths: string[] = ['']
+  tree.store.root.eachNode?.((node) => {
+    if (node.level > 0 && node.loaded && node.isLeaf === false && node.key != null) paths.push(node.key)
+  })
+  return paths
+}
+
+/** 文件列表签名：name|is_dir|size 拼接。轮询对比用——签名不变说明该层未变化，跳过刷新避免闪烁。 */
+export function signatureOf(files: Array<{ name: string; is_dir: boolean; size?: number }>): string {
+  return files.map((f) => `${f.name}|${f.is_dir}|${f.size ?? 0}`).join(',')
 }

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { refreshExpandedTree, reloadNode, snapshotExpandedPaths, type ElTreeLike, type TreeNodeLike } from './workspace-tree'
+import {
+  collectLoadedPaths,
+  refreshExpandedTree,
+  reloadNode,
+  signatureOf,
+  snapshotExpandedPaths,
+  type ElTreeLike,
+  type TreeNodeLike,
+} from './workspace-tree'
 
 /** 假 el-tree Node：TreeNodeLike + childNodes（实现本工具依赖的最小接口，loadData/expand 同步完成） */
 interface FakeNode extends TreeNodeLike {
@@ -95,5 +103,37 @@ describe('workspace-tree 保展开刷新', () => {
     const tree = makeTree(root)
     tree.__refreshing = true
     await expect(refreshExpandedTree(tree)).resolves.toBe(false)
+  })
+
+  it('signatureOf：name/is_dir/size 编码；同内容同签名，size 变化签名变', () => {
+    const a = [
+      { name: 'a.md', is_dir: false, size: 10 },
+      { name: 'docs', is_dir: true, size: 0 },
+    ]
+    const b = [
+      { name: 'a.md', is_dir: false, size: 10 },
+      { name: 'docs', is_dir: true, size: 0 },
+    ]
+    const c = [
+      { name: 'a.md', is_dir: false, size: 99 }, // 内容变化 → size 变
+      { name: 'docs', is_dir: true },
+    ]
+    expect(signatureOf(a)).toBe('a.md|false|10,docs|true|0')
+    expect(signatureOf(a)).toBe(signatureOf(b))
+    expect(signatureOf(a)).not.toBe(signatureOf(c))
+  })
+
+  it('collectLoadedPaths：根层 + 已加载非叶；未加载/叶节点排除', () => {
+    const root = makeNode('', 0, { loaded: true, expanded: true })
+    const docs = makeNode('docs', 1, { loaded: true, expanded: true })
+    const src = makeNode('src', 1, { loaded: false }) // 未加载
+    const readme = makeNode('README.md', 1, { loaded: true }) // 叶文件
+    root.childNodes = [docs, src, readme]
+    docs.isLeaf = false
+    src.isLeaf = false
+    readme.isLeaf = true
+
+    const tree = makeTree(root)
+    expect(collectLoadedPaths(tree)).toEqual(['', 'docs'])
   })
 })
