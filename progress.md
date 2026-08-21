@@ -70,6 +70,11 @@
 - **验证**：全量 **370 passed / 0 skipped** + ruff 干净。
 - **待用户**：重启后端（sync_registry 使 spec enabled 跟随 DB）→ 在工作区问「今天 GitHub 有哪些热门项目」实测。
 
+### 会话收尾（2026-08-21）
+- 本轮 commit 链：c14a2c9（`.agent/` 机制）+ 2f5c9e5（reveal）+ 06cc3e8（文件夹可读化 + seed 启用 GitHub 工具）+ 55c7948（GITHUB_PROXY）+ 4bfe38b（镜像+近似榜自动兜底）+ 2555067（工具返回 str 修截断）+ e0e390c（摘要上限 500→8000）。全量 **375 全绿 + ruff**。
+- **GitHub 热点渠道**：代码/工具/skill/落库/降级链全部就绪，**待用户重启后端后实测**（工作区问「今天 GitHub 有哪些热门项目」）。
+- **明日待办（交接板 [open] →后端，已勘察未开工）**：**工作区硬删 + 文件树操作契约扩展**——① `DELETE /workspaces/{id}` 软删→真删（删 root_path 目录 + DB 行 + 级联 conversations/messages/memory_trace/run_log/attachment/webhook/evolution/longterm_memory，无 FK 级联手动叶子→根）；② `PATCH /files/rename`；③ `POST /files {is_dir:true}`；④ `DELETE /files?path=` 目录递归删；⑤ docs/03 同步。**待拍板**：硬删时 attachment 磁盘文件是否连删（我倾向只删 DB 行）。详见 memory `agent-backend-project-state.md`。
+
 ---
 
 ## M7-A 主 Agent 第三方 Skills + MCP 适配（2026-08-20 完成）
