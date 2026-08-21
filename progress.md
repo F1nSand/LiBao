@@ -1,6 +1,6 @@
 # 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-20-m7b-workspace.md（M7-B）
 
-## M7-B 工作区（2026-08-20 进行中）
+## M7-B 工作区（2026-08-20 完成）
 
 任务清单：
 - [x] Phase1 T1 workspace 实体 + 迁移 0013 + 仓库 + 本地文件夹 + serialize
@@ -21,6 +21,13 @@
 - 修复（commit 160cc89）：workspace_root 返回绝对路径（relative_to/路径校验相对绝对混用致 500）；data/ 进 .gitignore。
 - Phase4 T8（commit ce009dd）：longterm_memory.workspace_id（迁移 0015）+ list_cards 按 workspace_id 过滤（普通→个人；工作区→工作区∪个人）+ memory_inject 读 workspace_id。测试 +1。
 - Phase3 T7a（commit 720014d）：discover_workspace_skills（扫描 skills/*/SKILL.md → 路由描述）+ build_initial_state 合并 org+工作区 skills 进前缀 + load_skill 回退（DB 未命中读工作区文件）。测试 +2。**mcp_server.workspace_id（工作区级 MCP）defer**——工作区 agent 复用组织级 MCP 已够 80% 场景。
+
+### M7-B 收尾轮（2026-08-21，L2 轻量）
+- **提交外部 slugify 改动**（commit c19cb52）：`slugify` 连字符→下划线。查清影响面：`mc_...` spec id 纯内存不落库、启动每次重建；绑定键 `row.name` 不变，无持久化破坏。
+- **工作区会话隔离**（commit 41bc9fb）：`GET /conversations` 加 `workspace_id` 查询参数（缺省排除工作区会话 / 带值命中工作区）；`POST /conversations` 接受 `workspace_id`；对齐前端 mock 语义。测试 +2（347 全绿 + ruff）。
+- **docs 同步**（前端交接板 →后端）：docs/03 补 §5.15 主 Agent Skills（org 级）+ §5.2 会话列表 workspace_id 参数；docs/02 §4/§6.2/§7 删 /tasks·TaskList·EvalManage/CostChart/EvolutionManage·task store、补 /skills·SkillsView·skill store、/system 收敛为日志+trace；docs/00 §5 模块图更新。（docs 在 `Desktop/Agent/docs/`，非后端 git 仓库，仅落盘）
+- **交接板**：FrontEnd/progress.md 三张 open 纸条划 [done] + 回「会话 workspace_id 已对齐，前端零改动」。
+- **遗留（记录不修）**：`mcp_server.workspace_id` defer、工作区端到端联调、run_log org 列、测试污染根治；下一大里程碑 = M8 热点垂直化。
 
 ---
 
