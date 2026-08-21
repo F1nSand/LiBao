@@ -86,6 +86,7 @@ class Settings(BaseSettings):
 
     # ---- M8 热点收集（GitHub）----
     github_token: str | None = None  # GitHub API token（.env GITHUB_TOKEN，缺省匿名 60 req/h 配额受限）
+    github_proxy: str | None = None  # 访问 GitHub 的 HTTP 代理（如 http://127.0.0.1:7890），国内直连被墙时填
 
     # ---- 跨域 ----
     cors_origins: list[str] = ["http://localhost:5173"]

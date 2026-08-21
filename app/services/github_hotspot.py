@@ -7,6 +7,8 @@ trending（无官方 API）→ 复用 gtrending 库爬 github.com/trending；搜
 from __future__ import annotations
 
 import json
+import os
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,31 @@ def _headers() -> dict[str, str]:
     return headers
 
 
+def _proxy() -> str | None:
+    """httpx 显式代理（None = 走 trust_env，读系统 HTTP_PROXY/HTTPS_PROXY）。"""
+    return get_settings().github_proxy
+
+
+@contextmanager
+def _proxy_env():
+    """gtrending 的 requests 读 os.environ 代理 → 临时注入 HTTPS_PROXY/HTTP_PROXY，用完还原（不影响 LLM 出站）。"""
+    proxy = get_settings().github_proxy
+    if not proxy:
+        yield
+        return
+    old = {k: os.environ.get(k) for k in ("HTTPS_PROXY", "HTTP_PROXY")}
+    os.environ["HTTPS_PROXY"] = proxy
+    os.environ["HTTP_PROXY"] = proxy
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 # ---- GitHub 官方 REST API（搜索 / 详情）----
 
 
@@ -35,7 +62,7 @@ async def search_repos(query: str, limit: int = 10, language: str | None = None)
     q = f"{query} language:{language}" if language else query
     url = f"{_GITHUB_API}/search/repositories"
     try:
-        async with httpx.AsyncClient(headers=_headers(), timeout=15.0) as client:
+        async with httpx.AsyncClient(headers=_headers(), timeout=15.0, proxy=_proxy()) as client:
             resp = await client.get(
                 url, params={"q": q, "per_page": min(limit, 100), "sort": "stars", "order": "desc"}
             )
@@ -67,7 +94,7 @@ async def get_repo(owner: str, repo: str) -> dict[str, Any]:
     """GET /repos/{owner}/{repo} → 项目概况（含 html_url 跳转链接）。"""
     url = f"{_GITHUB_API}/repos/{owner}/{repo}"
     try:
-        async with httpx.AsyncClient(headers=_headers(), timeout=15.0) as client:
+        async with httpx.AsyncClient(headers=_headers(), timeout=15.0, proxy=_proxy()) as client:
             resp = await client.get(url)
     except httpx.HTTPError as exc:
         return {"error": f"GitHub API 网络失败（国内可能需代理）: {str(exc)[:120]}"}
@@ -108,7 +135,8 @@ def fetch_trending(
     """gtrending 同步抓取（阻塞网络请求，调用方需 asyncio.to_thread）。"""
     from gtrending import fetch_repos  # 惰性 import：测试可 monkeypatch 本函数绕过依赖
 
-    repos = fetch_repos(language=language, spoken_language_code=spoken_language, since=since)
+    with _proxy_env():
+        repos = fetch_repos(language=language, spoken_language_code=spoken_language, since=since)
     return [
         {
             "fullname": r["fullname"],
