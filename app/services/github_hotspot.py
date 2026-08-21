@@ -259,6 +259,18 @@ def format_repo_md(repo: dict[str, Any]) -> str:
     )
 
 
+def format_search_md(items: list[dict[str, Any]], query: str, total: int) -> str:
+    """搜索结果为 markdown 列表（LLM 可直接读用，含跳转链接）。"""
+    lines = [f"## GitHub 搜索「{query}」（前 {len(items)} / 共 {total}）", ""]
+    for i, it in enumerate(items, 1):
+        lines.append(
+            f"{i}. **[{it['full_name']}]({it['html_url']})** ⭐{it['stargazers_count']} · {it['language'] or '—'}"
+        )
+        if it.get("description"):
+            lines.append(f"   {it['description']}")
+    return "\n".join(lines)
+
+
 # ---- 本地落库（工作区 github-hotspot/ 目录）----
 
 

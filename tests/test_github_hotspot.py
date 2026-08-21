@@ -86,9 +86,8 @@ async def test_trending_handler_persist(tmp_path, monkeypatch):
         out = await gh_tools.tl_github_trending_handler("daily")
     finally:
         set_tool_workspace_root(None)
-    assert out["from_cache"] is False
-    assert out["count"] == 2
-    assert "repo-a" in out["markdown"]
+    assert "repo-a" in out
+    assert "实时抓取" in out
     assert gh.read_trending_file(tmp_path, "daily") is not None
 
 
@@ -103,7 +102,7 @@ async def test_trending_handler_cache(tmp_path, monkeypatch):
         out = await gh_tools.tl_github_trending_handler("daily")
     finally:
         set_tool_workspace_root(None)
-    assert out["from_cache"] is True
+    assert "本地缓存" in out
     assert called["n"] == 0  # 未触发实时抓取
 
 
@@ -123,9 +122,8 @@ async def test_trending_handler_fallback(tmp_path, monkeypatch):
         out = await gh_tools.tl_github_trending_handler("daily", refresh=True)
     finally:
         set_tool_workspace_root(None)
-    assert out["from_cache"] is True
-    assert "old snapshot" in out["markdown"]
-    assert "兜底" in out["note"]
+    assert "old snapshot" in out
+    assert "兜底" in out
 
 
 async def test_trending_handler_error_no_cache(tmp_path, monkeypatch):
@@ -164,8 +162,7 @@ async def test_repo_handler_persist(tmp_path, monkeypatch):
         out = await gh_tools.tl_github_repo_handler("o", "r")
     finally:
         set_tool_workspace_root(None)
-    assert out["from_cache"] is False
-    assert "o/r" in out["markdown"]
+    assert "o/r" in out
     assert gh.read_repo_file(tmp_path, "o", "r") is not None
 
 
@@ -226,9 +223,8 @@ async def test_trending_handler_approx_fallback(tmp_path, monkeypatch):
         out = await gh_tools.tl_github_trending_handler("daily", refresh=True)
     finally:
         set_tool_workspace_root(None)
-    assert out["approx"] is True
-    assert "近似榜" in out["markdown"]
-    assert "x/y" in out["markdown"]
+    assert "近似榜" in out
+    assert "x/y" in out
     assert gh.read_trending_file(tmp_path, "daily") is not None  # 近似榜也落库
 
 
