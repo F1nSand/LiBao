@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     workspaces_root: str = "data/workspaces"  # 本地文件夹根（root_path 托管于此；MVP 单节点共享）
     command_review_model: str = ""  # Bash 命令语义审查模型（缺省复用主 LLM）
 
+    # ---- M8 热点收集（GitHub）----
+    github_token: str | None = None  # GitHub API token（.env GITHUB_TOKEN，缺省匿名 60 req/h 配额受限）
+
     # ---- 跨域 ----
     cors_origins: list[str] = ["http://localhost:5173"]
 

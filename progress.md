@@ -40,7 +40,27 @@
 - **兼容策略**：`workspace_skill` 表从未实现（仅 docs 描述，M7-B T7a 已是纯文件）——纯文件为准，无表废弃；`longterm_memory.workspace_id` 保留（DB 记忆隔离不变）。
 - **docs 同步**（`Desktop/Agent/docs/`，非后端仓库）：docs/00/01/03/04 移除 `workspace_skill` 表描述、补 `.agent/` 机制；docs/03 工作区 skills REST 改文件化 + 补 `/workspaces/{id}/reveal`；docs/02 扫描路径修正。
 - **验证**：`test_workspace_agent` +8（发现/`.agent/` 优先级/骨架幂等/注入/同名覆盖）；全量 **339 通过 + 18 跳过**（skip 全是 redis 容器 6379 未发布宿主机，环境问题与本改动无关）+ ruff 干净。
-- **待做**：Part B `POST /workspaces/{id}/reveal`（L1）、Part C GitHub 热点收集渠道（L2）；commit 待用户确认。
+
+### Part B · `POST /workspaces/{id}/reveal`（2026-08-21，L1，未提交）
+
+交接板 `[open]` →后端 项：OS 打开工作区本地文件夹。
+
+- `WorkspaceService.reveal`（存在校验 + `_open_folder`：Windows `os.startfile` / Linux `xdg-open` / macOS `open`）+ `/workspaces/{id}/reveal` 路由（developer+，40416 校验）。
+- 测试 test_reveal +1（monkeypatch `_open_folder` 捕获路径 + 不存在 40416）。
+
+### Part C · GitHub 热点收集渠道（2026-08-21，L2，未提交）
+
+垂直化领域-热点收集的 GitHub 信息源（plan `agent-ancient-lynx.md`）。用户拍板：trending 复用 gtrending 库 + 搜索/详情走官方 API + 落库本地工作区 + 定时脚本。
+
+- **依赖**：pyproject 加 `gtrending>=0.5.1`；`Settings.github_token`（env `GITHUB_TOKEN`，缺省匿名 60 req/h）。
+- **服务层** `app/services/github_hotspot.py`：`fetch_trending`（gtrending 同步爬，需 `asyncio.to_thread`）+ `search_repos`/`get_repo`（官方 REST API + 降级）+ `format_trending_md`/`format_repo_md` + 本地落库（`github-hotspot/{trending,repos}/` + `index.json` 新鲜度）。
+- **内置工具** `app/tools/builtin/github_hotspot.py`：`tl_github_trending`（优先本地新鲜/实时抓取/失败本地兜底）、`tl_github_search`、`tl_github_repo`（落库）；默认 `enabled=False`（网络工具约束优先）。
+- **定时脚本** `scripts/fetch_github_hotspot.py`（`--workspace-id`/`--root`/`--since`/`--force`，由 DevPanel/任务计划调度）。
+- **skill 模板** `examples/skills/github-hotspot/SKILL.md`（复制到工作区 `.agent/skills/github-hotspot/` 即被自动发现）。
+- **降级**（用户硬要求）：token 缺失→匿名+note；401/403→引导本地缓存；网络失败→本地快照兜底；gtrending 反爬→最近快照兜底。
+- **测试** test_github_hotspot +11（格式化/落库/新鲜度/降级，monkeypatch 隔离网络）；test_reveal +1。
+- **验证**：全量 **369 passed / 0 skipped**（redis 端口已恢复映射）+ ruff 干净。
+- **待用户**：`.env` 配 `GITHUB_TOKEN`（用户自行配置）；commit 待确认。
 
 ---
 

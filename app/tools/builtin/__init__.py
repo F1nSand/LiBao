@@ -10,6 +10,7 @@ from app.tools.builtin import (
     dispatch_subagent,
     fetch_url,
     file_ops,
+    github_hotspot,
     initiate_demo,
     kb_search,
     load_skill,
@@ -557,6 +558,92 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=130000,
             handler=file_ops.bash_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_github_trending",
+            name="github_trending",
+            description=(
+                "抓取 GitHub trending 榜单（日/周/月榜，可过滤编程语言）。需要了解 GitHub 热门项目/热点时使用；"
+                "结果自动落库到工作区 github-hotspot/，本地新鲜（<24h）时直接读回缓存。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "since": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "monthly"],
+                        "description": "时间范围，默认 daily",
+                    },
+                    "language": {"type": "string", "description": "可选：编程语言过滤，如 python"},
+                    "spoken_language": {"type": "string", "description": "可选：口语代码，如 zh/en"},
+                    "refresh": {"type": "boolean", "description": "强制刷新，忽略本地缓存，默认 false"},
+                },
+                "required": [],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=False,  # 网络工具，默认关闭（约束优先，管理员显式启用）
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=30000,
+            handler=github_hotspot.tl_github_trending_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_github_search",
+            name="github_search",
+            description=(
+                "搜索 GitHub 仓库（官方 API，按 star 排序）。需要查找某个项目/领域有哪些开源仓库时使用；"
+                "返回仓库名/链接/描述/star/fork/语言/topics（html_url 即跳转链接）。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "搜索关键词，如 llm agent framework"},
+                    "limit": {"type": "integer", "description": "返回条数，默认 10，上限 100"},
+                    "language": {"type": "string", "description": "可选：编程语言过滤，如 python"},
+                },
+                "required": ["query"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=False,  # 网络工具，默认关闭
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=20000,
+            handler=github_hotspot.tl_github_search_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_github_repo",
+            name="github_repo",
+            description=(
+                "获取单个 GitHub 仓库概况（官方 API）：描述/star/fork/issues/语言/topics/license/主页 + 跳转链接。"
+                "需要了解某个具体项目时使用；结果自动落库到工作区 github-hotspot/repos/。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string", "description": "仓库 owner，如 langchain-ai"},
+                    "repo": {"type": "string", "description": "仓库名，如 langgraph"},
+                    "refresh": {"type": "boolean", "description": "强制刷新，忽略本地缓存，默认 false"},
+                },
+                "required": ["owner", "repo"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=False,  # 网络工具，默认关闭
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=20000,
+            handler=github_hotspot.tl_github_repo_handler,
             builtin=True,
         )
     )
