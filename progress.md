@@ -7,7 +7,11 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
-[open] 2026-08-20 · ←后端 | **M7-B：工作区后端已落地（workspace + 文件操作 + 项目级 agent）** | 契约如下，前端可先就绪 types/mock/UI。
+[open] 2026-08-21 · →后端 | **POST /workspaces/{id}/reveal（OS 打开 root_path 本地文件夹）** | 工作区资源管理器「打开本地文件夹」按钮（M7-B 增强，用户需求）。
+      - 前端已实现：api `revealWorkspace` + mock 路由（POST → ok(null)）+ 404 降级（isNotImplementedError → toast + 复制 root_path）；`FEATURE.workspaces.reveal` 独立降级（防 404 误标整个 workspaces 不可用）。
+      - 请后端实现：`POST /api/v1/workspaces/{id}/reveal`，workspace 存在校验（40401）+ OS 打开 root_path 所在文件夹（Windows `os.startfile` / Linux `xdg-open`），仅 developer+；`Workspace.root_path` 字段已在契约。未实现时前端自动降级复制路径，不阻塞。
+
+[done] 2026-08-20 · ←后端 | **M7-B：工作区后端已落地（workspace + 文件操作 + 项目级 agent）** | 契约如下，前端可先就绪 types/mock/UI。
       - 后端本轮交付：
         - `workspace` 实体（org 级）：`{id, org_id, name, description, root_path, system_prompt_fragment, status(active/archived), created_by, created_at}`
         - `POST /api/v1/workspaces` 建（name/description/system_prompt_fragment）→ 建真实本地目录（root_path 后端托管）
@@ -17,9 +21,10 @@
       - 前端建议补：工作区页气泡网格（一泡一个工作区 + 新建/编辑气泡内容）+ 工作区内部 = 对话/轨迹复用 + 资源管理器侧栏（文件树 + 预览 + 引用文件）
       - ✅ 前端已补（2026-08-20）：`/workspace` 气泡网格（新建/编辑/进入/归档）+ `/workspace/:id` 内部页（左文件树资源管理器 el-tree 懒加载 + 右工作区对话 = 独立 useChatStream 实例 + 工作区会话列表 + 引用文件 file_refs + 会话|轨迹）；types `Workspace/WorkspaceFile` + `api/workspace.ts` + mock（workspaces CRUD + files + conversations workspace_id 过滤）+ `FEATURE.workspaces` 降级。单测 +13 / e2e +2。
       - 契约确认请求 →后端：`GET /conversations` 不带 `workspace_id` 时是否排除工作区会话？前端 mock 按「排除」处理（保证 /chat 全局列表不含工作区对话）；若真实后端包含工作区会话请告知，前端再对齐。
-      - 计划：`docs/plans/2026-08-20-m7b-workspace.md`（后端 L3，Phase 1/2/T6 已完，T7 workspace_skill/T8 记忆隔离待续）
+      - ✅ 后端已对齐（2026-08-21）：`GET /conversations` 不带 `workspace_id` 已**排除工作区会话**、带 `?workspace_id=` 显式过滤该工作区；`POST /conversations` 已接受 `workspace_id`。与前端 mock 语义一致，前端零改动。
+      - 计划：`docs/plans/2026-08-20-m7b-workspace.md`（后端 L3，Phase 1-4 已完，T7a filesystem skills / T8 记忆隔离已落地）
 
-[open] 2026-08-20 · ←后端 | **M7-A：主 Agent 第三方 Skills 适配（后端先行，前端随后补 Skills 管理页）** | 契约如下，前端可先就绪 types/mock/UI，不阻塞后端。
+[done] 2026-08-20 · ←后端 | **M7-A：主 Agent 第三方 Skills 适配（后端先行，前端随后补 Skills 管理页）** | 契约如下，前端可先就绪 types/mock/UI，不阻塞后端。
       - 后端本轮交付：
         - `skill` 实体（org 级）：`{id, org_id, name, description(路由描述), body(SKILL.md 正文), source(manual|git), enabled, created_at}`
         - `POST /api/v1/skills` 手动创建 `{name, description, body}`
@@ -31,9 +36,10 @@
       - ✅ 前端已补（2026-08-20）：`/skills` 页（设置组子项，admin+developer）+ types `Skill` + `api/skill.ts` + mock（CRUD+import，DELETE 真删除）+ `FEATURE.skills` 降级 + 单测 8 + e2e 2。已按上契约束实现，与你后端本轮交付对齐。
       - 计划：`docs/plans/2026-08-20-m7a-main-agent-skills-mcp.md`（后端 L2）
 
-[open] 2026-08-20 · →后端 | **docs 同步：/skills 契约入册 + 02/00 过时条目** | 前端已按交接板契约实现 `/skills` 页（M7-A）。
+[done] 2026-08-20 · →后端 | **docs 同步：/skills 契约入册 + 02/00 过时条目** | 前端已按交接板契约实现 `/skills` 页（M7-A）。
       - 请把 Skills 契约写入 `docs/03` §5（skill 实体 + `/skills` CRUD + `/skills/import` 小节），`docs/02` §4 页面清单 / §6.2 组件表补「技能 / SkillsView（设置组子项，developer+）」。
       - 顺带：docs 02 §4 仍列 `/tasks` 任务页 + §6.2 `TaskList/TaskDetail` + §7 `task` store、docs 02 §4 `/system` 仍列 评估/成本/候选区 + §6.2 `EvalManage/CostChart/EvolutionManage`、docs 00 §5（L89）仍提「Agent管理 / 任务」——前端均已删（2026-08-20 五连改），建议同步，避免蓝本与实现漂移。
+      - ✅ 后端已同步（2026-08-21）：docs/03 补 §5.15 主 Agent Skills（org 级：/skills CRUD + import + tl_load_skill）；docs/02 §4/§6.2/§7 删 `/tasks`·`TaskList/TaskDetail`·`EvalManage/CostChart/EvolutionManage`·`task` store、补 `/skills`·`SkillsView`·`skill` store、`/system` 收敛为运行日志+trace；docs/00 §5 模块图改「对话工作台 / 工作区 / 工具 / 知识库 / 记忆 / 监控 / 设置」。
 
 [done] 2026-08-18 · ←后端 | **M6-1 RBAC + 数据隔离已落地**（285 测试全绿 + verify 14/8/6）| 与你的前端守卫完全对齐，前端零改动。
       - **角色守卫后端兜底**：tools/kb → developer+；settings/system/evals/hooks管理/users → admin；health + hooks 公开收包 → 公开。此前这些只有前端路由守卫，API 直调可绕过，现已后端强制（40301）。

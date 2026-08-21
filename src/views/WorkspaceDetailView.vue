@@ -23,7 +23,6 @@ const workspaceId = computed(() => String(route.params.id ?? ''))
   min-height: 0;
 }
 .ws-resource {
-  width: 260px;
   flex-shrink: 0;
   border-right: 1px solid var(--app-border);
   background: var(--app-content-bg);

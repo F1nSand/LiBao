@@ -50,6 +50,8 @@ const conversations = ref<Conversation[]>([])
 const currentId = ref<string | null>(null)
 const messages = ref<Message[]>([])
 const convLoading = ref(false)
+/** 会话侧边栏折叠（窄条保留） */
+const convCollapsed = ref(false)
 
 const input = ref('')
 const pendingAttachments = reactive<string[]>([])
@@ -190,6 +192,8 @@ async function onInterruptConfirm(approved: boolean) {
         :items="conversations"
         :active-id="currentId"
         :loading="convLoading"
+        :collapsed="convCollapsed"
+        @toggle="convCollapsed = !convCollapsed"
         @select="selectConversation"
         @create="createConv"
         @delete="deleteConv"

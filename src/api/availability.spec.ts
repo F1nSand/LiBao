@@ -28,6 +28,7 @@ describe('availability 路由映射', () => {
     expect(featureForUrl('/skills/sk_001')).toBe(FEATURE.skills)
     expect(featureForUrl('/workspaces')).toBe(FEATURE.workspaces)
     expect(featureForUrl('/workspaces/ws_001/files')).toBe(FEATURE.workspaces)
+    expect(featureForUrl('/workspaces/ws_001/reveal')).toBe(FEATURE.workspaceReveal)
   })
 
   it('未知/既有路径 → null（不误标）', () => {

@@ -228,8 +228,8 @@ export const skills: Skill[] = [
 
 /** Workspaces 种子（M7-B 契约，交接板 2026-08-20；org 级、active） */
 export const workspaces: Workspace[] = [
-  { id: 'ws_001', org_id: 'org_1', name: '产品文档', description: '产品文档与入门指南写作工作区', status: 'active', created_by: 'u_admin', created_at: isoDate(90) },
-  { id: 'ws_002', org_id: 'org_1', name: '数据管线', description: '数据采集与清洗管线开发', status: 'active', created_by: 'u_admin', created_at: isoDate(60) },
+  { id: 'ws_001', org_id: 'org_1', name: '产品文档', description: '产品文档与入门指南写作工作区', root_path: 'C:\\Users\\Admin1\\Desktop\\demo\\product-docs', status: 'active', created_by: 'u_admin', created_at: isoDate(90) },
+  { id: 'ws_002', org_id: 'org_1', name: '数据管线', description: '数据采集与清洗管线开发', root_path: 'C:\\Users\\Admin1\\Desktop\\demo\\data-pipeline', status: 'active', created_by: 'u_admin', created_at: isoDate(60) },
 ]
 
 /** 工作区文件树（扁平 list，path 相对 root 含层级；列目录按父路径过滤） */

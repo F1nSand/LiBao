@@ -2,21 +2,25 @@
 import type { Conversation } from '@/types'
 
 /** 工作区会话列表（M7-B）：展示 + select/create/delete 事件；状态由 WorkspaceChatPanel 持有、api 直调 */
-defineProps<{ items: Conversation[]; activeId: string | null; loading?: boolean }>()
+defineProps<{ items: Conversation[]; activeId: string | null; loading?: boolean; collapsed: boolean }>()
 const emit = defineEmits<{
   select: [id: string]
   create: []
   delete: [id: string]
+  toggle: []
 }>()
 </script>
 
 <template>
-  <div class="ws-conv-list">
-    <div class="ws-conv-head">
-      <span class="ws-conv-title">会话</span>
+  <div class="ws-conv-list" :class="{ collapsed }">
+    <div v-show="!collapsed" class="ws-conv-head">
+      <div class="ws-conv-head-left">
+        <el-button text class="ws-conv-toggle" title="折叠会话面板" :icon="'Fold'" @click="emit('toggle')" />
+        <span class="ws-conv-title">会话</span>
+      </div>
       <el-button size="small" :icon="'Plus'" circle class="ws-conv-add" title="新建工作区会话" @click="emit('create')" />
     </div>
-    <div class="ws-conv-items">
+    <div v-show="!collapsed" class="ws-conv-items">
       <div
         v-for="c in items"
         :key="c.id"
@@ -36,6 +40,9 @@ const emit = defineEmits<{
       </div>
       <div v-if="!loading && items.length === 0" class="ws-conv-empty">暂无会话，点 + 新建</div>
     </div>
+    <button v-show="collapsed" class="ws-conv-strip" type="button" title="展开会话面板" @click="emit('toggle')">
+      <el-icon :size="18"><Expand /></el-icon>
+    </button>
   </div>
 </template>
 
@@ -46,9 +53,14 @@ const emit = defineEmits<{
   height: 100%;
   min-height: 0;
   width: 172px;
+  transition: width 0.2s ease;
+  overflow: hidden;
   flex-shrink: 0;
   border-right: 1px solid var(--app-border);
   background: var(--app-content-bg);
+}
+.ws-conv-list.collapsed {
+  width: 28px;
 }
 .ws-conv-head {
   display: flex;
@@ -56,10 +68,39 @@ const emit = defineEmits<{
   justify-content: space-between;
   padding: 10px 12px 6px;
 }
+.ws-conv-head-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.ws-conv-toggle {
+  padding: 4px;
+  color: var(--app-text-muted);
+}
+.ws-conv-toggle:hover {
+  color: var(--app-primary);
+}
 .ws-conv-title {
   font-weight: 600;
   color: var(--app-text-main);
   font-size: 12px;
+  white-space: nowrap;
+}
+.ws-conv-strip {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--app-text-muted);
+}
+.ws-conv-strip:hover {
+  color: var(--app-primary);
+  background: var(--app-bg);
 }
 .ws-conv-items {
   flex: 1;

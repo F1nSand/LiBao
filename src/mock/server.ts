@@ -59,6 +59,9 @@ const mockProviders: Array<Record<string, unknown>> = [
   { id: 'pv_002', name: 'deepseek', base_url: '', model: 'deepseek-chat', enabled: false, has_key: true, created_at: isoDate(100) },
 ]
 
+/** M7-B 演示「外部写文件」：首次拉取 ws_001 文件列表后延迟注入一个新文件（文件树轮询应自动捕获） */
+let ws001Injected = false
+
 function readBody(req: IncomingMessage): Promise<ParsedBody> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = []
@@ -425,6 +428,13 @@ export const mockServer = {
         if (!path) return !f.path.includes('/')
         return f.path.startsWith(`${path}/`) && !f.path.slice(path.length + 1).includes('/')
       })
+      if (p!.id === 'ws_001' && !ws001Injected) {
+        ws001Injected = true
+        setTimeout(() => {
+          workspaceFiles['ws_001'].push({ name: '外部注入.md', path: '外部注入.md', is_dir: false, size: 64 })
+          workspaceFileContents['ws_001|外部注入.md'] = '# 外部更新\n\n由 mock 模拟 agent 写入的新文件。\n'
+        }, fast() ? 300 : 3000)
+      }
       return void json(res, ok(children))
     }
     if (method === 'POST' && p) {
@@ -446,6 +456,13 @@ export const mockServer = {
       const target = list.find((f) => f.path === path)
       if (target && target.is_dir) return void json(res, fail(40001, '目录删除暂不支持'))
       workspaceFiles[p!.id] = list.filter((f) => f.path !== path)
+      return void json(res, ok(null))
+    }
+    /* 打开本地文件夹（交接板 2026-08-21 提案 →后端）：真实后端 OS reveal root_path；mock 返回成功 */
+    p = match(pathname, '/workspaces/:id/reveal')
+    if (method === 'POST' && p) {
+      const w = workspaces.find((x) => x.id === p!.id)
+      if (!w) return void json(res, fail(40401, '工作区不存在'))
       return void json(res, ok(null))
     }
 

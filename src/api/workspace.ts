@@ -23,6 +23,11 @@ export function archiveWorkspace(id: string) {
   return httpDelete<null>(`/workspaces/${id}`)
 }
 
+/** 打开本地文件夹（OS reveal root_path；交接板 2026-08-21 提案，真实后端未实现时前端降级） */
+export function revealWorkspace(id: string) {
+  return httpPost<null>(`/workspaces/${encodeURIComponent(id)}/reveal`)
+}
+
 /** 文件：列目录（path 相对 root；空 = 顶层） */
 export function listWorkspaceFiles(wsId: string, path = '') {
   return httpGet<WorkspaceFile[]>(`/workspaces/${encodeURIComponent(wsId)}/files`, { params: { path } })

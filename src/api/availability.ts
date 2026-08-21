@@ -24,6 +24,7 @@ export const FEATURE = {
   evolution: 'evolution',
   skills: 'skills',
   workspaces: 'workspaces',
+  workspaceReveal: 'workspaces.reveal',
 } as const
 export type Feature = (typeof FEATURE)[keyof typeof FEATURE]
 
@@ -43,6 +44,7 @@ const FEATURE_ROUTES: Array<[RegExp, Feature]> = [
   [/^\/settings\/providers/, FEATURE.providers],
   [/^\/evolution/, FEATURE.evolution],
   [/^\/skills/, FEATURE.skills],
+  [/^\/workspaces\/[^/]+\/reveal/, FEATURE.workspaceReveal],
   [/^\/workspaces/, FEATURE.workspaces],
 ]
 

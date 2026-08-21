@@ -6,6 +6,7 @@ import {
   createWorkspace,
   updateWorkspace,
   archiveWorkspace,
+  revealWorkspace,
   listWorkspaceFiles,
   readWorkspaceFile,
   writeWorkspaceFile,
@@ -50,6 +51,11 @@ describe('api/workspace（M7-B 契约，交接板 2026-08-20）', () => {
   it('archiveWorkspace DELETE /:id', () => {
     archiveWorkspace('ws_001')
     expect(mockedDelete).toHaveBeenCalledWith('/workspaces/ws_001')
+  })
+
+  it('revealWorkspace POST /:id/reveal（路径 encodeURIComponent）', () => {
+    revealWorkspace('ws_001')
+    expect(mockedPost).toHaveBeenCalledWith('/workspaces/ws_001/reveal')
   })
 
   it('listWorkspaceFiles 带 path 参数（路径 encodeURIComponent）', () => {

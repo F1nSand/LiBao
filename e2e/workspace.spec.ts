@@ -61,4 +61,47 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
     // 工作区会话列表出现新会话
     await expect(page.locator('.ws-conv-item')).not.toHaveCount(0)
   })
+
+  test('详情页：侧边栏折叠/展开（窄条保留）', async ({ page }) => {
+    await login(page)
+    await page.goto('/workspace')
+    await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
+    await expect(page).toHaveURL(/\/workspace\/ws_001/)
+
+    // 文件资源管理器：点头部汉堡折叠成 28px 窄条，树隐藏；点窄条展开恢复
+    await page.locator('.rm-toggle').click()
+    await expect(page.locator('.rm-root')).toHaveCSS('width', '28px')
+    await expect(page.locator('.rm-tree-wrap')).toBeHidden()
+    await page.locator('.rm-strip').click()
+    await expect(page.locator('.rm-root')).toHaveCSS('width', '260px')
+    await expect(page.locator('.rm-tree-wrap')).toBeVisible()
+
+    // 会话侧边栏：折叠成 28px，展开恢复 172px
+    await page.locator('.ws-conv-toggle').click()
+    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '28px')
+    await page.locator('.ws-conv-strip').click()
+    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '172px')
+  })
+
+  test('详情页：文件树轮询捕获外部更新（动态显示）', async ({ page }) => {
+    await login(page)
+    await page.goto('/workspace')
+    await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
+    await expect(page).toHaveURL(/\/workspace\/ws_001/)
+
+    // mock 注入「外部注入.md」（fast 模式 ~300ms 注入 + 500ms 轮询），无需刷新自动出现
+    await expect(
+      page.locator('.rm-tree-wrap .el-tree-node__content', { hasText: '外部注入.md' }),
+    ).toBeVisible({ timeout: 5000 })
+  })
+
+  test('详情页：打开本地文件夹按钮（mock 成功路径）', async ({ page }) => {
+    await login(page)
+    await page.goto('/workspace')
+    await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
+    await expect(page).toHaveURL(/\/workspace\/ws_001/)
+
+    await page.locator('.rm-head-right button[title^="打开本地文件夹"]').click()
+    await expect(page.locator('.el-message__content').filter({ hasText: '已请求在本地打开文件夹' })).toBeVisible()
+  })
 })
