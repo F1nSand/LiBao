@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderMarkdown, splitStreamingText, renderStreamingMarkdown, inOpenFence, MARKDOWN_WHITELIST } from './markdown'
+import { renderMarkdown, splitStreamingText, renderStreamingMarkdown, splitStreamingCode, inOpenFence, MARKDOWN_WHITELIST } from './markdown'
 
 describe('renderMarkdown 管线', () => {
   it('GFM 表格渲染为 table', () => {
@@ -121,6 +121,20 @@ describe('renderStreamingMarkdown 流式渲染', () => {
     expect(r.tail).toBe('')
     expect(r.html).toContain('def')
     expect(r.html).toContain('pri') // 末行内容在代码块内（高亮 span 会拆 'def foo' 连续性）
+  })
+})
+
+describe('splitStreamingCode 代码围栏感知拆分', () => {
+  it('普通段：同 splitStreamingText，inCode=false', () => {
+    expect(splitStreamingCode('# 标题\n正文中')).toEqual({ stable: '# 标题\n', tail: '正文中', inCode: false })
+  })
+
+  it('代码围栏内：stable=换行前整段（含未闭合围栏）、tail=末行、inCode=true', () => {
+    expect(splitStreamingCode('```js\nconst a = 1\nco')).toEqual({ stable: '```js\nconst a = 1\n', tail: 'co', inCode: true })
+  })
+
+  it('代码围栏已闭合：恢复正常（inCode=false）', () => {
+    expect(splitStreamingCode('```js\nconst a = 1\n```\n正文')).toEqual({ stable: '```js\nconst a = 1\n```\n', tail: '正文', inCode: false })
   })
 })
 

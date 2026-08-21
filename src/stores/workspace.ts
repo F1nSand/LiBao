@@ -1,10 +1,10 @@
 import { defineStore } from 'pinia'
-import { listWorkspaces, createWorkspace, updateWorkspace, archiveWorkspace } from '@/api/workspace'
+import { listWorkspaces, createWorkspace, updateWorkspace, deleteWorkspace } from '@/api/workspace'
 import { FEATURE, isUnavailable } from '@/api/availability'
 import { swallowNotImplemented } from '@/utils/http-envelope'
 import type { CreateWorkspaceRequest, UpdateWorkspaceRequest, Workspace } from '@/types'
 
-/** 工作区 store（M7-B，docs/02 §7）：气泡列表 + 创建/编辑/归档；文件树与工作区会话走 api 直调，不进 store */
+/** 工作区 store（M7-B，docs/02 §7）：气泡列表 + 创建/编辑/删除；文件树与工作区会话走 api 直调，不进 store */
 export const useWorkspaceStore = defineStore('workspace', {
   state: () => ({
     workspaces: [] as Workspace[],
@@ -34,9 +34,9 @@ export const useWorkspaceStore = defineStore('workspace', {
       await updateWorkspace(id, body)
       await this.list()
     },
-    async archive(id: string) {
+    async remove(id: string) {
       if (this.unavailable) return
-      await archiveWorkspace(id)
+      await deleteWorkspace(id)
       await this.list()
     },
   },

@@ -409,8 +409,18 @@ export const mockServer = {
       return void json(res, ok(w))
     }
     if (method === 'DELETE' && p) {
-      const w = workspaces.find((x) => x.id === p!.id)
-      if (w) w.status = 'archived'
+      // 硬删（交接板 2026-08-21 语义变更：归档→删除）：splice 工作区 + 级联清理文件树/内容/工作区会话/消息
+      const idx = workspaces.findIndex((x) => x.id === p!.id)
+      if (idx === -1) return void json(res, fail(40401, '工作区不存在'))
+      workspaces.splice(idx, 1)
+      delete workspaceFiles[p!.id]
+      for (const k of Object.keys(workspaceFileContents)) if (k.startsWith(`${p!.id}|`)) delete workspaceFileContents[k]
+      for (const c of [...conversations]) {
+        if (c.workspace_id === p!.id) {
+          conversations.splice(conversations.indexOf(c), 1)
+          delete messages[c.id]
+        }
+      }
       return void json(res, ok(null))
     }
     /* 工作区文件（path 相对 root；空 path = 顶层，非空 = 直接子项） */
@@ -440,11 +450,17 @@ export const mockServer = {
     if (method === 'POST' && p) {
       const b = body.json ?? {}
       const path = String(b.path ?? '')
-      const content = String(b.content ?? '')
       if (!path) return void json(res, fail(40001, '缺少文件路径'))
       if (!workspaceFiles[p!.id]) workspaceFiles[p!.id] = []
       const list = workspaceFiles[p!.id]
       const existing = list.find((f) => f.path === path)
+      if (b.is_dir) {
+        // 新建文件夹（交接板 2026-08-21 提案）
+        if (existing) return void json(res, fail(40001, '已存在同名路径'))
+        list.push({ name: path.split('/').pop() ?? path, path, is_dir: true, size: 0 })
+        return void json(res, ok({ name: path.split('/').pop(), path, is_dir: true, size: 0 }))
+      }
+      const content = String(b.content ?? '')
       if (existing && existing.is_dir) return void json(res, fail(40001, '目录不能写入内容'))
       if (!existing) list.push({ name: path.split('/').pop() ?? path, path, is_dir: false, size: content.length })
       workspaceFileContents[`${p!.id}|${path}`] = content
@@ -452,10 +468,37 @@ export const mockServer = {
     }
     if (method === 'DELETE' && p) {
       const path = query.get('path') ?? ''
+      if (!path) return void json(res, fail(40001, '缺少文件路径'))
       const list = workspaceFiles[p!.id] ?? []
-      const target = list.find((f) => f.path === path)
-      if (target && target.is_dir) return void json(res, fail(40001, '目录删除暂不支持'))
-      workspaceFiles[p!.id] = list.filter((f) => f.path !== path)
+      if (!list.some((f) => f.path === path)) return void json(res, fail(40401, '文件或目录不存在'))
+      // 递归删除（目录：自身 + 子项前缀）+ 内容清理（交接板 2026-08-21）
+      workspaceFiles[p!.id] = list.filter((f) => f.path !== path && !f.path.startsWith(`${path}/`))
+      for (const k of Object.keys(workspaceFileContents)) {
+        if (k.startsWith(`${p!.id}|${path}`)) delete workspaceFileContents[k]
+      }
+      return void json(res, ok(null))
+    }
+    /* 重命名文件/文件夹（交接板 2026-08-21 提案：子项前缀同步 + 内容 key 迁移） */
+    p = match(pathname, '/workspaces/:id/files/rename')
+    if (method === 'PATCH' && p) {
+      const b = body.json ?? {}
+      const oldPath = String(b.old_path ?? '')
+      const newPath = String(b.new_path ?? '')
+      if (!oldPath || !newPath || oldPath === newPath) return void json(res, fail(40001, '无效的重命名路径'))
+      const list = workspaceFiles[p!.id]
+      if (!list || !list.some((f) => f.path === oldPath)) return void json(res, fail(40401, '文件或目录不存在'))
+      for (const f of list) {
+        if (f.path === oldPath || f.path.startsWith(`${oldPath}/`)) {
+          const suffix = f.path.slice(oldPath.length)
+          const oldFull = `${p!.id}|${f.path}`
+          f.path = newPath + suffix
+          f.name = f.path.split('/').pop() ?? f.path
+          if (workspaceFileContents[oldFull]) {
+            workspaceFileContents[`${p!.id}|${f.path}`] = workspaceFileContents[oldFull]
+            delete workspaceFileContents[oldFull]
+          }
+        }
+      }
       return void json(res, ok(null))
     }
     /* 打开本地文件夹（交接板 2026-08-21 提案 →后端）：真实后端 OS reveal root_path；mock 返回成功 */

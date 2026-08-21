@@ -7,7 +7,15 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
-[open] 2026-08-21 · →后端 | **工作区项目级能力收敛：`.agent/` 目录机制（M7-B T7a/T8 重定位）** | 用户决策：不做工作区 skills/记忆管理 UI；项目级能力改为工作区 `.agent/` 目录文件化（Claude Code `.claude/` 同款），agent 工作于该工作区时自动发现并叠加。
+[open] 2026-08-21 · →后端 | **工作区删除（硬删）+ 文件树操作契约扩展（rename/mkdir/目录删）** | 用户决策：归档无恢复入口=假删除，改**真删除**；文件树增强行尾三连菜单。
+      - 前端已实现（mock 先行 + 真实后端未实现时 catch 404 降级提示）：
+        - `DELETE /workspaces/{id}` 前端按**硬删**处理（mock：splice + 级联清理文件树/内容/工作区会话/消息；卡片强确认输入名称防误删）——**请后端把 DELETE 从软删归档改为硬删**（删 root_path 目录 + DB 行 + 级联对话/记忆/文件），docs/03 L393 同步；
+        - `PATCH /workspaces/{id}/files/rename {old_path,new_path}`（重命名文件/文件夹，子项前缀同步）；
+        - `POST /workspaces/{id}/files` 扩展 `{path, is_dir:true}`（新建文件夹，默认当前目录子目录）；
+        - `DELETE /workspaces/{id}/files?path=` 支持**目录递归删除**（原「目录删除暂不支持」）。
+      - 请后端补齐端点并同步 docs/03（DELETE 语义 + 3 个新能力）。
+
+[done] 2026-08-21 · →后端 | **工作区项目级能力收敛：`.agent/` 目录机制（M7-B T7a/T8 重定位）** | 用户决策：不做工作区 skills/记忆管理 UI；项目级能力改为工作区 `.agent/` 目录文件化（Claude Code `.claude/` 同款），agent 工作于该工作区时自动发现并叠加。
       - **能力模型**：agent 运行时 = 全局基座（org skills + 长期记忆 + 知识库 + 工具）+ 项目级 `.agent/`（skills/ + memory/ + knowledge/）；**项目级覆盖全局同名**；工具暂不含（后续扩展）。
       - **`.agent/` 结构**：`agent.md`（项目约定 / system_prompt 片段）+ `skills/<name>/SKILL.md` + `memory/*.md` + `knowledge/*.md`。
       - **前端承诺**：`POST /workspaces` 契约不变（**不做 git_url 字段**，改为 `.agent/` 自动初始化）；**无新增 UI**；`.agent/` 作为普通目录出现在文件树（用户可直接编辑）。docs/02 前端蓝本已更新 §4.2。
@@ -17,6 +25,12 @@
         3. 优先级：项目级覆盖全局同名；
         4. 已落地 `workspace_skill` 表 / `longterm_memory.workspace_id` 兼容策略（`.agent/` 文件为准，表作存储层兼容或逐步废弃，请后端拍板）；
         5. docs 00/01/03/04 同步本机制。
+      - ✅ **后端已实现（2026-08-21，commit c14a2c9）**：
+        ① 创建时 `init_agent_skeleton` 建 `.agent/` 骨架（agent.md 模板 + skills/memory/knowledge 空目录 + README，幂等不覆盖用户改动）；
+        ② `discover_workspace_agent` 扫 `.agent/skills/*/SKILL.md`（**兼容旧 `skills/` 路径**）+ `agent.md` + `memory/*.md` + `knowledge/*.md`；`build_initial_state` 注入 `[项目约定]`/`[项目记忆]`/`[项目知识]` 段；
+        ③ skills 同名去重，项目级（`.agent/`）覆盖全局 org skill；
+        ④ **兼容拍板**：`workspace_skill` 表**从未实现**（M7-B T7a 就是纯文件扫描，docs 里只是规划残留）——无表要废弃，`.agent/` 文件即事实源；`longterm_memory.workspace_id` 保留（DB 记忆隔离不变）；
+        ⑤ docs 00/01/03/04 已同步（移除 `workspace_skill` 表描述、补 `.agent/` 机制）。前端零改动。
 
 [open] 2026-08-21 · →后端 | **POST /workspaces/{id}/reveal（OS 打开 root_path 本地文件夹）** | 工作区资源管理器「打开本地文件夹」按钮（M7-B 增强，用户需求）。
       - 前端已实现：api `revealWorkspace` + mock 路由（POST → ok(null)）+ 404 降级（isNotImplementedError → toast + 复制 root_path）；`FEATURE.workspaces.reveal` 独立降级（防 404 误标整个 workspaces 不可用）。

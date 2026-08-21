@@ -5,12 +5,14 @@ import {
   getWorkspace,
   createWorkspace,
   updateWorkspace,
-  archiveWorkspace,
+  deleteWorkspace,
   revealWorkspace,
   listWorkspaceFiles,
   readWorkspaceFile,
   writeWorkspaceFile,
   deleteWorkspaceFile,
+  renameWorkspaceFile,
+  createWorkspaceDir,
 } from './workspace'
 
 vi.mock('./http', () => ({
@@ -48,8 +50,8 @@ describe('api/workspace（M7-B 契约，交接板 2026-08-20）', () => {
     expect(mockedPatch).toHaveBeenCalledWith('/workspaces/ws_001', { name: 'x' })
   })
 
-  it('archiveWorkspace DELETE /:id', () => {
-    archiveWorkspace('ws_001')
+  it('deleteWorkspace DELETE /:id（路径 encodeURIComponent）', () => {
+    deleteWorkspace('ws_001')
     expect(mockedDelete).toHaveBeenCalledWith('/workspaces/ws_001')
   })
 
@@ -81,5 +83,15 @@ describe('api/workspace（M7-B 契约，交接板 2026-08-20）', () => {
   it('deleteWorkspaceFile DELETE 带 path', () => {
     deleteWorkspaceFile('ws_001', 'a.md')
     expect(mockedDelete).toHaveBeenCalledWith('/workspaces/ws_001/files', { params: { path: 'a.md' } })
+  })
+
+  it('renameWorkspaceFile PATCH files/rename（old_path→new_path）', () => {
+    renameWorkspaceFile('ws_001', { old_path: 'a.md', new_path: 'b.md' })
+    expect(mockedPatch).toHaveBeenCalledWith('/workspaces/ws_001/files/rename', { old_path: 'a.md', new_path: 'b.md' })
+  })
+
+  it('createWorkspaceDir POST files 带 is_dir', () => {
+    createWorkspaceDir('ws_001', 'docs/assets')
+    expect(mockedPost).toHaveBeenCalledWith('/workspaces/ws_001/files', { path: 'docs/assets', is_dir: true })
   })
 })

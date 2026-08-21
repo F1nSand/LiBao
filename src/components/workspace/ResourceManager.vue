@@ -6,6 +6,8 @@ import {
   readWorkspaceFile,
   writeWorkspaceFile,
   deleteWorkspaceFile,
+  renameWorkspaceFile,
+  createWorkspaceDir,
   getWorkspace,
   revealWorkspace,
 } from '@/api/workspace'
@@ -15,8 +17,9 @@ import { collectLoadedPaths, refreshExpandedTree, signatureOf } from '@/utils/wo
 import type { WorkspaceFile } from '@/types'
 
 /**
- * 工作区资源管理器（M7-B，docs/02 §4）：el-tree 懒加载文件树 + 预览/编辑/保存 + 新建/删除（path 相对 root）。
- * 增强（2026-08-21）：可折叠（窄条保留）＋定时轮询文件树（外部更新同步可见，折叠时暂停）＋打开本地文件夹（reveal，后端未实现降级复制路径）。
+ * 工作区资源管理器（M7-B，docs/02 §4）：el-tree 懒加载文件树 + 预览/编辑/保存。
+ * 增强（2026-08-21）：折叠（窄条保留）+ 轮询同步（签名对比防闪烁）+ 打开本地文件夹 + 行尾「三个点」菜单
+ * （重命名/删除；文件夹额外：新建文件/新建文件夹）+ 顶部新建文件/文件夹 + 新建文件默认 .txt。
  */
 const props = defineProps<{ workspaceId: string }>()
 
@@ -24,29 +27,34 @@ const treeRef = ref()
 const previewVisible = ref(false)
 const previewPath = ref('')
 const previewContent = ref('')
-const newVisible = ref(false)
-const newForm = reactive({ path: '', content: '' })
-
-/** 折叠（窄条保留，VS Code 风格）：折叠成 28px 竖条，暂停文件树轮询 */
-const collapsed = ref(false)
-/** 预览编辑防覆盖：用户正在输入/聚焦时不轮询重读 */
 const previewDirty = ref(false)
 const previewFocused = ref(false)
 
-/** 本地根路径（打开文件夹按钮 title + 降级复制用；后端未实现 reveal 时兜底展示） */
+/** 折叠（窄条保留，VS Code 风格）：折叠成 28px 竖条，暂停文件树轮询 */
+const collapsed = ref(false)
+/** 本地根路径（打开文件夹按钮 title + 降级复制用） */
 const rootPath = ref<string | undefined>()
+
+/** 新建文件/文件夹/重命名 弹窗 */
+const newFileVisible = ref(false)
+const newFileForm = reactive({ name: '', content: '' })
+const newFileDir = ref('') // 目标父目录（菜单新建 → 当前文件夹；顶部新建 → 根）
+const newDirVisible = ref(false)
+const newDirForm = reactive({ name: '' })
+const newDirTarget = ref('')
+const renameVisible = ref(false)
+const renameForm = reactive({ oldPath: '', name: '' })
 
 onMounted(() => {
   void getWorkspace(props.workspaceId)
     .then((w) => (rootPath.value = w.root_path))
-    .catch(() => undefined) // 预取失败不阻塞（降级路径再查）
+    .catch(() => undefined)
 })
 
-/** 数据变化检测缓存：各可见层签名（对比通过则跳过刷新，消除无谓重建导致的文件树闪烁） */
+/** 数据变化检测缓存：各可见层签名（对比通过则跳过刷新，消除无谓重建闪烁） */
 const layerSignatures = new Map<string, string>()
 let cacheInitialized = false
 
-/** 轮询刷新：先只读可见层对比签名，全部无变化 → 零 DOM 操作跳过；有变化才保展开重建 + 预览安全重读（e2e fast 模式缩短间隔，见 .env.e2e） */
 async function refreshAll() {
   const tree = treeRef.value
   if (!tree) return
@@ -55,24 +63,22 @@ async function refreshAll() {
     const files = await listWorkspaceFiles(props.workspaceId, path).catch(() => null)
     if (!files) continue
     const sig = signatureOf(files)
-    if (!cacheInitialized) {
-      layerSignatures.set(path, sig)
-    } else if (layerSignatures.has(path) && layerSignatures.get(path) !== sig) {
+    if (!cacheInitialized) layerSignatures.set(path, sig)
+    else if (layerSignatures.has(path) && layerSignatures.get(path) !== sig) {
       layerSignatures.set(path, sig)
       changed = true
     } else if (!layerSignatures.has(path)) {
-      layerSignatures.set(path, sig) // 新展开层首次仅缓存，不触发重建
+      layerSignatures.set(path, sig)
     }
   }
   cacheInitialized = true
   if (changed) await refreshExpandedTree(tree)
-  // 预览安全重读（用户编辑中不覆盖）
   if (previewVisible.value && !previewDirty.value && !previewFocused.value && previewPath.value) {
     try {
       const res = await readWorkspaceFile(props.workspaceId, previewPath.value)
       previewContent.value = res.content
     } catch {
-      // 文件被外部删除等情况：静默，保持当前内容
+      // 文件被外部删除：静默保持当前内容
     }
   }
 }
@@ -93,7 +99,7 @@ async function loadNode(node: { level: number; data?: WorkspaceFile }, resolve: 
 }
 
 async function onFileClick(data: WorkspaceFile) {
-  if (data.is_dir) return // 目录只负责展开
+  if (data.is_dir) return
   const res = await readWorkspaceFile(props.workspaceId, data.path)
   previewPath.value = data.path
   previewContent.value = res.content
@@ -106,26 +112,6 @@ async function saveFile() {
   previewVisible.value = false
   previewDirty.value = false
   ElMessage.success('已保存')
-}
-
-async function onDelete(data: WorkspaceFile) {
-  await ElMessageBox.confirm(`删除文件「${data.path}」？`, '删除确认', { type: 'warning' })
-  await deleteWorkspaceFile(props.workspaceId, data.path)
-  treeRef.value?.remove(data.path)
-  ElMessage.success('已删除')
-}
-
-async function createFile() {
-  const path = newForm.path.trim()
-  if (!path) {
-    ElMessage.warning('请输入文件路径')
-    return
-  }
-  await writeWorkspaceFile(props.workspaceId, { path, content: newForm.content })
-  newVisible.value = false
-  Object.assign(newForm, { path: '', content: '' })
-  await refreshExpandedTree(treeRef.value) // 修复 el-tree 无 reload() 的静默 no-op，立即刷新
-  ElMessage.success('已创建')
 }
 
 /** 打开本地文件夹：reveal 成功；后端未实现（404）→ 降级复制 root_path */
@@ -152,6 +138,126 @@ async function onReveal() {
     }
   }
 }
+
+/** 行尾菜单（三连）分派：重命名/删除/文件夹内新建文件/文件夹 */
+async function onMenu(cmd: string, data: WorkspaceFile) {
+  if (cmd === 'rename') openRename(data)
+  else if (cmd === 'new-file') openNewFile(data.path)
+  else if (cmd === 'new-dir') openNewDir(data.path)
+  else if (cmd === 'delete') await onDelete(data)
+}
+
+/** 顶部「新建」dropdown：文件/文件夹 */
+function onTopCreate(cmd: string) {
+  if (cmd === 'file') openNewFile('')
+  else if (cmd === 'dir') openNewDir('')
+}
+
+function parentOf(path: string): string {
+  const i = path.lastIndexOf('/')
+  return i === -1 ? '' : path.slice(0, i)
+}
+
+/** 新建文件（默认 .txt：无后缀自动补） */
+function openNewFile(dir: string) {
+  newFileDir.value = dir
+  Object.assign(newFileForm, { name: '', content: '' })
+  newFileVisible.value = true
+}
+async function createFile() {
+  let name = newFileForm.name.trim()
+  if (!name) {
+    ElMessage.warning('请输入文件名')
+    return
+  }
+  if (!/\.\w+$/.test(name)) name += '.txt'
+  const path = newFileDir.value ? `${newFileDir.value}/${name}` : name
+  await writeWorkspaceFile(props.workspaceId, { path, content: newFileForm.content })
+  newFileVisible.value = false
+  await refreshExpandedTree(treeRef.value)
+  ElMessage.success('已创建')
+}
+
+/** 新建文件夹（默认当前目录下子目录） */
+function openNewDir(dir: string) {
+  newDirTarget.value = dir
+  newDirForm.name = ''
+  newDirVisible.value = true
+}
+async function createDir() {
+  const name = newDirForm.name.trim()
+  if (!name) {
+    ElMessage.warning('请输入文件夹名')
+    return
+  }
+  const path = newDirTarget.value ? `${newDirTarget.value}/${name}` : name
+  try {
+    await createWorkspaceDir(props.workspaceId, path)
+    newDirVisible.value = false
+    await refreshExpandedTree(treeRef.value)
+    ElMessage.success('已创建文件夹')
+  } catch (e) {
+    if (isNotImplementedError(e)) {
+      ElMessage.warning('后端未实现新建文件夹接口')
+      newDirVisible.value = false
+    } else {
+      throw e
+    }
+  }
+}
+
+/** 重命名文件/文件夹 */
+function openRename(data: WorkspaceFile) {
+  renameForm.oldPath = data.path
+  renameForm.name = data.name
+  renameVisible.value = true
+}
+async function renameFile() {
+  const newName = renameForm.name.trim()
+  if (!newName) {
+    ElMessage.warning('请输入新名称')
+    return
+  }
+  const parent = parentOf(renameForm.oldPath)
+  const newPath = parent ? `${parent}/${newName}` : newName
+  if (newPath === renameForm.oldPath) {
+    renameVisible.value = false
+    return
+  }
+  try {
+    await renameWorkspaceFile(props.workspaceId, { old_path: renameForm.oldPath, new_path: newPath })
+    renameVisible.value = false
+    await refreshExpandedTree(treeRef.value)
+    ElMessage.success('已重命名')
+  } catch (e) {
+    if (isNotImplementedError(e)) {
+      ElMessage.warning('后端未实现重命名接口')
+      renameVisible.value = false
+    } else {
+      throw e
+    }
+  }
+}
+
+/** 删除文件/目录（目录递归；强确认弹窗） */
+async function onDelete(data: WorkspaceFile) {
+  if (data.is_dir) {
+    await ElMessageBox.confirm(`删除目录「${data.path}」及其全部内容？不可恢复。`, '删除目录', { type: 'warning' })
+  } else {
+    await ElMessageBox.confirm(`删除文件「${data.path}」？`, '删除确认', { type: 'warning' })
+  }
+  try {
+    await deleteWorkspaceFile(props.workspaceId, data.path)
+    treeRef.value?.remove(data.path)
+    ElMessage.success('已删除')
+  } catch (e) {
+    if (isNotImplementedError(e)) {
+      ElMessage.warning('后端未实现删除接口')
+    } else {
+      throw e
+    }
+  }
+}
 </script>
 
 <template>
@@ -162,7 +268,15 @@ async function onReveal() {
         <span class="rm-title">文件</span>
       </div>
       <div class="rm-head-right">
-        <el-button size="small" :icon="'DocumentAdd'" title="新建文件" @click="newVisible = true">新建</el-button>
+        <el-dropdown trigger="click" @command="onTopCreate">
+          <el-button size="small" :icon="'Plus'">新建</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="file">新建文件</el-dropdown-item>
+              <el-dropdown-item command="dir">新建文件夹</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button
           size="small"
           :icon="'FolderOpened'"
@@ -186,14 +300,17 @@ async function onReveal() {
           <span class="rm-node">
             <el-icon :size="14"><component :is="data.is_dir ? 'Folder' : 'Document'" /></el-icon>
             <span class="rm-node-name">{{ data.name }}</span>
-            <el-button
-              v-if="!data.is_dir"
-              size="small"
-              text
-              type="danger"
-              class="rm-del"
-              @click.stop="onDelete(data)"
-            >删</el-button>
+            <el-dropdown trigger="click" @command="(cmd: string) => onMenu(cmd, data)">
+              <span class="rm-more" title="更多操作" @click.stop><el-icon :size="14"><MoreFilled /></el-icon></span>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                  <el-dropdown-item v-if="data.is_dir" command="new-file">新建文件</el-dropdown-item>
+                  <el-dropdown-item v-if="data.is_dir" command="new-dir">新建文件夹</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </span>
         </template>
       </el-tree>
@@ -221,19 +338,45 @@ async function onReveal() {
       </template>
     </el-dialog>
 
-    <!-- 新建文件 -->
-    <el-dialog :model-value="newVisible" title="新建文件" width="520px" @close="newVisible = false">
+    <!-- 新建文件（默认 .txt） -->
+    <el-dialog :model-value="newFileVisible" :title="`新建文件${newFileDir ? ' 于 ' + newFileDir : ''}`" width="480px" @close="newFileVisible = false">
       <el-form label-width="80px">
-        <el-form-item label="路径" required>
-          <el-input v-model="newForm.path" placeholder="如 docs/新文档.md（相对工作区根目录）" class="mono" />
+        <el-form-item label="文件名" required>
+          <el-input v-model="newFileForm.name" placeholder="如 入门指南（无后缀默认 .txt）" class="mono" />
         </el-form-item>
         <el-form-item label="内容">
-          <el-input v-model="newForm.content" type="textarea" :rows="6" placeholder="文件内容" class="mono" />
+          <el-input v-model="newFileForm.content" type="textarea" :rows="6" placeholder="文件内容" class="mono" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="newVisible = false">取消</el-button>
+        <el-button @click="newFileVisible = false">取消</el-button>
         <el-button type="primary" @click="createFile">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 新建文件夹（默认当前目录下子目录） -->
+    <el-dialog :model-value="newDirVisible" :title="`新建文件夹${newDirTarget ? ' 于 ' + newDirTarget : ''}`" width="400px" @close="newDirVisible = false">
+      <el-form label-width="80px">
+        <el-form-item label="文件夹名" required>
+          <el-input v-model="newDirForm.name" placeholder="如 assets" class="mono" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="newDirVisible = false">取消</el-button>
+        <el-button type="primary" @click="createDir">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 重命名文件/文件夹 -->
+    <el-dialog :model-value="renameVisible" :title="`重命名：${renameForm.oldPath}`" width="400px" @close="renameVisible = false">
+      <el-form label-width="80px">
+        <el-form-item label="新名称" required>
+          <el-input v-model="renameForm.name" placeholder="新名称" class="mono" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="renameVisible = false">取消</el-button>
+        <el-button type="primary" @click="renameFile">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -314,11 +457,14 @@ async function onReveal() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rm-del {
+.rm-more {
   opacity: 0;
   flex-shrink: 0;
+  display: inline-flex;
+  color: var(--app-text-muted);
+  cursor: pointer;
 }
-.rm-node:hover .rm-del {
+.rm-node:hover .rm-more {
   opacity: 1;
 }
 .mono {

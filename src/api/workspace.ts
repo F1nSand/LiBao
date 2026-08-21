@@ -19,8 +19,9 @@ export function updateWorkspace(id: string, body: UpdateWorkspaceRequest) {
   return httpPatch<Workspace>(`/workspaces/${id}`, body)
 }
 
-export function archiveWorkspace(id: string) {
-  return httpDelete<null>(`/workspaces/${id}`)
+/** 删除工作区（硬删：本地目录 + DB 行 + 级联对话/记忆/文件；交接板 2026-08-21，后端 DELETE 由软删改硬删） */
+export function deleteWorkspace(id: string) {
+  return httpDelete<null>(`/workspaces/${encodeURIComponent(id)}`)
 }
 
 /** 打开本地文件夹（OS reveal root_path；交接板 2026-08-21 提案，真实后端未实现时前端降级） */
@@ -45,7 +46,17 @@ export function writeWorkspaceFile(wsId: string, body: { path: string; content: 
   return httpPost<WorkspaceFile>(`/workspaces/${encodeURIComponent(wsId)}/files`, body)
 }
 
-/** 删除文件（目录不支持） */
+/** 删除文件（目录：递归删子项，交接板 2026-08-21） */
 export function deleteWorkspaceFile(wsId: string, path: string) {
   return httpDelete<null>(`/workspaces/${encodeURIComponent(wsId)}/files`, { params: { path } })
+}
+
+/** 重命名文件/文件夹（子项前缀由服务端同步；交接板 2026-08-21 提案，后端未实现时 404 降级） */
+export function renameWorkspaceFile(wsId: string, body: { old_path: string; new_path: string }) {
+  return httpPatch<null>(`/workspaces/${encodeURIComponent(wsId)}/files/rename`, body)
+}
+
+/** 新建文件夹（path 相对 root；交接板 2026-08-21 提案，POST files 扩展 is_dir，后端未实现时 404 降级） */
+export function createWorkspaceDir(wsId: string, path: string) {
+  return httpPost<WorkspaceFile>(`/workspaces/${encodeURIComponent(wsId)}/files`, { path, is_dir: true })
 }

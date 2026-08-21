@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { Workspace } from '@/types'
 
-/** 工作区气泡卡片（M7-B，docs/02 §4）：name/description 就地编辑 + 进入 + 归档 */
+/** 工作区气泡卡片（M7-B，docs/02 §4）：name/description 就地编辑 + 进入 + 删除（强确认输入名称） */
 const props = defineProps<{ workspace: Workspace }>()
 const store = useWorkspaceStore()
 const router = useRouter()
@@ -29,10 +29,24 @@ async function save() {
   ElMessage.success('已保存')
 }
 
-async function onArchive() {
-  await ElMessageBox.confirm(`归档工作区「${props.workspace.name}」？归档后不再列出。`, '归档确认', { type: 'warning' })
-  await store.archive(props.workspace.id)
-  ElMessage.success('已归档')
+async function onDelete() {
+  // 强确认：输入工作区名称防误删（删除 = 本地目录 + 对话/记忆/文件全删，不可恢复）
+  const { value } = await ElMessageBox.prompt(
+    `删除工作区「${props.workspace.name}」？将删除本地目录、对话、记忆与文件，不可恢复。输入工作区名称确认：`,
+    '删除工作区',
+    {
+      type: 'warning',
+      inputPlaceholder: props.workspace.name,
+      confirmButtonText: '删除',
+      confirmButtonClass: 'el-button--danger',
+    },
+  ).catch(() => ({ value: '' }))
+  if (value.trim() !== props.workspace.name) {
+    ElMessage.warning('名称不匹配，已取消删除')
+    return
+  }
+  await store.remove(props.workspace.id)
+  ElMessage.success('已删除')
 }
 
 function enter() {
@@ -47,7 +61,7 @@ function enter() {
         <span class="ws-card-name" :title="workspace.name">{{ workspace.name }}</span>
         <div class="ws-card-ops">
           <el-button size="small" text @click="startEdit">编辑</el-button>
-          <el-button size="small" text type="danger" @click="onArchive">归档</el-button>
+          <el-button size="small" text type="danger" @click="onDelete">删除</el-button>
         </div>
       </div>
       <el-input v-else v-model="name" size="small" placeholder="工作区名称" class="mono" @keyup.enter="save" />

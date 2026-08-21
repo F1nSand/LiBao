@@ -122,6 +122,38 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
     ]
   }
 
+  // 代码块演示：消息含「代码/code/示例」→ 逐行流式输出含 Python 代码块的回复（验证流式代码块渐进渲染，docs/02 §5.4）
+  const wantsCode = /代码|code|示例/i.test(content)
+  if (wantsCode) {
+    const codeLines = [
+      '下面是一个 **Python** 示例：\n\n',
+      '```python\n',
+      'def greet(name):\n',
+      '    return f"Hello, {name}!"\n',
+      '\n',
+      'greet("world")\n',
+      '```\n',
+      '调用 `greet("Claude")` 输出问候语。',
+    ]
+    const codeText = codeLines.join('')
+    return [
+      ...base,
+      ...codeLines.map((line) => tok(line, 150)),
+      doneEvent(
+        {
+          id: uid('msg'),
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: codeText,
+          attachments: [],
+          tool_calls: [],
+          round: 0,
+          created_at: new Date().toISOString(),
+        },
+      ),
+    ]
+  }
+
   // 默认：两轮多消息——轮1「检索 + web_search 工具」→ message 封口；轮2「最终答案」→ done
   const toolCallId = uid('tc')
   const jobRef = uid('job')

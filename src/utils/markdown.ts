@@ -87,3 +87,11 @@ export function renderStreamingMarkdown(raw: string): { html: string; tail: stri
   const { stable, tail } = splitStreamingText(raw)
   return { html: renderMarkdown(stable), tail }
 }
+
+/** 代码围栏感知的流式拆分（MarkdownRenderer 用）：普通段同 splitStreamingText（inCode=false）；
+ * 代码围栏内 stable=换行前整段（含未闭合围栏，renderMarkdown 渲染成代码块）、tail=末行且 inCode=true。
+ * 组件据此缓存 stable 渲染（防整块每 token 重解析）+ 把 tail DOM 注入 code 元素内（不逃逸、不重渲染）。 */
+export function splitStreamingCode(raw: string): { stable: string; tail: string; inCode: boolean } {
+  const { stable, tail } = splitStreamingText(raw)
+  return { stable, tail, inCode: inOpenFence(raw) }
+}
