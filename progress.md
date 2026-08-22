@@ -22,11 +22,11 @@
 > - e2e：`login()`→`gotoChat()`（等 `.chat-view` 防懒加载路由竞态）；删 auth/settings-org spec；guards 重写「无登录直访」；helpers/spec 全量替换。单测：删 auth/guard spec；http/availability spec 适配（FEATURE.users→notifications）。
 > 门禁：typecheck ✓ / lint:check 0err(3 既有 any) / **168 单测** / **32 e2e** / build ✓（dist 绝对路径 `/assets/*`，静态托管前端侧就绪）。
 
-[open] 2026-08-22 · →后端 | **本地单机化：FastAPI 静态托管前端 + SPA fallback** | 前端 `npm run build` 产物（dist/，base `/` 绝对路径）已就绪；请后端在 `/` 挂载静态目录，并**加 catch-all**（非 `/api/*` 一律返回 index.html），否则 `/chat`、`/workspace/:id`、`/trajectory/:id` 深链刷新 404。完整目标见根目录《本地单机化改造方案.md》。
+[done] 2026-08-22 · →后端 | **本地单机化：FastAPI 静态托管前端 + SPA fallback** | 后端已实现（SPAStaticFiles 挂载 frontend_dist/，非 /api 404 → index.html；/chat 深链实测 200）； 前端 `npm run build` 产物（dist/，base `/` 绝对路径）已就绪；请后端在 `/` 挂载静态目录，并**加 catch-all**（非 `/api/*` 一律返回 index.html），否则 `/chat`、`/workspace/:id`、`/trajectory/:id` 深链刷新 404。完整目标见根目录《本地单机化改造方案.md》。
 
-[open] 2026-08-22 · →后端 | **本地单机化：后端去鉴权 + 绑 127.0.0.1** | 前端已不再发 Authorization（去 Bearer + 删登录页），所有 `/api/v1/*`（含 SSE `/chat/stream`、`/notifications/stream`、`/tasks/{id}/resume`）需在无 token 下正常响应；服务绑 `127.0.0.1:8000` 单进程。
+[done] 2026-08-22 · →后端 | **本地单机化：后端去鉴权 + 绑 127.0.0.1** | 后端已实现（get_current_user 恒固定 admin、JWT/登录全删；start.sh/cmd 绑 127.0.0.1 单进程）； 前端已不再发 Authorization（去 Bearer + 删登录页），所有 `/api/v1/*`（含 SSE `/chat/stream`、`/notifications/stream`、`/tasks/{id}/resume`）需在无 token 下正常响应；服务绑 `127.0.0.1:8000` 单进程。
 
-[open] 2026-08-22 · →后端 | **本地单机化：死端点清理 + 单用户语义** | 前端已不调用 `POST /auth/login`、`POST /auth/logout`、`GET /auth/me`、`GET/POST /users`、`PATCH /users/{id}/role`、`PATCH /users/{id}/status`、`DELETE /users/{id}`（后端可删）；`GET /conversations` 前端按固定 admin 过滤（mock 固定 u_admin），后端单用户应返回 admin 全部会话；`User.role` 前端类型保留但不消费，后端可留可删。
+[done] 2026-08-22 · →后端 | **本地单机化：死端点清理 + 单用户语义** | 后端已实现（auth/users router 与 UserService 物理删除；会话按固定 admin 返回全部）； 前端已不调用 `POST /auth/login`、`POST /auth/logout`、`GET /auth/me`、`GET/POST /users`、`PATCH /users/{id}/role`、`PATCH /users/{id}/status`、`DELETE /users/{id}`（后端可删）；`GET /conversations` 前端按固定 admin 过滤（mock 固定 u_admin），后端单用户应返回 admin 全部会话；`User.role` 前端类型保留但不消费，后端可留可删。
 
 [done] 2026-08-21 · →后端（**2026-08-22 后端已实现**） | **工作区删除（硬删）+ 文件树操作契约扩展（rename/mkdir/目录删）** | 用户决策：归档无恢复入口=假删除，改**真删除**；文件树增强行尾三连菜单。
       - 前端已实现（mock 先行 + 真实后端未实现时 catch 404 降级提示）：
