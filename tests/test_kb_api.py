@@ -17,9 +17,6 @@ from app.services.serializers import kb_document_progress
 from app.storage.file.store import get_store
 from app.storage.models import User
 from app.storage.repositories.kb import KbRepository
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 class FakeEmbedder:

@@ -16,9 +16,6 @@ from app.services.task import TaskService
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, User
 from app.storage.repositories.task import TaskRepository
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 @pytest.fixture

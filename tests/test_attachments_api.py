@@ -13,9 +13,6 @@ from app.services.attachment import AttachmentService, analyze_attachment
 from app.services.serializers import serialize_attachment
 from app.storage.file.store import get_store
 from app.storage.models import Attachment, User
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 @pytest.fixture

@@ -11,9 +11,6 @@ from app.storage.models import Attachment, User
 from app.tools import executor
 from app.tools.builtin import register_builtin_tools
 from app.tools.registry import get
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 @pytest.fixture

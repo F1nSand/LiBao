@@ -16,9 +16,6 @@ from app.storage.models import AgentConfig, User
 from app.storage.models.memory import LongTermMemoryVersion
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 class FakeMaintainModel:

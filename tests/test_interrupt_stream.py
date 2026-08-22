@@ -18,9 +18,6 @@ from app.storage.models import AgentConfig, Conversation, User
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.task import TaskRepository
 from app.tools.registry import ToolSpec, register, unregister
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 class FakeChatModel:

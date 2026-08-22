@@ -6,33 +6,12 @@ requires_db 供各 DB-backed 测试文件做 pytestmark；clean_mcp_specs 供注
 """
 from __future__ import annotations
 
-import socket
 from types import SimpleNamespace
 
 import pytest
 
 from app.tools.builtin import register_builtin_tools
 from app.tools.registry import all_tools, unregister
-
-
-def db_reachable() -> bool:
-    try:
-        with socket.create_connection(("localhost", 5432), timeout=2):
-            return True
-    except OSError:
-        return False
-
-
-def redis_reachable() -> bool:
-    try:
-        with socket.create_connection(("localhost", 6379), timeout=2):
-            return True
-    except OSError:
-        return False
-
-
-requires_db = pytest.mark.skipif(not db_reachable(), reason="Docker db 未运行")
-requires_redis = pytest.mark.skipif(not redis_reachable(), reason="Docker redis 未运行")
 
 
 @pytest.fixture(autouse=True)

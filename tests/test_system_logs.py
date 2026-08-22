@@ -8,9 +8,6 @@ import pytest
 from app.services.serializers import serialize_run_log, serialize_trace_event
 from app.storage.file.store import get_store
 from app.storage.repositories.run_log import RunLogRepository
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 @pytest.fixture

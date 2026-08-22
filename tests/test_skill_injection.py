@@ -12,9 +12,6 @@ from app.storage.models import User
 from app.tools.builtin import register_builtin_tools
 from app.tools.builtin.load_skill import load_skill_handler
 from app.tools.context import set_tool_org
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 def test_skills_route_section_empty():

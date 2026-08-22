@@ -8,9 +8,6 @@ import pytest
 from app.services.conversation import ConversationService
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, User
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 @pytest.fixture

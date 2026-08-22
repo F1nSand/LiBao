@@ -15,9 +15,6 @@ from app.orchestration.stream_core import build_initial_state
 from app.services.memory import MemoryService
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, User
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 class FakeModel:

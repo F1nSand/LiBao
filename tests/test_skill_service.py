@@ -17,9 +17,6 @@ from app.services.skill import SkillService, parse_skill_md
 from app.storage.file.store import get_store
 from app.storage.models import User
 from app.tools.builtin import register_builtin_tools
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 VALID_SKILL = """---
 name: kb_strategy
