@@ -5,7 +5,6 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +18,8 @@ def log_task_failure(task: asyncio.Task) -> None:
         logger.warning("后台任务失败: %s", exc)
 
 
-def spawn_background(coro_fn: Callable[[Any, uuid.UUID], Awaitable[None]], arg: uuid.UUID) -> None:
-    """经 sessionmaker 桥触发后台链（桥未设时静默）；done_callback 观测异常。"""
-    from app.storage.db import get_sessionmaker
-
-    sessionmaker = get_sessionmaker()
-    if sessionmaker is not None:
-        t = asyncio.create_task(coro_fn(sessionmaker, arg))
-        t.add_done_callback(log_task_failure)
+def spawn_background(coro_fn: Callable[[uuid.UUID], Awaitable[None]], arg: uuid.UUID) -> None:
+    """以独立 asyncio.Task 跑后台链（本地单机化：直连 store，无 sessionmaker 桥）；
+    done_callback 观测异常。"""
+    t = asyncio.create_task(coro_fn(arg))
+    t.add_done_callback(log_task_failure)

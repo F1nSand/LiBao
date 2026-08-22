@@ -20,6 +20,7 @@ from app.core.errors import (
     AppError,
 )
 from app.storage.attachment_analysis import _ALLOWED, analyze_content
+from app.storage.file.store import get_store
 from app.storage.models.attachment import Attachment
 from app.storage.models.user import User
 from app.storage.repositories.attachment import AttachmentRepository
@@ -92,9 +93,9 @@ class AttachmentService:
             pass
 
 
-async def analyze_attachment(sessionmaker, attachment_id: uuid.UUID) -> None:
+async def analyze_attachment(attachment_id: uuid.UUID) -> None:
     """分析链：uploaded→analyzing→ready|failed。re-read 防并发（F4 模式）。"""
-    async with sessionmaker() as db:
+    async with get_store().session() as db:
         repo = AttachmentRepository(db)
         att = await repo.get_any_org(attachment_id)
         if att is None or att.status != "uploaded":
@@ -113,7 +114,7 @@ async def analyze_attachment(sessionmaker, attachment_id: uuid.UUID) -> None:
 
 
 def _spawn_analyze(attachment_id: uuid.UUID) -> None:
-    """经桥触发后台分析链（桥未设时静默：停留 uploaded，轮询可见）。"""
+    """触发后台分析链（本地单机化：直连 store）。"""
     from app.core.async_utils import spawn_background
 
     spawn_background(analyze_attachment, attachment_id)

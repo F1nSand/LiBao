@@ -1,4 +1,4 @@
-"""T8 kb_search 内置工具测试（DB-backed）：注册/ACI、org 上下文、handler 融合结果、
+"""T8 kb_search 内置工具测试（文件化）：注册/ACI、org 上下文、handler 融合结果、
 executor 全路径、参数校验、org 缺失降级。
 """
 from __future__ import annotations
@@ -7,50 +7,41 @@ import uuid
 
 import pytest
 
-from app.storage.db import init_db, set_sessionmaker
 from app.storage.file.store import get_store
-from app.storage.models import KbChunk, KbCollection, KbDocument, Org, User
+from app.storage.models.kb import KbChunk
+from app.storage.repositories.bm25 import BM25Index
+from app.storage.repositories.kb import KbRepository
 from app.tools import executor
 from app.tools.builtin import register_builtin_tools
 from app.tools.context import set_tool_org
 from app.tools.registry import get, get_by_name
-from tests.conftest import requires_db
-
-pytestmark = requires_db
 
 
 @pytest.fixture
 async def kb_tool_fixture(clean_mcp_specs):
     register_builtin_tools()
-    engine, sessionmaker = init_db()
+    store = get_store()
+    store.bm25 = BM25Index()
+    repo = KbRepository()
     uid = uuid.uuid4().hex[:8]
-    async with get_store().session(sessionmaker) as session:
-        org = Org(name=f"测试组织-kbt-{uid}")
-        session.add(org)
-        await session.flush()
-        user = User(username=f"kbt_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
-        session.add(user)
-        await session.flush()
-        coll = KbCollection(org_id=org.id, name=f"kb-{uid}")
-        session.add(coll)
-        await session.flush()
-        doc = KbDocument(
-            collection_id=coll.id, org_id=org.id, filename="指南.txt", content_type="text/plain",
-            size_bytes=10, content="知识库里有关于天气的记录。", status="indexed",
-        )
-        session.add(doc)
-        await session.flush()
-        session.add(
+    coll = await repo.create_collection(uuid.UUID(int=0), f"kb-{uid}", 512, 64)
+    doc = await repo.create_document(
+        collection_id=coll.id, org_id=uuid.UUID(int=0), filename="指南.txt",
+        content_type="text/plain", size_bytes=10, content="知识库里有关于天气的记录。",
+    )
+    doc.status = "indexed"
+    index = await repo._load_index(coll.id)  # noqa: SLF001
+    index["documents"][str(doc.id)] = doc.to_dict()
+    await repo._save_index(coll.id, index)  # noqa: SLF001
+    await repo.insert_chunks(
+        [
             KbChunk(
-                document_id=doc.id, collection_id=coll.id, org_id=org.id, chunk_index=0,
-                content="知识库里有关于天气的记录。", embedding=[0.5] * 1024,
+                document_id=doc.id, collection_id=coll.id, org_id=uuid.UUID(int=0),
+                chunk_index=0, content="知识库里有关于天气的记录。", embedding=[0.5] * 1024,
             )
-        )
-        await session.commit()
-    set_sessionmaker(sessionmaker)
-    yield sessionmaker, user, org.id, coll.id
-    set_sessionmaker(None)
-    await engine.dispose()
+        ]
+    )
+    yield coll.id
 
 
 async def test_registered_with_aci(kb_tool_fixture):
@@ -66,14 +57,14 @@ async def test_registered_with_aci(kb_tool_fixture):
 
 
 async def test_handler_returns_fused_results(kb_tool_fixture, monkeypatch):
-    sessionmaker, user, org_id, coll_id = kb_tool_fixture
+    coll_id = kb_tool_fixture
 
     class NearEmbedder:
         async def embed_query(self, text):
             return [0.5] * 1024
 
     monkeypatch.setattr("app.storage.repositories.kb.EmbeddingService", lambda: NearEmbedder())
-    set_tool_org(str(org_id))
+    set_tool_org(str(coll_id))
     try:
         spec = get("tl_kb_search")
         result = await executor.execute(spec, {"query": "天气"})
@@ -84,12 +75,13 @@ async def test_handler_returns_fused_results(kb_tool_fixture, monkeypatch):
         set_tool_org(None)
 
 
-async def test_missing_org_context_degrades(kb_tool_fixture):
-    sessionmaker, user, org_id, coll_id = kb_tool_fixture
+async def test_missing_org_context_uses_default(kb_tool_fixture):
+    """org 折叠：无上下文时用默认 org（不再降级 error）。"""
+    _ = kb_tool_fixture  # fixture 建数据（coll_id 无需解包）
     spec = get("tl_kb_search")
     result = await executor.execute(spec, {"query": "天气"})  # 无 org 上下文
-    assert result.ok is True  # 不报错（降级结果）
-    assert "error" in result.output
+    assert result.ok is True
+    assert result.output["count"] >= 1
 
 
 async def test_executor_validation_failure(kb_tool_fixture):

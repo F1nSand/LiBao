@@ -33,6 +33,13 @@ async def init_runtime(settings: Settings | None = None) -> Runtime:
     await store.init()
     set_store(store)
 
+    # KB BM25 索引（启动构建：扫 kb/*/index.json）
+    from app.storage.repositories.bm25 import BM25Index
+    from app.storage.repositories.kb import KbRepository
+
+    store.bm25 = BM25Index()
+    store.bm25.rebuild(await KbRepository()._bm25_corpus())  # noqa: SLF001  全量语料（个人量级毫秒级）
+
     # 本地单机化：tool_definitions.json enabled 为事实源 → registry 同步 + MCP 行重建
     from app.seed import seed_if_first_run
     from app.services.provider import ProviderService

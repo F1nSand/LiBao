@@ -23,6 +23,8 @@ pytestmark = requires_db
 async def att_fixture(monkeypatch, tmp_path):
     s = get_settings()
     monkeypatch.setattr(s, "upload_dir", str(tmp_path))
+    # 禁自动分析链（测试手动调 analyze_attachment 控制状态机）
+    monkeypatch.setattr("app.services.attachment._spawn_analyze", lambda att_id: None)
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
     async with get_store().session(sessionmaker) as session:
@@ -82,7 +84,7 @@ async def test_analyze_image_degrades(att_fixture):
     async with get_store().session(sessionmaker) as session:
         att = await svc.save_upload(session, user, "pic.png", "image/png", b"\x89PNG")
         att_id = att.id
-    await analyze_attachment(sessionmaker, att_id)
+    await analyze_attachment(att_id)
     async with get_store().session(sessionmaker) as session:
         att = await svc.get_attachment(session, user, att_id)
         assert att.status == "ready"  # 降级是完成态，不是 failed
@@ -96,7 +98,7 @@ async def test_analyze_txt_extracts(att_fixture):
     async with get_store().session(sessionmaker) as session:
         att = await svc.save_upload(session, user, "note.txt", "text/plain", "这是笔记内容".encode())
         att_id = att.id
-    await analyze_attachment(sessionmaker, att_id)
+    await analyze_attachment(att_id)
     async with get_store().session(sessionmaker) as session:
         att = await svc.get_attachment(session, user, att_id)
         assert att.status == "ready"
@@ -109,7 +111,7 @@ async def test_analyze_pdf_metadata_only(att_fixture):
     async with get_store().session(sessionmaker) as session:
         att = await svc.save_upload(session, user, "doc.pdf", "application/pdf", b"%PDF-1.4")
         att_id = att.id
-    await analyze_attachment(sessionmaker, att_id)
+    await analyze_attachment(att_id)
     async with get_store().session(sessionmaker) as session:
         att = await svc.get_attachment(session, user, att_id)
         assert att.status == "ready"

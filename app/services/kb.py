@@ -120,7 +120,7 @@ class KbService:
             raise AppError(ERR_TASK_RUNNING, "文档正在处理中")
         doc.status = "uploaded"
         doc.error = None
-        await db.commit()
+        await KbRepository(db).persist_document(doc)  # index.json 落盘（不走 FileTable）
         _spawn_pipeline(document_id)
 
     async def archive_document(self, db: AsyncSession, user: User, document_id: uuid.UUID, status: str) -> None:
@@ -128,7 +128,7 @@ class KbService:
         if doc.status in {"chunking", "indexing"}:
             raise AppError(ERR_TASK_RUNNING, "文档正在处理中")
         doc.status = status  # archived
-        await db.commit()
+        await KbRepository(db).persist_document(doc)  # index.json 落盘（不走 FileTable）
 
     async def delete_document(self, db: AsyncSession, user: User, document_id: uuid.UUID) -> None:
         """软删文档 + 硬删 chunks。"""
@@ -149,12 +149,15 @@ class KbService:
         top_k: int = 5,
         hybrid: dict | None = None,
     ) -> list[dict]:
-        """语义 + BM25 双通道 → RRF 融合（repository 单一来源）。rerank_score 恒 null（M4 接缝）。"""
-        return await KbRepository(db).hybrid_search(user.org_id, coll_ids, query, top_k, hybrid)
+        """语义 + BM25 双通道 → RRF 融合（repository 单一来源）。org 折叠：user 缺省用默认 org。"""
+        from app.storage.constants import DEFAULT_ORG_ID
+
+        org_id = getattr(user, "org_id", None) or DEFAULT_ORG_ID
+        return await KbRepository(db).hybrid_search(org_id, coll_ids, query, top_k, hybrid)
 
 
 def _spawn_pipeline(document_id: uuid.UUID) -> None:
-    """经 sessionmaker 桥触发后台处理链（桥未设时静默：状态停留 uploaded，轮询可见）。"""
+    """触发后台处理链（本地单机化：直连 store，无 sessionmaker 桥）。"""
     from app.core.async_utils import spawn_background
     from app.services.kb_pipeline import process_document
 

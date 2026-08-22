@@ -21,6 +21,7 @@ from app.storage.file.tables import FileTable, _append_line
 from app.storage.models.agent import AgentConfig, AgentVersion
 from app.storage.models.attachment import Attachment
 from app.storage.models.conversation import Conversation
+from app.storage.models.kb import KbCollection
 from app.storage.models.mcp_server import McpServer
 from app.storage.models.memory import LongTermMemory
 from app.storage.models.notification import Notification
@@ -46,6 +47,7 @@ TABLE_SPECS: dict[str, tuple[str, type]] = {
     "skills": ("skills.json", Skill),
     "tool_definitions": ("tool_definitions.json", ToolDefinition),
     "workspaces": ("workspaces.json", Workspace),
+    "kb_collections": ("kb_collections.json", KbCollection),
 }
 
 
@@ -59,6 +61,7 @@ class FileStore:
         self.tables: dict[str, FileTable] = {}
         self._jsonl_locks: dict[str, asyncio.Lock] = {}
         self.sql_sessionmaker: Any = None  # 双轨期：真实 SQL sessionmaker（P4 全文件化后删除）
+        self.bm25: Any = None  # KB BM25 索引（bootstrap 构建，kb repository 读写）
 
     # ---- 初始化 ----
 
@@ -144,8 +147,9 @@ class FileContext:
     def execute(self, stmt: Any) -> Any:
         return self._sql.execute(stmt)
 
-    def flush(self) -> Any:
-        return self._sql.flush()
+    async def flush(self) -> None:
+        if self._sql is not None:
+            await self._sql.flush()
 
     def add(self, row: Any) -> None:
         """SQL 行转发；文件行（Row）按模型类自动注册到对应表（commit 时落盘）。"""
