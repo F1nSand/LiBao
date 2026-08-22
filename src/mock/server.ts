@@ -30,26 +30,6 @@ interface ParsedBody {
   files?: Array<{ name: string; filename: string; mimeType: string; size: number }>
 }
 
-/** mock 评估集用例（内存态，dev 重启重置；后端契约对齐 docs 03 §5.8） */
-const mockEvalCases: Record<string, Array<Record<string, unknown>>> = {
-  es_001: Array.from({ length: 8 }, (_, i) => ({
-    id: `ec_${i + 1}`,
-    eval_set_id: 'es_001',
-    input: `用例 ${i + 1}：加两个数`,
-    expected: i % 2 ? '返回正确结果' : '返回计算结果',
-    layer: `L${(i % 5) + 1}`,
-    active: true,
-  })),
-  es_002: Array.from({ length: 6 }, (_, i) => ({
-    id: `ec2_${i + 1}`,
-    eval_set_id: 'es_002',
-    input: `工具用例 ${i + 1}`,
-    expected: '调用工具并返回结果',
-    layer: `L${(i % 5) + 1}`,
-    active: true,
-  })),
-}
-
 /** mock webhook / provider 配置（内存态；provider 契约见 api/provider.ts） */
 const mockHooks: Array<Record<string, unknown>> = [
   { id: 'hk_001', tool_id: 'tl_demo_notify', conversation_id: 'c_001', enabled: true, created_at: isoDate(120) },
@@ -455,8 +435,11 @@ export const mockServer = {
       const list = workspaceFiles[p!.id]
       const existing = list.find((f) => f.path === path)
       if (b.is_dir) {
-        // 新建文件夹（交接板 2026-08-21 提案）
-        if (existing) return void json(res, fail(40001, '已存在同名路径'))
+        // 新建文件夹（交接板 2026-08-21 契约，后端已实现 08-22）；幂等：已存在同名目录返回现有
+        if (existing) {
+          if (existing.is_dir) return void json(res, ok(existing))
+          return void json(res, fail(40001, '目标路径已存在同名文件'))
+        }
         list.push({ name: path.split('/').pop() ?? path, path, is_dir: true, size: 0 })
         return void json(res, ok({ name: path.split('/').pop(), path, is_dir: true, size: 0 }))
       }
@@ -485,8 +468,12 @@ export const mockServer = {
       const oldPath = String(b.old_path ?? '')
       const newPath = String(b.new_path ?? '')
       if (!oldPath || !newPath || oldPath === newPath) return void json(res, fail(40001, '无效的重命名路径'))
+      // 边界校验（对齐后端 08-22 契约）：跨出工作区 / 自身子路径 / 目标已存在
+      if (newPath.split('/').includes('..')) return void json(res, fail(40001, '路径越界'))
+      if (newPath.startsWith(`${oldPath}/`)) return void json(res, fail(40001, '不能移动到自身子路径'))
       const list = workspaceFiles[p!.id]
       if (!list || !list.some((f) => f.path === oldPath)) return void json(res, fail(40401, '文件或目录不存在'))
+      if (list.some((f) => f.path === newPath)) return void json(res, fail(40302, '目标路径已存在'))
       for (const f of list) {
         if (f.path === oldPath || f.path.startsWith(`${oldPath}/`)) {
           const suffix = f.path.slice(oldPath.length)
@@ -732,96 +719,6 @@ export const mockServer = {
         }),
       )
     }
-    /* ===== 评估管理（docs 03 §5.8 / docs 06 §2.4） ===== */
-    if (method === 'GET' && pathname === '/system/evals/sets') {
-      return void json(res, ok([
-        { id: 'es_001', name: '基础对话', description: 'M1 回归集', case_count: mockEvalCases.es_001.length, created_at: isoDate(300) },
-        { id: 'es_002', name: '工具调用', description: 'M2 回归集', case_count: mockEvalCases.es_002.length, created_at: isoDate(150) },
-      ]))
-    }
-    if (method === 'POST' && pathname === '/system/evals/sets') {
-      const nc = { id: uid('es'), ...(body.json ?? {}), case_count: 0, created_at: isoDate(0) }
-      return void json(res, ok(nc))
-    }
-    p = match(pathname, '/system/evals/sets/:id/cases/:case_id')
-    if (method === 'PATCH' && p) {
-      const setId = p.id
-      const caseId = p.case_id
-      const c = (mockEvalCases[setId] ?? []).find((x) => x.id === caseId)
-      if (c && body.json?.active !== undefined) c.active = body.json.active
-      return void json(res, ok(c ?? { id: caseId, active: body.json?.active ?? true }))
-    }
-    if (method === 'DELETE' && p) {
-      const setId = p.id
-      const caseId = p.case_id
-      mockEvalCases[setId] = (mockEvalCases[setId] ?? []).filter((x) => x.id !== caseId)
-      return void json(res, ok(null))
-    }
-    p = match(pathname, '/system/evals/sets/:id/cases')
-    if (method === 'GET' && p) return void json(res, ok(mockEvalCases[p.id] ?? []))
-    if (method === 'POST' && p) {
-      const nc = { id: uid('ec'), eval_set_id: p.id, ...(body.json ?? {}), active: true, layer: body.json?.layer ?? 'L1' }
-      mockEvalCases[p.id] = [...(mockEvalCases[p.id] ?? []), nc]
-      return void json(res, ok(nc))
-    }
-    p = match(pathname, '/system/evals/sets/:id')
-    if (method === 'PUT' && p) {
-      const s = { id: p.id, ...(body.json ?? {}), created_at: isoDate(0) }
-      return void json(res, ok(s))
-    }
-    if (method === 'DELETE' && p) {
-      delete mockEvalCases[p.id]
-      return void json(res, ok(null))
-    }
-    if (method === 'POST' && pathname === '/system/evals/run') {
-      const rid = uid('run')
-      return void json(res, ok({ id: rid, eval_set_id: body.json?.eval_set_id, baseline_run_id: body.json?.baseline_run_id ?? null, status: 'running', progress: 10, created_at: isoDate(0) }))
-    }
-    if (method === 'GET' && pathname === '/system/evals/runs') {
-      return void json(res, ok([
-        { id: 'run_001', eval_set_id: 'es_001', baseline_run_id: null, status: 'done', progress: 100, pass_rate: 0.965, created_at: isoDate(60) },
-        { id: 'run_002', eval_set_id: 'es_001', baseline_run_id: 'run_001', status: 'done', progress: 100, pass_rate: 0.98, created_at: isoDate(30) },
-      ]))
-    }
-    p = match(pathname, '/system/evals/runs/:run_id/pairwise')
-    if (method === 'GET' && p) {
-      const baseline = query.get('baseline_run_id') ?? 'run_001'
-      const matrix = Array.from({ length: 8 }, (_, i) => ({
-        case_id: `ec_${i + 1}`,
-        input: `用例 ${i + 1}`,
-        baseline_pass: i % 3 !== 0,
-        candidate_pass: i % 3 !== 2,
-        outcome: (i % 3 === 2 ? 'win' : i % 3 === 1 ? 'tie' : 'lose') as 'win' | 'lose' | 'tie',
-      }))
-      return void json(
-        res,
-        ok({
-          run_id: p.run_id,
-          baseline_run_id: baseline,
-          matrix,
-          summary: { baseline_pass_rate: 0.875, candidate_pass_rate: 0.625, delta: -0.25, wins: 3, losses: 2, ties: 3 },
-        }),
-      )
-    }
-    p = match(pathname, '/system/evals/runs/:run_id')
-    if (method === 'GET' && p) {
-      return void json(
-        res,
-        ok({
-          run: { id: p.run_id, eval_set_id: 'es_001', baseline_run_id: 'run_001', status: 'done', progress: 100, pass_rate: 0.965, created_at: isoDate(0) },
-          results: Array.from({ length: 5 }, (_, i) => ({
-            case_id: uid('ec'),
-            input: `测试用例 ${i + 1}`,
-            expected: '期望输出',
-            actual: i % 2 ? '输出正确' : '输出略有偏差',
-            pass: i % 2 === 0,
-            score: i % 2 ? 1 : 0.8,
-            latency_ms: 420 + i * 30,
-            cost: 0.0008 + i * 0.0001,
-          })),
-        }),
-      )
-    }
     /* ===== Webhook（docs 03 §5.10） ===== */
     if (method === 'GET' && pathname === '/hooks') return void json(res, ok(mockHooks))
     p = match(pathname, '/hooks/:tool_id/register')
@@ -855,25 +752,6 @@ export const mockServer = {
       const id = p.id
       mockProviders.splice(mockProviders.findIndex((x) => x.id === id), 1)
       return void json(res, ok(null))
-    }
-
-    if (method === 'GET' && pathname === '/system/cost') {
-      return void json(
-        res,
-        ok({
-          total_cost: 12.47,
-          total_calls: 1840,
-          by_provider: [
-            { provider: 'openai', cost: 8.2, calls: 1100 },
-            { provider: 'deepseek', cost: 4.27, calls: 740 },
-          ],
-          series: Array.from({ length: 14 }, (_, i) => ({
-            date: new Date(Date.now() - (13 - i) * 86_400_000).toISOString().slice(0, 10),
-            cost: +(0.4 + Math.random() * 1.2).toFixed(2),
-            calls: Math.round(60 + Math.random() * 120),
-          })),
-        }),
-      )
     }
 
     /* ===== 附件 ===== */

@@ -51,12 +51,12 @@ export function deleteWorkspaceFile(wsId: string, path: string) {
   return httpDelete<null>(`/workspaces/${encodeURIComponent(wsId)}/files`, { params: { path } })
 }
 
-/** 重命名文件/文件夹（子项前缀由服务端同步；交接板 2026-08-21 提案，后端未实现时 404 降级） */
+/** 重命名文件/文件夹（子项前缀由服务端同步；交接板 2026-08-21 契约，后端已实现 08-22，降级保留为安全网） */
 export function renameWorkspaceFile(wsId: string, body: { old_path: string; new_path: string }) {
   return httpPatch<null>(`/workspaces/${encodeURIComponent(wsId)}/files/rename`, body)
 }
 
-/** 新建文件夹（path 相对 root；交接板 2026-08-21 提案，POST files 扩展 is_dir，后端未实现时 404 降级） */
+/** 新建文件夹（path 相对 root；交接板 2026-08-21 契约，后端已实现 08-22，降级保留为安全网） */
 export function createWorkspaceDir(wsId: string, path: string) {
   return httpPost<WorkspaceFile>(`/workspaces/${encodeURIComponent(wsId)}/files`, { path, is_dir: true })
 }

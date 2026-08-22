@@ -43,7 +43,7 @@ export function formatTokens(u: TokenUsage | undefined | null): string {
   return `${p}/${c} tok`
 }
 
-/** 成本（¥）：≥0.01 两位小数，更小保留四位（避免 ¥0.00 丢失信息）；与 SystemView/CostChart 币种一致 */
+/** 成本（¥）：≥0.01 两位小数，更小保留四位（避免 ¥0.00 丢失信息）；与既有成本渲染一致 */
 export function formatCost(c: number | undefined | null): string {
   if (c == null) return ''
   const s = c >= 0.01 ? c.toFixed(2) : c.toFixed(4)

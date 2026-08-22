@@ -9,13 +9,15 @@
 
 > **2026-08-22 存档（前端续作三连，commit 见下）**：①修工作区假降级——`FEATURE.workspacesFiles` 独立，文件子操作（rename/mkdir/目录删）404 不再折叠整页；②恢复 evolution 候选区 UI——独立页挂设置组（admin），还原 git 历史 EvolutionManage 组件 + EvolutionView + 路由/菜单/e2e；③CI 补 e2e + 工程收尾——lint:check、e2e job、.dockerignore、barrel 补 availability/evolution 导出、清死代码（uploads/kb/tool/notifications/auth/sse/mock tasks 路由，**保留 resume**）+ 陈旧注释更新。门禁：typecheck ✓ / lint:check 0err(3 既有 any) / **184 单测** / **38 e2e**（+2 evolution）。交接板 `[open] →后端` 仅剩：工作区硬删 + rename/mkdir/目录删 契约扩展。
 
-[open] 2026-08-21 · →后端 | **工作区删除（硬删）+ 文件树操作契约扩展（rename/mkdir/目录删）** | 用户决策：归档无恢复入口=假删除，改**真删除**；文件树增强行尾三连菜单。
+> **2026-08-22 二次存档（后端硬删闭环后收尾，commit 见下）**：① **mock 语义对齐后端**——mkdir 幂等（已存在同名目录返回现有，对齐后端实测）+ rename 边界校验（目标已存在 40302 / 自身子路径 / 跨出工作区），后端 08-22 实测语义一致；② **清 system evals/cost 死代码**——`api/system.ts` evals/cost 组 + `stores/system.ts` 对应 state/getters/actions + mock `/system/evals/*`、`/system/cost` 路由 + `types/api.ts` EvalSet/EvalCase/EvalRun/EvalCaseResult/Pairwise*/CostStat 类型 + availability `systemEvals/systemCost` flag 五处联动删（全库 grep + spec + e2e 核实零消费）；③ 陈旧注释 6 处更新（types/api.ts Provider、format.ts CostChart、routes.ts 工作区、EvolutionManage、workspace.ts rename/mkdir）；④ **真实后端联调核验 PASS**——:8000 实测（VITE_USE_MOCK=false + UI 驱动）：写文件/mkdir 幂等/rename(含目标冲突 40302)/目录递归删/硬删+级联/reveal 全对齐，evolution 4 条 + skills 1 条真实渲染，0 页面错误。门禁：typecheck ✓ / lint:check 0err(3 既有 any) / **184 单测** / **38 e2e**。**交接板已全 [done]，无 `[open]` 项**。
+
+[done] 2026-08-21 · →后端（**2026-08-22 后端已实现**） | **工作区删除（硬删）+ 文件树操作契约扩展（rename/mkdir/目录删）** | 用户决策：归档无恢复入口=假删除，改**真删除**；文件树增强行尾三连菜单。
       - 前端已实现（mock 先行 + 真实后端未实现时 catch 404 降级提示）：
         - `DELETE /workspaces/{id}` 前端按**硬删**处理（mock：splice + 级联清理文件树/内容/工作区会话/消息；卡片强确认输入名称防误删）——**请后端把 DELETE 从软删归档改为硬删**（删 root_path 目录 + DB 行 + 级联对话/记忆/文件），docs/03 L393 同步；
         - `PATCH /workspaces/{id}/files/rename {old_path,new_path}`（重命名文件/文件夹，子项前缀同步）；
         - `POST /workspaces/{id}/files` 扩展 `{path, is_dir:true}`（新建文件夹，默认当前目录子目录）；
         - `DELETE /workspaces/{id}/files?path=` 支持**目录递归删除**（原「目录删除暂不支持」）。
-      - 请后端补齐端点并同步 docs/03（DELETE 语义 + 3 个新能力）。
+      - ✅ **后端已实现（2026-08-22，L2，全量 391 绿 + ruff + HTTP 冒烟通过）**：`DELETE /workspaces/{id}` 改**硬删**（删 root 目录 + DB 行 + 级联 conversations/messages/memory_trace/run_logs/attachments（含磁盘文件）/webhook_configs/candidates/longterm_memory，服务端叶子→根手动删）；`PATCH .../files/rename` 新增；`POST .../files` 支持 `{is_dir:true}`；`DELETE .../files?path=` 目录递归删。**注意**：`POST /files` 写文件响应由 `{path,written}` 统一为 `WorkspaceFile {name,path,is_dir,size}`（前端 `writeWorkspaceFile` 类型已是 WorkspaceFile，无需改动）。docs/03 §5.14 + AC-6e 已同步。
 
 [done] 2026-08-21 · →后端 | **工作区项目级能力收敛：`.agent/` 目录机制（M7-B T7a/T8 重定位）** | 用户决策：不做工作区 skills/记忆管理 UI；项目级能力改为工作区 `.agent/` 目录文件化（Claude Code `.claude/` 同款），agent 工作于该工作区时自动发现并叠加。
       - **能力模型**：agent 运行时 = 全局基座（org skills + 长期记忆 + 知识库 + 工具）+ 项目级 `.agent/`（skills/ + memory/ + knowledge/）；**项目级覆盖全局同名**；工具暂不含（后续扩展）。

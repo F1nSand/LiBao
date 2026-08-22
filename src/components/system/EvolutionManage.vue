@@ -7,7 +7,7 @@ import { CANDIDATE_CHANGE_LABEL, CANDIDATE_STATUS_LABEL } from '@/constants/labe
 import { formatDate } from '@/utils/format'
 import type { Candidate, CandidateChangeType, CandidateStatus } from '@/types'
 
-/** 经验候选区（docs/06 §5 契约提案，mock 演示；后端未实现 → SystemView 侧 EmptyState）：
+/** 经验候选区（docs/06 §5 契约，后端已实现 08-18；EvolutionView 使用，降级仅安全网）：
  * 候选 → 验证 → 批准 → 发布 → 回滚；详情抽屉展示变更契约字段。 */
 const store = useEvolutionStore()
 

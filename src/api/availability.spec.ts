@@ -20,8 +20,9 @@ describe('availability 路由映射', () => {
     expect(featureForUrl('/users')).toBe(FEATURE.users)
     expect(featureForUrl('/system/logs/trace/t1')).toBe(FEATURE.systemTrace)
     expect(featureForUrl('/system/logs')).toBe(FEATURE.systemLogs)
-    expect(featureForUrl('/system/evals/run')).toBe(FEATURE.systemEvals)
-    expect(featureForUrl('/system/cost')).toBe(FEATURE.systemCost)
+    // evals/cost 契约层已随 UI 精简删除（08-20），未知路径不误标
+    expect(featureForUrl('/system/evals/run')).toBeNull()
+    expect(featureForUrl('/system/cost')).toBeNull()
     expect(featureForUrl('/evolution/candidates')).toBe(FEATURE.evolution)
     expect(featureForUrl('/evolution/candidates/cand_1/publish')).toBe(FEATURE.evolution)
     expect(featureForUrl('/skills')).toBe(FEATURE.skills)
@@ -65,10 +66,10 @@ describe('availability 打标', () => {
   })
 
   it('reset 清空全部标记', () => {
-    markUnavailable(FEATURE.systemCost)
+    markUnavailable(FEATURE.systemLogs)
     markUnavailableForUrl('/notifications')
     resetUnavailable()
-    expect(isUnavailable(FEATURE.systemCost)).toBe(false)
+    expect(isUnavailable(FEATURE.systemLogs)).toBe(false)
     expect(isUnavailable(FEATURE.notifications)).toBe(false)
   })
 })

@@ -419,79 +419,7 @@ export interface TraceDetail {
   events: TraceEvent[]
 }
 
-export interface EvalSet {
-  id: string
-  name: string
-  description?: string
-  case_count?: number
-  created_at: string
-}
-
-export interface EvalCase {
-  id: string
-  eval_set_id: string
-  input: string
-  expected: string
-  /** L1-L5 分层（docs 06 §3.1，后端可空） */
-  layer?: string
-  active: boolean
-}
-
-export interface EvalRun {
-  id: string
-  eval_set_id: string
-  /** 配对比较基线（docs 06 §2.4；无基线时为 null） */
-  baseline_run_id?: string | null
-  status: 'pending' | 'running' | 'done' | 'failed'
-  progress?: number
-  pass_rate?: number
-  created_at: string
-}
-
-export interface EvalCaseResult {
-  case_id: string
-  input: string
-  expected: string
-  actual?: string
-  pass: boolean
-  score?: number
-  latency_ms?: number
-  cost?: number
-}
-
-/** ---------- 配对比较（docs 06 §2.4，McNemar 思路：真变好还是运气） ---------- */
-export interface PairwiseMatrixRow {
-  case_id: string
-  input: string
-  baseline_pass: boolean
-  candidate_pass: boolean
-  outcome: 'win' | 'lose' | 'tie'
-}
-
-export interface PairwiseSummary {
-  baseline_pass_rate: number
-  candidate_pass_rate: number
-  delta: number
-  wins: number
-  losses: number
-  ties: number
-}
-
-export interface PairwiseDetail {
-  run_id: string
-  baseline_run_id: string
-  matrix: PairwiseMatrixRow[]
-  summary: PairwiseSummary
-}
-
-export interface CostStat {
-  total_cost: number
-  total_calls: number
-  by_provider: Array<{ provider: string; cost: number; calls: number }>
-  series: Array<{ date: string; cost: number; calls: number }>
-}
-
-/** ---------- 经验候选区（M6，docs/06 §5 契约提案，前端 mock 演示，待后端认领） ---------- */
+/** ---------- 经验候选区（M6，docs/06 §5 契约，后端已实现 08-18） ---------- */
 export interface Candidate {
   id: string
   title: string
@@ -564,7 +492,7 @@ export interface RegisterHookRequest {
   conversation_id?: string
 }
 
-/** ---------- Provider 配置（前端定义契约，后端待实现 /settings/providers） ---------- */
+/** ---------- Provider 配置（前端定义契约 docs/03 §5.6，后端已实现 08-17） ---------- */
 export interface ProviderConfig {
   id: string
   name: string
