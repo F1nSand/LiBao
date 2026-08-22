@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # ---- M3 记忆 ----
     memory_inject_limit: int = 5  # 每轮注入卡片上限（docs 01 §8.2）
     memory_card_max_chars: int = 500  # 单卡片注入序列化上限
-    memory_trace_limit: int = 100  # maintenance 读取轨迹上限
+    memory_maintenance_limit: int = 100  # maintenance 读取最近 messages 上限（memory_trace 已删改读 messages）
 
     # ---- M3 知识库 ----
     kb_max_chunks: int = 2000  # 单文档分块上限（防 20MB 文本爆 embedding 预算）

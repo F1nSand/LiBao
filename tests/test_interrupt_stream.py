@@ -16,7 +16,6 @@ from app.orchestration.chat_stream import chat_stream_events, resume_stream_even
 from app.orchestration.graph import build_graph
 from app.storage.db import init_db
 from app.storage.models import AgentConfig, Conversation, Org, User
-from app.storage.repositories.memory import MemoryRepository
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.task import TaskRepository
 from app.tools.registry import ToolSpec, register, unregister
@@ -168,13 +167,6 @@ async def test_resume_approved_done(interrupt_fixture):
         assert msgs[1].round == 1 and msgs[1].tool_calls[0]["tool_name"] == "confirm_test"
         assert msgs[1].tool_calls[0]["status"] == "done"
         assert msgs[2].round == 2 and msgs[2].tool_calls == []
-
-        # C8：resume 续答轮补 assistant 轨迹（中断轮 + 最终轮各一条）
-        traces = await MemoryRepository(session).list_traces(user.id, limit=10, offset=0)
-        assert [t.role for t in traces] == ["user", "assistant", "assistant"]
-        assert traces[-1].content == "已按确认结果处理。"
-        assert traces[-1].trace_id == "trace-resume"
-        assert traces[-1].message_id == uuid.UUID(done["payload"]["message_id"])
 
 
 async def test_resume_denied_cancelled(interrupt_fixture):

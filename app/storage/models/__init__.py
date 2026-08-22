@@ -8,7 +8,7 @@ from app.storage.models.eval import EvalCase, EvalResult, EvalRun, EvalSet
 from app.storage.models.evolution import Candidate
 from app.storage.models.kb import KbChunk, KbCollection, KbDocument
 from app.storage.models.mcp_server import McpServer
-from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion, MemoryTrace
+from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion
 from app.storage.models.message import Message
 from app.storage.models.notification import Notification
 from app.storage.models.org import Org
@@ -37,7 +37,6 @@ __all__ = [
     "LongTermMemory",
     "LongTermMemoryVersion",
     "McpServer",
-    "MemoryTrace",
     "Message",
     "Notification",
     "Org",

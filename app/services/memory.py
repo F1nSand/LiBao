@@ -1,7 +1,7 @@
 """记忆领域服务（docs 01 §8 / docs 03 §5.7）。
 
-三层记忆之①轨迹（append-only，maintenance 原料）与②长期记忆（版本化只增：改写 = 新版本行）。
-maintenance（LLM 整理）：读卡片+轨迹 → LLM 输出整理计划 → 单事务应用（只增原则）。
+长期记忆（版本化只增：改写 = 新版本行）。maintenance（LLM 整理）：读卡片 + 最近 messages
+（memory_trace 已删改读 messages，见迁移 0016）→ LLM 输出整理计划 → 单事务应用（只增原则）。
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from app.core.config import get_settings
 from app.core.errors import ERR_LLM_FAILURE, ERR_MEMORY_NOT_FOUND, AppError
 from app.core.llm import LLMService
 from app.orchestration.stream_core import message_text
-from app.services.serializers import serialize_longterm_version, serialize_memory_trace
+from app.services.serializers import serialize_longterm_version
 from app.storage.models.memory import LongTermMemory
 from app.storage.repositories.memory import MemoryRepository
 
@@ -34,46 +34,6 @@ _MAINTENANCE_PROMPT = """你是记忆整理器。基于用户的长期记忆卡�
 
 
 class MemoryService:
-    # ---- 轨迹 ----
-
-    async def record_trace(
-        self,
-        db: AsyncSession,
-        user_id: uuid.UUID,
-        role: str,
-        content: str,
-        trace_id: str | None = None,
-        conversation_id: uuid.UUID | None = None,
-        message_id: uuid.UUID | None = None,
-        meta: dict | None = None,
-    ) -> None:
-        await MemoryRepository(db).add_trace(
-            user_id=user_id,
-            role=role,
-            content=content[:1000],  # 轨迹截断（防膨胀）
-            trace_id=trace_id,
-            conversation_id=conversation_id,
-            message_id=message_id,
-            meta=meta,
-        )
-
-    async def list_traces(
-        self,
-        db: AsyncSession,
-        user_id: uuid.UUID,
-        page: int,
-        page_size: int,
-        conversation_id: uuid.UUID | None = None,
-    ) -> dict[str, Any]:
-        repo = MemoryRepository(db)
-        items = await repo.list_traces(
-            user_id, limit=page_size, offset=(page - 1) * page_size, conversation_id=conversation_id
-        )
-        total = await repo.count_traces(user_id, conversation_id=conversation_id)
-        from app.api.schemas.common import paged
-
-        return paged([serialize_memory_trace(t) for t in items], total, page, page_size)
-
     # ---- 长期记忆卡片 ----
 
     async def create_card(
@@ -158,18 +118,18 @@ async def run_maintenance(db: AsyncSession, user_id: uuid.UUID, model: Any = Non
     """
     repo = MemoryRepository(db)
     cards = await repo.list_cards(user_id, limit=200)
-    traces = await repo.recent_traces(user_id, get_settings().memory_trace_limit)
+    recent_msgs = await repo.recent_messages_for_maintenance(user_id, get_settings().memory_maintenance_limit)
     cards_text = "\n".join(
         f"- [{c.id}] ({c.card_type}, importance={c.importance:.2f}) {c.title or ''}: "
         f"{json.dumps(c.content, ensure_ascii=False)}"
         for c in cards
     )
-    traces_text = "\n".join(f"- [{t.role}] {t.content[:200]}" for t in traces)
-    messages = [
-        HumanMessage(
-            content=f"{_MAINTENANCE_PROMPT}\n\n当前卡片:\n{cards_text or '(无)'}\n\n最近轨迹:\n{traces_text or '(无)'}"
-        )
-    ]
+    recent_msgs_text = "\n".join(f"- [{m.role}] {m.content[:200]}" for m in recent_msgs)
+    prompt = (
+        f"{_MAINTENANCE_PROMPT}\n\n当前卡片:\n{cards_text or '(无)'}\n\n"
+        f"最近对话:\n{recent_msgs_text or '(无)'}"
+    )
+    messages = [HumanMessage(content=prompt)]
     try:
         if model is None:
             model = LLMService.build_model()

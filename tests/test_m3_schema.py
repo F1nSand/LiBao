@@ -1,4 +1,4 @@
-"""T1 M3 数据层测试（DB-backed）：迁移 0004 七表、pgvector 列、GENERATED tsvector、
+"""T1 M3 数据层测试（DB-backed）：迁移 0004 表、pgvector 列、GENERATED tsvector、
 UNIQUE 约束、软删语义、HNSW/GIN 索引。
 """
 from __future__ import annotations
@@ -23,7 +23,6 @@ from tests.conftest import requires_db
 pytestmark = requires_db
 
 TABLES = [
-    "memory_trace",
     "longterm_memory",
     "longterm_memory_version",
     "kb_collections",
@@ -146,14 +145,6 @@ async def test_memory_version_unique_constraint(m3_fixture):
             await session.commit()
         assert "unique" in str(exc.value).lower() or "duplicate" in str(exc.value).lower()
         await session.rollback()
-
-
-async def test_memory_trace_is_append_only(m3_fixture):
-    sessionmaker, user = m3_fixture
-    async with sessionmaker() as session:
-        cols = {c["name"] for c in await session.run_sync(lambda s: inspect(s.get_bind()).get_columns("memory_trace"))}
-        assert "deleted_at" not in cols  # append-only：无软删列
-        assert "created_at" in cols
 
 
 async def test_kb_chunks_hnsw_and_gin_indexes(m3_fixture):

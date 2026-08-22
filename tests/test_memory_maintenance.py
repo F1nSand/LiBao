@@ -13,7 +13,7 @@ from app.core.errors import AppError
 from app.core.security import hash_password
 from app.services.memory import MemoryService, _extract_json, run_maintenance
 from app.storage.db import init_db
-from app.storage.models import Org, User
+from app.storage.models import AgentConfig, Conversation, Message, Org, User
 from app.storage.models.memory import LongTermMemoryVersion
 from tests.conftest import requires_db
 
@@ -64,7 +64,17 @@ async def test_maintenance_applies_plan(maint_fixture):
         keep = await svc.create_card(session, user.id, "note", "保留", {"text": "keep"})
         upd = await svc.create_card(session, user.id, "note", "更新", {"text": "old"}, importance=0.3)
         dele = await svc.create_card(session, user.id, "note", "删除", {"text": "bye"})
-        await svc.record_trace(session, user.id, role="user", content="用户说喜欢喝咖啡", trace_id="t1")
+        # maintenance 改读 messages：造一条 user 消息作为整理原料
+        agent = AgentConfig(
+            org_id=user.org_id, name="maint-agent", model="fake", system_prompt="x", tools=[], max_steps=5,
+            status="published",
+        )
+        session.add(agent)
+        await session.flush()
+        conv = Conversation(user_id=user.id, agent_id=agent.id, title="maint-conv")
+        session.add(conv)
+        await session.flush()
+        session.add(Message(conversation_id=conv.id, role="user", content="用户说喜欢喝咖啡"))
 
         plan = {
             "keep": [str(keep.id)],
@@ -163,3 +173,32 @@ async def test_maintenance_importance_clamped(maint_fixture):
         await run_maintenance(session, user.id, model=FakeMaintainModel(json.dumps(plan)))
         cards = await MemoryService().list_cards(session, user.id)
         assert cards[0].importance == 1.0  # clamp 到 [0,1]
+
+
+async def test_maintenance_reads_recent_messages(maint_fixture):
+    """run_maintenance 改读 messages（memory_trace 已删）：LLM 收到最近对话含 user+assistant 消息。"""
+    sessionmaker, user = maint_fixture
+    async with sessionmaker() as session:
+        agent = AgentConfig(
+            org_id=user.org_id, name="maint-agent", model="fake", system_prompt="x", tools=[], max_steps=5,
+            status="published",
+        )
+        session.add(agent)
+        await session.flush()
+        conv = Conversation(user_id=user.id, agent_id=agent.id, title="maint-conv")
+        session.add(conv)
+        await session.flush()
+        session.add(Message(conversation_id=conv.id, role="user", content="用户说喜欢喝咖啡"))
+        session.add(Message(conversation_id=conv.id, role="assistant", content="已记录偏好"))
+        await session.commit()
+    captured: dict[str, str] = {}
+
+    class CaptureModel(FakeMaintainModel):
+        async def ainvoke(self, messages):
+            captured["prompt"] = messages[0].content
+            return AIMessage(content=json.dumps({"keep": [], "update": [], "create": [], "delete": []}))
+
+    async with sessionmaker() as session:
+        await run_maintenance(session, user.id, model=CaptureModel("{}"))  # content 占位，ainvoke 被覆写
+    assert "用户说喜欢喝咖啡" in captured["prompt"]
+    assert "已记录偏好" in captured["prompt"]

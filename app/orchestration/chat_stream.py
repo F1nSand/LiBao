@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import sse_emitter
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
-from app.services.memory import MemoryService
 from app.services.notification import maybe_notify_from_tool_results
 from app.services.serializers import serialize_message
 from app.services.skill import SkillService
@@ -108,18 +107,14 @@ async def chat_stream_events(
         await db.commit()
 
     # ---- ① 开头持久化用户消息（message-as-log，刷新可回放）----
-    # C8：用户消息 + 附件回填 + 记忆轨迹 + touch 合并为单事务（原 3 次独立 commit，D10 同事务偏差）
+    # C8：用户消息 + 附件回填 + touch 合并为单事务（原 3 次独立 commit，D10 同事务偏差）
     att_refs = [{"attachment_id": aid} for aid in (attachments or [])] or None
     user_msg = await msg_repo.create(
         conversation_id=conversation.id, role="user", content=content, attachments=att_refs, trace_id=trace_id
     )
-    await db.flush()  # uuid4 default 在 flush 应用——回填/轨迹需 user_msg.id（C8 单事务内不 commit）
+    await db.flush()  # uuid4 default 在 flush 应用——回填需 user_msg.id（C8 单事务内不 commit）
     if att_refs:
         await _backfill_attachments(db, [a["attachment_id"] for a in att_refs], conversation.id, user_msg.id)
-    await MemoryService().record_trace(
-        db, user.id, role="user", content=content, trace_id=trace_id,
-        conversation_id=conversation.id, message_id=user_msg.id,
-    )
     await ConversationRepository(db).touch_last_message(conversation.id)
     await db.commit()
 
@@ -185,16 +180,6 @@ async def chat_stream_events(
         final_row.id = assistant_msg_id
         for log in final_state.get("run_logs", []):
             await RunLogRepository(db).create(session_id=conversation.id, **log)
-        # M3：记忆轨迹（round_sink 轮 + 最终轮各一条）
-        for round_msg in round_sink:
-            await MemoryService().record_trace(
-                db, user.id, role="assistant", content=round_msg["content"], trace_id=trace_id,
-                conversation_id=conversation.id, message_id=round_msg["id"],
-            )
-        await MemoryService().record_trace(
-            db, user.id, role="assistant", content=fm.get("content", ""), trace_id=trace_id,
-            conversation_id=conversation.id, message_id=assistant_msg_id,
-        )
         await ConversationRepository(db).touch_last_message(conversation.id)
         await db.commit()
         return _done_payload(assistant_msg_id, fm.get("token_usage") or totals, serialize_message(final_row))
@@ -321,26 +306,6 @@ async def resume_stream_events(
             for log in final_state.get("run_logs", []):
                 await RunLogRepository(db).create(session_id=conversation_id, **log)
             await ConversationRepository(db).touch_last_message(conversation_id)
-            # C8：resume 续答轮补 assistant 轨迹（round_sink 轮 + 最终轮各一条；maintenance 原料）
-            for round_msg in round_sink:
-                await MemoryService().record_trace(
-                    db,
-                    user.id,
-                    role="assistant",
-                    content=round_msg["content"],
-                    trace_id=trace_id,
-                    conversation_id=conversation_id,
-                    message_id=round_msg["id"],
-                )
-            await MemoryService().record_trace(
-                db,
-                user.id,
-                role="assistant",
-                content=fm.get("content", ""),
-                trace_id=trace_id,
-                conversation_id=conversation_id,
-                message_id=assistant_msg_id,
-            )
         # F10：重读任务行，避免覆盖并发取消（与 task_run 一致）
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status != "cancelled":

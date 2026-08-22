@@ -1,4 +1,4 @@
-"""T3 记忆域测试（DB-backed）：轨迹 append-only、卡片 CRUD/importance 排序/版本只增/软删。"""
+"""T3 记忆域测试（DB-backed）：卡片 CRUD/importance 排序/版本只增/软删。"""
 from __future__ import annotations
 
 import uuid
@@ -33,19 +33,6 @@ async def memory_fixture():
         await session.commit()
     yield sessionmaker, user, other_user
     await engine.dispose()
-
-
-async def test_record_and_list_traces(memory_fixture):
-    sessionmaker, user, other = memory_fixture
-    async with sessionmaker() as session:
-        svc = MemoryService()
-        await svc.record_trace(session, user.id, role="user", content="现在几点", trace_id="t1")
-        await svc.record_trace(session, user.id, role="assistant", content="现在是 12 点", trace_id="t2")
-        await svc.record_trace(session, other.id, role="user", content="别人的轨迹", trace_id="t3")
-        data = await svc.list_traces(session, user.id, page=1, page_size=10)
-        assert data["total"] == 2  # 只统计本人
-        roles = [t["role"] for t in data["items"]]
-        assert roles == ["user", "assistant"]  # created_at asc
 
 
 async def test_create_card_note_and_json_card(memory_fixture):

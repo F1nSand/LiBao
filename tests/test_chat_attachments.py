@@ -1,7 +1,6 @@
-"""T10 消息 attachments 链路 + memory_trace 测试（DB-backed，FakeChatModel）。
+"""T10 消息 attachments 链路测试（DB-backed，FakeChatModel）。
 
-覆盖：带附件发消息 → 用户消息 attachments=[id] + 附件回填 + memory_trace 2 条（user+assistant）；
-纯文本消息 trace 仍落；chat_stream_events 全链路。
+覆盖：带附件发消息 → 用户消息 attachments=[id] + 附件回填；纯文本消息落 messages；chat_stream_events 全链路。
 """
 from __future__ import annotations
 
@@ -19,7 +18,6 @@ from app.services.attachment import AttachmentService
 from app.storage.db import init_db
 from app.storage.models import AgentConfig, Conversation, Org, User
 from app.storage.repositories.attachment import AttachmentRepository
-from app.storage.repositories.memory import MemoryRepository
 from app.storage.repositories.message import MessageRepository
 from tests.conftest import requires_db
 
@@ -78,7 +76,7 @@ async def _run_chat(chat_fixture, content: str, attachments: list[str] | None = 
     return frames
 
 
-async def test_chat_with_attachment_links_and_trace(chat_att_fixture):
+async def test_chat_with_attachment_links(chat_att_fixture):
     sessionmaker, org, user, agent, conv = chat_att_fixture
     # 先上传一个附件
     async with sessionmaker() as session:
@@ -94,12 +92,6 @@ async def test_chat_with_attachment_links_and_trace(chat_att_fixture):
         att = await AttachmentRepository(session).get(user.id, att_id)
         assert att.conversation_id == conv.id
         assert att.message_id == user_msg.id
-        # memory_trace 2 条（user + assistant）
-        traces = await MemoryRepository(session).list_traces(user.id, limit=10, offset=0)
-        assert [t.role for t in traces] == ["user", "assistant"]
-        assert traces[0].content == "看下这个附件"
-        assert traces[0].conversation_id == conv.id
-        assert traces[0].message_id == user_msg.id
 
 
 def test_chat_message_input_attachments_uuid_validation():
@@ -110,11 +102,9 @@ def test_chat_message_input_attachments_uuid_validation():
         ChatMessageInput(content="x", attachments=["not-a-uuid"])
 
 
-async def test_plain_text_still_records_trace(chat_att_fixture):
+async def test_plain_text_persists_message(chat_att_fixture):
     sessionmaker, org, user, agent, conv = chat_att_fixture
     await _run_chat(chat_att_fixture, "没有附件的消息")
     async with sessionmaker() as session:
-        traces = await MemoryRepository(session).list_traces(user.id, limit=10, offset=0)
-        assert len(traces) == 2  # 纯文本也落 trace
         msgs = await MessageRepository(session).list_by_conversation(conv.id)
         assert all(m.attachments is None or m.attachments == [] for m in msgs)

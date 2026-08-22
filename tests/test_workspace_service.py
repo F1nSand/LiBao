@@ -23,7 +23,6 @@ from app.storage.models import (
     Conversation,
     LongTermMemory,
     LongTermMemoryVersion,
-    MemoryTrace,
     Message,
     Org,
     RunLog,
@@ -120,7 +119,6 @@ async def test_hard_delete_cascades_all_workspace_rows(workspace_fixture):
         session.add_all(
             [
                 Message(conversation_id=conv_id, role="user", content="hi"),
-                MemoryTrace(user_id=user.id, conversation_id=conv_id, role="user", content="hi"),
                 RunLog(trace_id=f"t-{uuid.uuid4().hex}", session_id=conv_id),
                 Attachment(
                     user_id=user.id,
@@ -143,7 +141,6 @@ async def test_hard_delete_cascades_all_workspace_rows(workspace_fixture):
         await WorkspaceService().hard_delete(session, user, str(wid))
 
         assert await _count_rows(session, Message, "conversation_id", conv_id) == 0
-        assert await _count_rows(session, MemoryTrace, "conversation_id", conv_id) == 0
         assert await _count_rows(session, RunLog, "session_id", conv_id) == 0
         assert await _count_rows(session, Attachment, "conversation_id", conv_id) == 0
         assert await _count_rows(session, WebhookConfig, "conversation_id", conv_id) == 0

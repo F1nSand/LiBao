@@ -1,5 +1,19 @@
 # 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-20-m7b-workspace.md（M7-B）
 
+## 删除 memory_trace + maintenance 改读 messages + 「轨迹」改名「对话轨迹」（2026-08-22，L2）
+
+用户拍板：记忆页「轨迹」（memory_trace 原始聊天文本转储，与 messages 冗余）删除；会话轨迹保留并改名「对话轨迹」；主动记忆（记忆工具/Mem0）本轮不做。迁移 **0016**（drop memory_trace 表）。
+
+- **后端删 memory_trace**：`models/memory.py` 删 MemoryTrace 类；`repositories/memory.py` 删 4 个 trace 方法 + **新增 `recent_messages_for_maintenance`**（join conversations 过滤 user_id + role in(user,assistant) + 排除软删会话/消息，与旧 recent_traces 同「最近 N 条升序」语义）；`services/memory.py` 删 record_trace/list_traces + run_maintenance 改读 messages；`routers/memory.py` 删 GET /memory/traces；`serializers.py` 删 serialize_memory_trace；`config.py` memory_trace_limit → memory_maintenance_limit；`chat_stream.py` 删 5 处 record_trace（C8 单事务缩为 user_msg+附件回填+touch）。
+- **级联清理**：`workspace.py` `_cascade_delete_workspace` + `cleanup_test_orgs.py` 删 memory_trace 行。
+- **迁移 0016** `b8c9d0e1f2a3`：drop_table；downgrade 重建表 + 两索引。已应用（head）。
+- **测试**：6 文件改造（删 trace 用例/断言 + maintenance 改造 messages 数据源 + 新增 `test_maintenance_reads_recent_messages`）。全量 **393 passed + 2 跳过 + ruff**。
+- **前端**：MemoryView.vue 删「轨迹」tab（只留长期记忆 + 触发整理）；stores/api/types/mock 删 MemoryTrace；ChatView/WorkspaceChatPanel radio「轨迹」→「对话轨迹」+ e2e 文案。typecheck ✓ / lint 0err / **179 单测** / build ✓。
+- **docs 同步**：docs/00（记忆分层）/01（§8.1 记忆分层去轨迹）/02（「对话轨迹」+ 删命名警示）/03（删 GET /memory/traces）/04（删 §3.8 memory_trace + 目录树）。
+- **遗留**：主动记忆（记忆工具/Mem0）待议；`mcp_server.workspace_id` defer、run_log org 列、测试污染根治 L3 等不变。
+
+---
+
 ## 工作区硬删 + 文件树操作扩展（2026-08-22 完成，L2，交接板 [open] 收口）
 
 交接板 `[open]` →后端 项：工作区删除（硬删）+ 文件树操作契约扩展（rename/mkdir/目录递归删）。前端已实现（mock + 404 降级），本轮后端补齐。用户拍板：硬删时附件**连磁盘文件一起删**。plan：`docs/plans/2026-08-22-workspace-hard-delete-file-ops.md`。

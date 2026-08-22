@@ -43,7 +43,6 @@ from app.storage.models import (
     LongTermMemory,
     LongTermMemoryVersion,
     McpServer,
-    MemoryTrace,
     Message,
     Notification,
     Org,
@@ -111,9 +110,6 @@ async def main(dry_run: bool) -> None:
             )),
             ("attachments", delete(Attachment).where(
                 or_(Attachment.conversation_id.in_(conv_ids), Attachment.user_id.in_(user_ids))
-            )),
-            ("memory_trace", delete(MemoryTrace).where(
-                or_(MemoryTrace.conversation_id.in_(conv_ids), MemoryTrace.user_id.in_(user_ids))
             )),
             ("webhook_configs", delete(WebhookConfig).where(
                 or_(WebhookConfig.conversation_id.in_(conv_ids), WebhookConfig.org_id.in_(org_ids))

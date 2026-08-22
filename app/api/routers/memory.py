@@ -1,9 +1,9 @@
-"""记忆路由（docs 03 §5.7）。轨迹只读分页；长期记忆 CRUD（版本只增/软删）。"""
+"""记忆路由（docs 03 §5.7）。长期记忆 CRUD（版本只增/软删）+ maintenance（读最近 messages）。"""
 from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -14,17 +14,6 @@ from app.services.serializers import serialize_longterm
 from app.storage.models.user import User
 
 router = APIRouter()
-
-
-@router.get("/memory/traces")
-async def list_traces(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    conversation_id: uuid.UUID | None = Query(None),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    return ok(await MemoryService().list_traces(db, user.id, page, page_size, conversation_id))
 
 
 @router.get("/memory/longterm")

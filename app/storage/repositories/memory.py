@@ -1,64 +1,37 @@
-"""记忆数据访问（docs 04 §3.8）。轨迹 append-only；卡片软删过滤；版本 UNIQUE(memory_id, version)。"""
+"""记忆数据访问（docs 04 §3.8）。卡片软删过滤；版本 UNIQUE(memory_id, version)。
+maintenance 原料改读 messages（memory_trace 已删，见迁移 0016）。"""
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion, MemoryTrace
+from app.storage.models.conversation import Conversation
+from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion
+from app.storage.models.message import Message
 
 
 class MemoryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    # ---- 轨迹（append-only）----
+    # ---- maintenance 原料（改读 messages，docs 04 §3.2 message-as-log）----
 
-    async def add_trace(
-        self,
-        *,
-        user_id: uuid.UUID,
-        role: str,
-        content: str,
-        trace_id: str | None = None,
-        conversation_id: uuid.UUID | None = None,
-        message_id: uuid.UUID | None = None,
-        meta: dict | None = None,
-    ) -> MemoryTrace:
-        row = MemoryTrace(
-            user_id=user_id,
-            role=role,
-            content=content,
-            trace_id=trace_id,
-            conversation_id=conversation_id,
-            message_id=message_id,
-            meta=meta,
-        )
-        self.session.add(row)
-        return row
-
-    async def list_traces(
-        self, user_id: uuid.UUID, *, limit: int, offset: int, conversation_id: uuid.UUID | None = None
-    ) -> list[MemoryTrace]:
-        stmt = select(MemoryTrace).where(MemoryTrace.user_id == user_id)
-        if conversation_id is not None:
-            stmt = stmt.where(MemoryTrace.conversation_id == conversation_id)
-        stmt = stmt.order_by(MemoryTrace.created_at.asc()).limit(limit).offset(offset)
-        return list((await self.session.execute(stmt)).scalars())
-
-    async def count_traces(self, user_id: uuid.UUID, conversation_id: uuid.UUID | None = None) -> int:
-        stmt = select(func.count()).select_from(MemoryTrace).where(MemoryTrace.user_id == user_id)
-        if conversation_id is not None:
-            stmt = stmt.where(MemoryTrace.conversation_id == conversation_id)
-        return int((await self.session.execute(stmt)).scalar_one())
-
-    async def recent_traces(self, user_id: uuid.UUID, limit: int) -> list[MemoryTrace]:
+    async def recent_messages_for_maintenance(self, user_id: uuid.UUID, limit: int) -> list[Message]:
+        """maintenance 原料：该用户最近 user+assistant 消息（join conversations 过滤 user_id +
+        排除软删会话/软删消息）。与旧 recent_traces 同语义：最近 limit 条按时间升序。"""
         stmt = (
-            select(MemoryTrace)
-            .where(MemoryTrace.user_id == user_id)
-            .order_by(MemoryTrace.created_at.desc())
+            select(Message)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .where(
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+                Message.role.in_(("user", "assistant")),
+                Message.deleted_at.is_(None),
+            )
+            .order_by(Message.created_at.desc())
             .limit(limit)
         )
         return list(reversed((await self.session.execute(stmt)).scalars().all()))

@@ -8,7 +8,7 @@ from app.storage.models.conversation import Conversation
 from app.storage.models.eval import EvalCase, EvalResult, EvalRun, EvalSet
 from app.storage.models.kb import KbCollection, KbDocument
 from app.storage.models.mcp_server import McpServer
-from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion, MemoryTrace
+from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion
 from app.storage.models.message import Message
 from app.storage.models.notification import Notification
 from app.storage.models.run_log import RunLog
@@ -206,17 +206,6 @@ def serialize_kb_document(d: KbDocument) -> dict[str, Any]:
         "progress": kb_document_progress(d.status),
         "error": d.error,
         "created_at": _dt(d.created_at),
-    }
-
-
-def serialize_memory_trace(t: MemoryTrace) -> dict[str, Any]:
-    """轨迹序列化（docs 03 §5.7 / FrontEnd MemoryTrace）。summary 字段对齐前端（取 content）。"""
-    return {
-        "id": str(t.id),
-        "conversation_id": str(t.conversation_id) if t.conversation_id else None,
-        "summary": t.content,
-        "role": t.role,
-        "created_at": _dt(t.created_at),
     }
 
 
