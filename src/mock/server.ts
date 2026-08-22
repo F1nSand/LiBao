@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ChatRequest, KbCollection, KbDocument, Skill, ToolDefinition, Workspace } from '@/types'
 import {
   users,
-  candidates,
   DEFAULT_AGENT_ID,
   tools,
   skills,
@@ -271,42 +270,6 @@ export const mockServer = {
     }
     p = match(pathname, '/users/:id')
     if (method === 'DELETE' && p) return void json(res, ok(null))
-
-    /* ===== 经验候选区（M6 契约提案 docs/06 §5：候选 → 验证 → 批准 → 发布 → 回滚） ===== */
-    if (method === 'GET' && pathname === '/evolution/candidates') {
-      const page = Number(query.get('page') ?? 1)
-      const size = Number(query.get('page_size') ?? 20)
-      const status = query.get('status')
-      const search = query.get('search')?.trim()
-      let list = candidates
-      if (status) list = list.filter((c) => c.status === status)
-      if (search) list = list.filter((c) => c.title.includes(search))
-      return void json(res, ok(paginate(list, page, size)))
-    }
-    p = match(pathname, '/evolution/candidates/:id')
-    if (method === 'GET' && p) {
-      const c = candidates.find((x) => x.id === p!.id)
-      if (!c) return void json(res, fail(40401, '候选不存在'))
-      return void json(res, ok(c))
-    }
-    // 状态迁移表：candidate → 验证/拒绝 → approved/rejected → 发布 → published → 回滚 → rolled_back
-    const CANDIDATE_TRANSITIONS = {
-      validate: { from: 'candidate', to: 'approved', verb: '验证' },
-      publish: { from: 'approved', to: 'published', verb: '发布' },
-      reject: { from: 'candidate', to: 'rejected', verb: '拒绝' },
-      rollback: { from: 'published', to: 'rolled_back', verb: '回滚' },
-    } as const
-    for (const [action, spec] of Object.entries(CANDIDATE_TRANSITIONS)) {
-      p = match(pathname, `/evolution/candidates/:id/${action}`)
-      if (method === 'POST' && p) {
-        const c = candidates.find((x) => x.id === p!.id)
-        if (!c) return void json(res, fail(40401, '候选不存在'))
-        if (c.status !== spec.from) return void json(res, fail(40020, `状态 ${c.status} 不允许${spec.verb}`))
-        c.status = spec.to
-        c.updated_at = isoDate(0)
-        return void json(res, ok(c))
-      }
-    }
 
     /* ===== 会话 / 消息 ===== */
     if (method === 'GET' && pathname === '/conversations') {

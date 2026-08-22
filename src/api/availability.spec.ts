@@ -23,8 +23,9 @@ describe('availability 路由映射', () => {
     // evals/cost 契约层已随 UI 精简删除（08-20），未知路径不误标
     expect(featureForUrl('/system/evals/run')).toBeNull()
     expect(featureForUrl('/system/cost')).toBeNull()
-    expect(featureForUrl('/evolution/candidates')).toBe(FEATURE.evolution)
-    expect(featureForUrl('/evolution/candidates/cand_1/publish')).toBe(FEATURE.evolution)
+    // evolution 候选区已删除（08-22），未知路径不误标
+    expect(featureForUrl('/evolution/candidates')).toBeNull()
+    expect(featureForUrl('/evolution/candidates/cand_1/publish')).toBeNull()
     expect(featureForUrl('/skills')).toBe(FEATURE.skills)
     expect(featureForUrl('/skills/sk_001')).toBe(FEATURE.skills)
     expect(featureForUrl('/workspaces')).toBe(FEATURE.workspaces)

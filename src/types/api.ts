@@ -1,8 +1,6 @@
 /** REST 契约类型（对齐 docs/03 §2/§5、docs/04 §3，字段 snake_case） */
 import type {
   AttachmentStatus,
-  CandidateChangeType,
-  CandidateStatus,
   KbDocumentStatus,
   LogLevel,
   MessageRole,
@@ -417,30 +415,6 @@ export interface TraceEvent {
 export interface TraceDetail {
   trace_id: string
   events: TraceEvent[]
-}
-
-/** ---------- 经验候选区（M6，docs/06 §5 契约，后端已实现 08-18） ---------- */
-export interface Candidate {
-  id: string
-  title: string
-  source_conversation_id?: string
-  source_type: 'trajectory' | 'eval' | 'manual'
-  change_type: CandidateChangeType
-  status: CandidateStatus
-  /** 变更契约（docs/06 §5.6）：失败证据 */
-  evidence?: string
-  /** 推断根因 */
-  root_cause?: string
-  /** 候选修改 */
-  proposed_change?: string
-  /** 预期修复 */
-  expected_fix?: string
-  /** 受损行为 */
-  affected_behaviors?: string[]
-  /** 验证用例 */
-  validation_cases?: string[]
-  created_at: string
-  updated_at?: string
 }
 
 /** ---------- 附件 ---------- */

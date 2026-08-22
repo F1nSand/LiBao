@@ -19,7 +19,6 @@ export const FEATURE = {
   systemTrace: 'system.trace',
   hooks: 'hooks',
   providers: 'settings.providers',
-  evolution: 'evolution',
   skills: 'skills',
   workspaces: 'workspaces',
   workspaceReveal: 'workspaces.reveal',
@@ -39,7 +38,6 @@ const FEATURE_ROUTES: Array<[RegExp, Feature]> = [
   [/^\/system\/logs/, FEATURE.systemLogs],
   [/^\/hooks/, FEATURE.hooks],
   [/^\/settings\/providers/, FEATURE.providers],
-  [/^\/evolution/, FEATURE.evolution],
   [/^\/skills/, FEATURE.skills],
   [/^\/workspaces\/[^/]+\/files\/rename/, FEATURE.workspacesFiles],
   [/^\/workspaces\/[^/]+\/files/, FEATURE.workspacesFiles], // 覆盖 list/content/rename/mkdir/dir-delete；子操作 404 不折叠整页
