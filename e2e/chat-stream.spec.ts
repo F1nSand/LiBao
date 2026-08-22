@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { login, sendMessage } from './helpers'
+import { gotoChat, sendMessage } from './helpers'
 
 test.describe('对话流式（核心演示）', () => {
   test('计算 6*7 → 中断确认 → 回填 42 + 工具卡', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await sendMessage(page, '计算 6*7')
 
     // 中断确认弹窗
@@ -21,7 +21,7 @@ test.describe('对话流式（核心演示）', () => {
   })
 
   test('拒绝分支 → 显示已取消', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await sendMessage(page, '危险操作')
 
     await expect(page.locator('.el-dialog').filter({ hasText: '工具调用确认' })).toBeVisible({ timeout: 10_000 })
@@ -31,7 +31,7 @@ test.describe('对话流式（核心演示）', () => {
   })
 
   test('默认分支（web_search 占位→回填）', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await sendMessage(page, '什么是 SSE')
 
     await expect(page.locator('.tool-card')).toContainText('web_search', { timeout: 15_000 })

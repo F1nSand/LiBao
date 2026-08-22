@@ -1,12 +1,9 @@
 import type { Page } from '@playwright/test'
 
-/** 登录并等待进入 /chat */
-export async function login(page: Page, username = 'admin', password = 'admin123') {
-  await page.goto('/login')
-  await page.getByPlaceholder('请输入用户名').fill(username)
-  await page.getByPlaceholder('请输入密码').fill(password)
-  await page.getByRole('button', { name: /登\s*录/ }).click()
-  await page.waitForURL('**/chat')
+/** 单用户本地模式：无登录流程，直接进入 /chat 工作台（等 ChatView 挂载，避免懒加载路由竞态） */
+export async function gotoChat(page: Page) {
+  await page.goto('/chat')
+  await page.locator('.chat-view').waitFor({ state: 'visible', timeout: 15_000 })
   await page.locator('.sidebar').waitFor({ state: 'visible' })
 }
 

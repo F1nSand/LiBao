@@ -48,26 +48,6 @@ function updatePinned(): void {
   if (activeRun === -1 && conversationId.value) scrollPositions.set(conversationId.value, el.scrollTop)
 }
 
-onMounted(() => {
-  containerRef.value?.addEventListener('scroll', updatePinned, { passive: true })
-})
-onBeforeUnmount(() => {
-  scrollRun++ // 作废挂起跑批
-  containerRef.value?.removeEventListener('scroll', updatePinned)
-})
-
-// 内容版本号：覆盖消息追加 + 流式文本 + 工具/thinking/agent 段插入 + 完成/中断。
-// 之前只监听 partialText/messages.length，漏了 segments（thinking/工具卡/agent_switch 段插入时
-// scrollHeight 增长但 watch 不触发 → 流式中工具卡出现时滚动滞后一帧）。
-const contentVersion = computed(
-  () =>
-    `${props.messages.length}|${props.stream?.segments.length ?? 0}|${props.stream?.partialText?.length ?? 0}|${props.stream?.finished ?? false}|${props.stream?.interrupted ?? false}`,
-)
-// 内容变化（流式/新消息/工具段/完成）：仅当贴底时跟随（保持吸底），滚走则不动
-watch(contentVersion, () => {
-  if (pinned.value) scrollToStable('bottom')
-})
-
 /**
  * 滚动到目标并稳定：scrollHeight 真实（无 content-visibility），但新内容在 paint commit 时会重置 scrollTop——
  * 用「位置稳定性」追帧（scrollTop 停在目标处连续 3 帧才停，自然跨过 paint），最多 30 帧兜底。
@@ -103,20 +83,47 @@ function scrollToStable(target: 'bottom' | number): void {
   void nextTick(() => step())
 }
 
-/** 会话加载/切换（messages 引用替换）：有滚动记录 → 恢复原位；无记录（新/没开过）→ 默认到底；与吸底跟随 watch 并存 */
+/**
+ * 应用当前会话滚动：有记录 → 恢复原位；无记录（新/没开过）→ 默认到底。
+ * 挂载时消息已就绪（刷新 / 从其它路由返回 /chat 且已选中会话，或懒加载路由晚于会话选中）也会走这里——
+ * 原 { immediate: true } watch 在 setup 期 containerRef 为 null 会静默跳过，导致该场景永不贴底。
+ */
+function applyScrollTo(): void {
+  if (!props.messages.length) return
+  const saved = conversationId.value ? scrollPositions.get(conversationId.value) : undefined
+  if (saved != null) {
+    pinned.value = false // 立即取消贴底，防恢复期间被内容 watch 拉回
+    scrollToStable(saved)
+  } else {
+    scrollToStable('bottom')
+  }
+}
+
+onMounted(() => {
+  containerRef.value?.addEventListener('scroll', updatePinned, { passive: true })
+  applyScrollTo()
+})
+onBeforeUnmount(() => {
+  scrollRun++ // 作废挂起跑批
+  containerRef.value?.removeEventListener('scroll', updatePinned)
+})
+
+// 内容版本号：覆盖消息追加 + 流式文本 + 工具/thinking/agent 段插入 + 完成/中断。
+// 之前只监听 partialText/messages.length，漏了 segments（thinking/工具卡/agent_switch 段插入时
+// scrollHeight 增长但 watch 不触发 → 流式中工具卡出现时滚动滞后一帧）。
+const contentVersion = computed(
+  () =>
+    `${props.messages.length}|${props.stream?.segments.length ?? 0}|${props.stream?.partialText?.length ?? 0}|${props.stream?.finished ?? false}|${props.stream?.interrupted ?? false}`,
+)
+// 内容变化（流式/新消息/工具段/完成）：仅当贴底时跟随（保持吸底），滚走则不动
+watch(contentVersion, () => {
+  if (pinned.value) scrollToStable('bottom')
+})
+
+// 会话加载/切换（messages 引用替换）：恢复原位或贴底；与吸底跟随 watch 并存
 watch(
   () => props.messages,
-  () => {
-    if (!props.messages.length) return
-    const saved = conversationId.value ? scrollPositions.get(conversationId.value) : undefined
-    if (saved != null) {
-      pinned.value = false // 立即取消贴底，防恢复期间被内容 watch 拉回
-      scrollToStable(saved)
-    } else {
-      scrollToStable('bottom')
-    }
-  },
-  { immediate: true },
+  () => applyScrollTo(),
 )
 
 defineExpose({ containerRef })

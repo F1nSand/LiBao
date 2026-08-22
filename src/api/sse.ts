@@ -1,5 +1,4 @@
 import type { ChatRequest, SseEnvelope } from '@/types'
-import { getToken } from '@/utils/token'
 import { SseParser, SeqGuard } from '@/utils/sse-parser'
 import { markUnavailableForUrl } from './availability'
 
@@ -84,13 +83,11 @@ export async function streamChatAt(
   h: SseHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = getToken()
   return openSseStream(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(req),
     signal,
@@ -104,13 +101,11 @@ export async function streamTaskResume(
   h: SseHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = getToken()
   return openSseStream(`/api/v1/tasks/${taskId}/resume`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({ confirm }),
     signal,

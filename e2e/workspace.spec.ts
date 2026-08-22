@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { login } from './helpers'
+import { gotoChat } from './helpers'
 
 test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
   test('气泡网格：种子列表 + 新建 + 编辑卡片', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/workspace')
 
     // 种子 2 条气泡卡片
@@ -28,7 +28,7 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
   })
 
   test('进入详情：文件树展开/读文件 + 引用文件发送 + 工作区会话', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/workspace')
 
     // 进入产品文档工作区
@@ -63,7 +63,7 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
   })
 
   test('详情页：侧边栏折叠/展开（窄条保留）', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/workspace')
     await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
     await expect(page).toHaveURL(/\/workspace\/ws_001/)
@@ -84,7 +84,7 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
   })
 
   test('详情页：文件树轮询捕获外部更新（动态显示）', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/workspace')
     await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
     await expect(page).toHaveURL(/\/workspace\/ws_001/)
@@ -96,7 +96,7 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
   })
 
   test('详情页：打开本地文件夹按钮（mock 成功路径）', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/workspace')
     await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
     await expect(page).toHaveURL(/\/workspace\/ws_001/)
@@ -106,7 +106,7 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
   })
 
   test('详情页：.agent/ 项目级能力目录（skills/记忆/知识库，docs/02 §4.2）', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/workspace')
     await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
     await expect(page).toHaveURL(/\/workspace\/ws_001/)
@@ -124,7 +124,7 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
   })
 
   test('气泡网格：删除工作区（强确认输入名称，防误删）', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/workspace')
 
     // 新建临时工作区用于删除（不动种子数据）
@@ -149,7 +149,7 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
   })
 
   test('详情页：文件树三连菜单（新建文件/文件夹 + 重命名 + 删除）', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/workspace')
     await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
     await expect(page).toHaveURL(/\/workspace\/ws_001/)

@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { login } from './helpers'
+import { gotoChat } from './helpers'
 
 test.describe('知识库上传状态收敛（不刷新，mock 异步链 uploaded→indexed）', () => {
   test('kb_upload_converge：非空集合上传 → 自动 已索引 + chunks>0 + 重索引按钮', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/kb')
     await page.locator('.kb-collections').waitFor({ state: 'visible' })
 
@@ -24,7 +24,7 @@ test.describe('知识库上传状态收敛（不刷新，mock 异步链 uploaded
   })
 
   test('kb_upload_empty：空集合上传 → 同样自动收敛，不卡「已上传」', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/kb')
     await page.locator('.kb-collections').waitFor({ state: 'visible' })
 

@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { login } from './helpers'
+import { gotoChat } from './helpers'
 
 test.describe('Skills 管理页（M7-A 契约，交接板 2026-08-20）', () => {
   test('设置气泡 → /skills：种子列表 + 来源标签 + 启用开关（含确认）', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
 
     // 设置气泡 → 技能子项 → 跳转 /skills 且设置按钮高亮
     await page.locator('.settings-toggle').click()
@@ -29,7 +29,7 @@ test.describe('Skills 管理页（M7-A 契约，交接板 2026-08-20）', () => 
   })
 
   test('创建 / git 导入 / 删除 技能', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/skills')
     await expect(page.locator('.skill-table')).toBeVisible()
 

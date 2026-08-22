@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { login } from './helpers'
+import { gotoChat } from './helpers'
 
 test.describe('对话滚动位置（记忆/恢复 + 新会话贴底，docs/02 §6.2）', () => {
   test('c_scroll：新开默认到底；上滚后切走再回恢复原位', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
 
     // 打开长会话（无滚动记录 → 默认到底，最近对话）
     await page.locator('.conv-item:has-text("滚动测试长会话")').click()

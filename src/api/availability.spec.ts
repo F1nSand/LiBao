@@ -17,7 +17,6 @@ describe('availability 路由映射', () => {
     expect(featureForUrl('/notifications/stream')).toBe(FEATURE.notificationsStream)
     expect(featureForUrl('/notifications')).toBe(FEATURE.notifications)
     expect(featureForUrl('/notifications/123/read')).toBe(FEATURE.notifications)
-    expect(featureForUrl('/users')).toBe(FEATURE.users)
     expect(featureForUrl('/system/logs/trace/t1')).toBe(FEATURE.systemTrace)
     expect(featureForUrl('/system/logs')).toBe(FEATURE.systemLogs)
     // evals/cost 契约层已随 UI 精简删除（08-20），未知路径不误标
@@ -52,17 +51,17 @@ describe('availability 打标', () => {
   beforeEach(() => resetUnavailable())
 
   it('mark/isUnavailable 与 URL 级封装', () => {
-    expect(isUrlUnavailable('/users')).toBe(false)
-    markUnavailableForUrl('/users')
-    expect(isUnavailable(FEATURE.users)).toBe(true)
-    expect(isUrlUnavailable('/users')).toBe(true)
+    expect(isUrlUnavailable('/notifications')).toBe(false)
+    markUnavailableForUrl('/notifications')
+    expect(isUnavailable(FEATURE.notifications)).toBe(true)
+    expect(isUrlUnavailable('/notifications')).toBe(true)
     // 未标记组不受影响
     expect(isUrlUnavailable('/system/logs')).toBe(false)
   })
 
   it('markUnavailableForUrl 对未知路径静默（不误标）', () => {
     markUnavailableForUrl('/agents')
-    expect(isUnavailable(FEATURE.users)).toBe(false)
+    expect(isUnavailable(FEATURE.notifications)).toBe(false)
     expect(isUnavailable(FEATURE.trajectory)).toBe(false)
   })
 

@@ -4,7 +4,6 @@ import { ElMessage } from 'element-plus'
 import { listNotifications, markRead } from '@/api/notifications'
 import { FEATURE, isUnavailable } from '@/api/availability'
 import { useSSE } from '@/composables/useSSE'
-import { getToken } from '@/utils/token'
 import type { Notification } from '@/types'
 
 const items = ref<Notification[]>([])
@@ -28,16 +27,12 @@ async function load() {
 
 const sse = useSSE(
   '/api/v1/notifications/stream',
-  () => {
-    const token = getToken()
-    return {
-      method: 'GET',
-      headers: {
-        Accept: 'text/event-stream',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    }
-  },
+  () => ({
+    method: 'GET',
+    headers: {
+      Accept: 'text/event-stream',
+    },
+  }),
   {
     onEvent: (ev) => {
       const n = ev.payload as Notification

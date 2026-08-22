@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
 import { isSettingsRoute, menuItems, type MenuItem } from '@/router/routes'
-import { canAccess } from '@/router/guard'
 import { useMediaQuery } from '@/composables/useMediaQuery'
 import { NARROW_LAYOUT_MQ } from '@/constants/layout'
 import ConversationList from '@/components/business/ConversationList.vue'
@@ -13,7 +11,6 @@ import ConversationList from '@/components/business/ConversationList.vue'
  * 设置按钮弹气泡卡片（设置/任务/工具/记忆/系统），点击跳转。
  */
 const route = useRoute()
-const auth = useAuthStore()
 const userCollapsed = ref(false)
 /** 设置气泡开关 */
 const settingsOpen = ref(false)
@@ -23,12 +20,7 @@ const autoNarrow = computed(() => isNarrow.value && route.path !== '/chat')
 const collapsed = computed(() => autoNarrow.value || userCollapsed.value)
 
 function pick(paths: string[]): MenuItem[] {
-  return paths
-    .map((p) => menuItems.find((i) => i.path === p))
-    .filter(
-      (i): i is MenuItem =>
-        !!i && canAccess({ requiresAuth: true, roles: i.roles }, auth.role),
-    )
+  return paths.map((p) => menuItems.find((i) => i.path === p)).filter((i): i is MenuItem => !!i)
 }
 
 /** 菜单项高亮：/workspace/:id 命中「工作区」入口 */
@@ -42,10 +34,10 @@ const topItems = computed(() => pick(['/workspace', '/chat']))
 /** 底部：知识库 */
 const bottomItems = computed(() => pick(['/kb']))
 const settingsActive = computed(() => isSettingsRoute(route.path))
-/** 设置气泡内容：设置组子项（按角色过滤） */
+/** 设置气泡内容：设置组子项 */
 const settingsChildren = computed(() => {
   const s = menuItems.find((i) => i.path === '/settings')
-  return (s?.children ?? []).filter((item) => canAccess({ requiresAuth: true, roles: item.roles }, auth.role))
+  return s?.children ?? []
 })
 </script>
 

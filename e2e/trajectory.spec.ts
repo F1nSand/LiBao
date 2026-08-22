@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { login } from './helpers'
+import { gotoChat } from './helpers'
 
 test.describe('对话轨迹页', () => {
   test('深链 c_001：时间轴 + 台账（含 calculator）+ 选中联动详情 + 返回', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/trajectory/c_001')
 
     // 台账：user #1 与 calculator 工具行
@@ -29,7 +29,7 @@ test.describe('对话轨迹页', () => {
   })
 
   test('c_002：纯文本会话，无工具行', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/trajectory/c_002')
 
     await expect(page.locator('.tj-ledger')).toContainText('什么是 SSE', { timeout: 10_000 })
@@ -37,7 +37,7 @@ test.describe('对话轨迹页', () => {
   })
 
   test('跨视图定位：?focus=tc_seed 自动选中工具记录并打开详情', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/trajectory/c_001?focus=tc_seed')
 
     await expect(page.locator('.tj-cell.selected')).toContainText('calculator', { timeout: 10_000 })
@@ -45,7 +45,7 @@ test.describe('对话轨迹页', () => {
   })
 
   test('四种投影（顺序/耗时/时间/实际）均可渲染', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/trajectory/c_001')
     await page.locator('.tj-timeline').waitFor({ timeout: 10_000 })
 
@@ -58,7 +58,7 @@ test.describe('对话轨迹页', () => {
   })
 
   test('c_001：含 context（Diff）与 compaction 节点', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/trajectory/c_001')
     await page.locator('.tj-ledger').waitFor({ timeout: 10_000 })
 
@@ -67,7 +67,7 @@ test.describe('对话轨迹页', () => {
   })
 
   test('长会话 c_long：「加载更早」后节点数增加', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/trajectory/c_long')
     await page.locator('.tj-ledger').waitFor({ timeout: 10_000 })
 

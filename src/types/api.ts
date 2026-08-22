@@ -26,7 +26,7 @@ export interface Paged<T> {
   page_size: number
 }
 
-/** ---------- 认证 / 用户 ---------- */
+/** ---------- 用户（契约保留：role 为被动字段，前端单用户化后不再消费） ---------- */
 export interface User {
   id: string
   name: string
@@ -36,24 +36,6 @@ export interface User {
   org_name?: string
   enabled?: boolean
   created_at?: string
-}
-
-export interface LoginResponse {
-  token: string
-  user: User
-}
-
-export interface LoginRequest {
-  username: string
-  password: string
-}
-
-export interface CreateUserRequest {
-  username: string
-  password: string
-  name: string
-  role: Role
-  org_id?: string
 }
 
 /** ---------- 对话 / 消息 ---------- */

@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { login } from './helpers'
+import { gotoChat } from './helpers'
 
 test.describe('工具页：元工具与常规工具区分（docs 03 §5.5，meta 字段）', () => {
   test('tool_search 标记元工具 + 类别筛选 + 搜索排除元工具', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
     await page.goto('/tools')
     await page.locator('.tool-table').waitFor({ state: 'visible' })
 

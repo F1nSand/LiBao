@@ -1,4 +1,4 @@
-import type { ApiEnvelope, User } from '@/types'
+import type { ApiEnvelope } from '@/types'
 
 /** 随机 hex */
 export function randHex(len = 8): string {
@@ -33,23 +33,6 @@ export function fail(code: number, message: string): ApiEnvelope<null> {
 export function json(res: import('http').ServerResponse, body: unknown, status = 200): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(body))
-}
-
-/** mock token 格式：`mock.<base64url(userJson)>`（Node 侧，用 Buffer 支持中文） */
-export function signMockToken(user: Pick<User, 'id' | 'name' | 'role'>): string {
-  return `mock.${Buffer.from(JSON.stringify(user)).toString('base64url')}`
-}
-
-export function decodeMockToken(token: string | undefined): Pick<User, 'id' | 'name' | 'role'> | null {
-  if (!token?.startsWith('mock.')) return null
-  try {
-    const b64 = token.slice(5).replace(/-/g, '+').replace(/_/g, '/')
-    const parsed = JSON.parse(Buffer.from(b64, 'base64').toString('utf-8'))
-    if (parsed && parsed.id) return parsed
-  } catch {
-    /* ignore */
-  }
-  return null
 }
 
 export function isoDate(offsetMinutes: number): string {

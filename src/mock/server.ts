@@ -17,9 +17,12 @@ import {
   notifications,
   systemLogs,
 } from './db'
-import { ok, fail, json, signMockToken, decodeMockToken, paginate, uid, randHex, isoDate, fast } from './util'
+import { ok, fail, json, paginate, uid, randHex, isoDate, fast } from './util'
 import { buildChatScript, buildResumeScript, toEnvelope } from './stream'
 import { buildLongConversationNodes, buildTrajectoryNodes, paginateTrajectory } from './trajectory'
+
+/** 单用户本地模式：固定当前用户 = admin（mock 不再校验 token，用户仅用于归属字段） */
+const CURRENT_USER = users[0]
 
 /* ---------- 工具函数 ---------- */
 
@@ -76,14 +79,6 @@ function readBody(req: IncomingMessage): Promise<ParsedBody> {
       resolve({})
     })
   })
-}
-
-function currentUser(req: IncomingMessage): (typeof users)[number] | null {
-  const h = req.headers.authorization
-  if (!h?.startsWith('Bearer ')) return null
-  const decoded = decodeMockToken(h.slice(7))
-  if (!decoded) return null
-  return users.find((u) => u.id === decoded.id) ?? null
 }
 
 function parseUrl(req: IncomingMessage): { pathname: string; query: URLSearchParams } {
@@ -183,12 +178,11 @@ export const mockServer = {
   async handle(req: IncomingMessage, res: ServerResponse, _next: () => void): Promise<void> {
     const { pathname, query } = parseUrl(req)
     const method = (req.method ?? 'GET').toUpperCase()
-    const user = currentUser(req)
+    const user = CURRENT_USER
     const body = await readBody(req)
 
     // SSE 端点（无需鉴权前置在路由内处理）
     if (method === 'POST' && pathname === '/chat/stream') {
-      if (!user) return void json(res, fail(40101, '未登录'), 401)
       const chatReq = (body.json ?? {}) as ChatRequest
       // 新会话：先注册 conversation，保证消息可持久化回读（工作区对话带 workspace_id）
       if (!chatReq.conversation_id) {
@@ -220,56 +214,6 @@ export const mockServer = {
       return void sendSse(req, res, buildChatScript(chatReq))
     }
 
-    // 统一鉴权（login 除外）
-    if (pathname !== '/auth/login' && !user) {
-      return void json(res, fail(40101, '未登录或 token 失效'), 401)
-    }
-
-    /* ===== 认证 ===== */
-    if (method === 'POST' && pathname === '/auth/login') {
-      const { username, password } = body.json ?? {}
-      const u = users.find((x) => x.username === username && x.password === password)
-      // 业务错误走信封（HTTP 200 + code!=0），前端按 ApiError.code 分支提示
-      if (!u) return void json(res, fail(40101, '用户名或密码错误'))
-      return void json(res, ok({ token: signMockToken(u), user: { id: u.id, name: u.name, role: u.role, org_id: u.org_id, org_name: u.org_name } }))
-    }
-    if (method === 'POST' && pathname === '/auth/logout') return void json(res, ok(null))
-    if (method === 'GET' && pathname === '/auth/me') {
-      const u = { id: user!.id, name: user!.name, role: user!.role, org_id: user!.org_id, org_name: user!.org_name }
-      return void json(res, ok(u))
-    }
-
-    /* ===== 用户 ===== */
-    if (method === 'GET' && pathname === '/users') {
-      const page = Number(query.get('page') ?? 1)
-      const size = Number(query.get('page_size') ?? 20)
-      const items = users.map((u) => ({ id: u.id, username: u.username, name: u.name, role: u.role, org_id: u.org_id, org_name: u.org_name, enabled: u.enabled }))
-      return void json(res, ok(paginate(items, page, size)))
-    }
-    if (method === 'POST' && pathname === '/users') {
-      const b = body.json ?? {}
-      const nu = { id: uid('u'), username: b.username, password: b.password ?? 'pass123', name: b.name ?? b.username, role: b.role ?? 'viewer', org_id: b.org_id, org_name: b.org_name, enabled: true, created_at: isoDate(0) }
-      users.push(nu)
-      const u = { id: nu.id, username: nu.username, name: nu.name, role: nu.role, org_id: nu.org_id, org_name: nu.org_name, enabled: nu.enabled }
-      return void json(res, ok(u))
-    }
-    let p = match(pathname, '/users/:id/role')
-    if (method === 'PATCH' && p) {
-      const u = users.find((x) => x.id === p!.id)
-      if (!u) return void json(res, fail(40401, '用户不存在'))
-      u.role = body.json?.role ?? u.role
-      return void json(res, ok({ id: u.id, name: u.name, role: u.role }))
-    }
-    p = match(pathname, '/users/:id/status')
-    if (method === 'PATCH' && p) {
-      const u = users.find((x) => x.id === p!.id)
-      if (!u) return void json(res, fail(40401, '用户不存在'))
-      u.enabled = body.json?.enabled ?? u.enabled
-      return void json(res, ok({ id: u.id, name: u.name, enabled: u.enabled }))
-    }
-    p = match(pathname, '/users/:id')
-    if (method === 'DELETE' && p) return void json(res, ok(null))
-
     /* ===== 会话 / 消息 ===== */
     if (method === 'GET' && pathname === '/conversations') {
       const page = Number(query.get('page') ?? 1)
@@ -277,18 +221,18 @@ export const mockServer = {
       const wsId = query.get('workspace_id')
       // 按工作区过滤；无参时排除工作区会话（/chat 全局列表不含工作区对话，M7-B）
       const mine = conversations.filter(
-        (c) => c.user_id === user!.id && (wsId ? c.workspace_id === wsId : !c.workspace_id),
+        (c) => c.user_id === user.id && (wsId ? c.workspace_id === wsId : !c.workspace_id),
       )
       return void json(res, ok(paginate(mine, page, size)))
     }
     if (method === 'POST' && pathname === '/conversations') {
       const b = body.json ?? {}
-      const nc = { id: uid('c'), user_id: user!.id, agent_id: DEFAULT_AGENT_ID, title: b.title ?? '新会话', status: 'active', max_messages: 1000, workspace_id: b.workspace_id ?? undefined, created_at: isoDate(0) }
+      const nc = { id: uid('c'), user_id: user.id, agent_id: DEFAULT_AGENT_ID, title: b.title ?? '新会话', status: 'active', max_messages: 1000, workspace_id: b.workspace_id ?? undefined, created_at: isoDate(0) }
       conversations.unshift(nc)
       messages[nc.id] = []
       return void json(res, ok(nc))
     }
-    p = match(pathname, '/conversations/:id')
+    let p = match(pathname, '/conversations/:id')
     if (method === 'GET' && p) {
       const c = conversations.find((x) => x.id === p!.id)
       if (!c) return void json(res, fail(40401, '会话不存在'))
@@ -327,12 +271,12 @@ export const mockServer = {
       const b = body.json ?? {}
       const nw = {
         id: uid('ws'),
-        org_id: user!.org_id ?? 'org_1',
+        org_id: user.org_id ?? 'org_1',
         name: b.name ?? '未命名工作区',
         description: b.description ?? '',
         system_prompt_fragment: b.system_prompt_fragment ?? '',
         status: 'active',
-        created_by: user!.id,
+        created_by: user.id,
         created_at: isoDate(0),
       } as Workspace
       workspaces.unshift(nw)
@@ -526,7 +470,7 @@ export const mockServer = {
     if (method === 'POST' && pathname === '/skills') {
       const ns = {
         id: uid('sk'),
-        org_id: currentUser(req)?.org_id ?? 'org_1',
+        org_id: user.org_id ?? 'org_1',
         name: body.json?.name ?? `skill_${randHex(4)}`,
         description: body.json?.description ?? '',
         body: body.json?.body ?? '',
@@ -542,7 +486,7 @@ export const mockServer = {
       const repo = url.split('/').filter(Boolean).pop()?.replace(/\.git$/, '') ?? `skill_${randHex(4)}`
       const ns = {
         id: uid('sk'),
-        org_id: currentUser(req)?.org_id ?? 'org_1',
+        org_id: user.org_id ?? 'org_1',
         name: repo,
         description: `git 导入技能（${url}）`,
         body: '> 由 git 导入，正文待后端 clone 后解析 SKILL.md（mock 演示）',

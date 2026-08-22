@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { login } from './helpers'
+import { gotoChat } from './helpers'
 
 test.describe('主题配色切换器', () => {
   test('短袖按钮弹气泡；点选后主色变化并持久化；刷新保留', async ({ page }) => {
-    await login(page)
+    await gotoChat(page)
 
     // 短袖按钮存在（通知左侧）
     const btn = page.locator('.theme-btn')

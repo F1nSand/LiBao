@@ -1,51 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import {
-  listUsers,
-  createUser,
-  patchUserRole,
-  patchUserStatus,
-  deleteUser,
-} from '@/api/users'
 import { listHooks, registerHook, unregisterHook } from '@/api/hooks'
 import { listProviders, createProvider, updateProvider, deleteProvider } from '@/api/provider'
 import { FEATURE, isUnavailable } from '@/api/availability'
 import { swallowNotImplemented } from '@/utils/http-envelope'
 import { formatDate } from '@/utils/format'
 import EmptyState from '@/components/common/EmptyState.vue'
-import { ROLE_LABEL } from '@/constants/labels'
-import type { ProviderConfig, Role, User, WebhookConfig } from '@/types'
+import type { ProviderConfig, WebhookConfig } from '@/types'
 
-/** 设置（docs/02 §4 / docs/03 §5.1）：用户与权限 + Provider 配置 + Webhook 管理 */
-const tab = ref('users')
-
-const users = ref<User[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = 20
-const loading = ref(false)
-/** 后端未实现 /users（HTTP 404 打标）→ 用户 tab 显示空态 */
-const usersUnavailable = computed(() => isUnavailable(FEATURE.users))
-
-const createVisible = ref(false)
-/** 新建用户表单初始值（reset 与初始化共用同一工厂，防字段漂移） */
-const emptyCreateForm = () => ({ username: '', password: '', name: '', role: 'viewer' as Role, org_id: 'org_1' })
-const createForm = reactive(emptyCreateForm())
-
-/** 组织筛选（数据隔离：客户端过滤，不改 listUsers 契约；org_name 有则优先显示名称，回退 UUID） */
-const orgFilter = ref('all')
-const orgOptions = computed(() => {
-  const map = new Map<string, string>()
-  for (const u of users.value) {
-    if (!u.org_id) continue
-    if (!map.has(u.org_id)) map.set(u.org_id, u.org_name ?? u.org_id)
-  }
-  return [...map.entries()].map(([value, label]) => ({ value, label }))
-})
-const filteredUsers = computed(() =>
-  orgFilter.value === 'all' ? users.value : users.value.filter((u) => u.org_id === orgFilter.value),
-)
+/** 设置（docs/02 §4 / docs/03 §5.1）：单用户本地模式 → Provider 配置 + Webhook 管理 */
+const tab = ref('provider')
 
 /* ---------- Provider 配置（契约见 api/provider.ts，后端未实现走降级） ---------- */
 const providers = ref<ProviderConfig[]>([])
@@ -60,67 +25,10 @@ const hooksUnavailable = computed(() => isUnavailable(FEATURE.hooks))
 const hookDialog = ref(false)
 const hookForm = reactive({ tool_id: '', token: '', conversation_id: '' })
 
-async function load(pageNo = 1) {
-  loading.value = true
-  try {
-    // 后端未实现 /users → 返回 undefined（已打标），页面显示空态；其余错误照常抛
-    const res = await swallowNotImplemented(listUsers({ page: pageNo, page_size: pageSize }))
-    if (res) {
-      users.value = res.items
-      total.value = res.total
-      page.value = res.page
-    }
-  } finally {
-    loading.value = false
-  }
-}
-
 onMounted(() => {
-  void load()
   void loadProviders()
   void loadHooks()
 })
-
-async function onCreate() {
-  if (!createForm.username || !createForm.password) {
-    ElMessage.warning('请填写用户名与密码')
-    return
-  }
-  // 后端未实现写操作 → 返回 undefined（已打标，tab 折叠空态），不弹错不崩
-  const created = await swallowNotImplemented(
-    createUser({ ...createForm, name: createForm.name || createForm.username }),
-  )
-  if (created === undefined) return
-  createVisible.value = false
-  Object.assign(createForm, emptyCreateForm())
-  ElMessage.success('用户已创建')
-  await load()
-}
-
-async function onChangeRole(u: User, role: Role) {
-  const ok = await swallowNotImplemented(patchUserRole(u.id, role))
-  if (ok === undefined) return
-  u.role = role
-  ElMessage.success('角色已更新')
-}
-
-async function onChangeStatus(u: User, enabled: boolean) {
-  if (!enabled) {
-    await ElMessageBox.confirm(`禁用用户「${u.name}」将立即踢下线，确认？`, '禁用确认', { type: 'warning' })
-  }
-  const ok = await swallowNotImplemented(patchUserStatus(u.id, enabled))
-  if (ok === undefined) return
-  u.enabled = enabled
-  ElMessage.success(enabled ? '已启用' : '已禁用')
-}
-
-async function onDelete(u: User) {
-  await ElMessageBox.confirm(`确认删除用户「${u.name}」？（软删，保留历史）`, '删除确认', { type: 'warning' })
-  const ok = await swallowNotImplemented(deleteUser(u.id))
-  if (ok === undefined) return
-  ElMessage.success('已删除')
-  await load()
-}
 
 /* ---------- Provider 配置 ---------- */
 async function loadProviders() {
@@ -205,52 +113,11 @@ async function onDeleteHook(toolId: string) {
     <div class="app-page-header">
       <div>
         <h2 class="app-page-title">设置</h2>
-        <p class="app-page-subtitle">Provider / 用户与权限 / Webhook 管理</p>
+        <p class="app-page-subtitle">Provider 配置 / Webhook 管理</p>
       </div>
     </div>
 
     <el-tabs v-model="tab" class="settings-tabs">
-      <el-tab-pane label="用户与权限" name="users">
-        <template v-if="!usersUnavailable">
-          <div class="users-toolbar">
-            <el-select v-model="orgFilter" size="small" style="width: 130px">
-              <el-option label="全部组织" value="all" />
-              <el-option v-for="org in orgOptions" :key="org.value" :label="org.label" :value="org.value" />
-            </el-select>
-            <el-button type="primary" :icon="'Plus'" @click="createVisible = true">新建用户</el-button>
-          </div>
-          <el-table :data="filteredUsers" v-loading="loading" size="small">
-            <el-table-column prop="username" label="用户名" width="140" />
-            <el-table-column prop="name" label="姓名" width="140" />
-            <el-table-column prop="org_id" label="组织" width="120">
-              <template #default="{ row }"><span class="mono">{{ row.org_name ?? row.org_id ?? '—' }}</span></template>
-            </el-table-column>
-            <el-table-column label="角色" width="160">
-              <template #default="{ row }">
-                <el-select :model-value="row.role" size="small" @change="(r: Role) => onChangeRole(row, r)">
-                  <el-option v-for="(label, val) in ROLE_LABEL" :key="val" :label="label" :value="val" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="启用" width="90">
-              <template #default="{ row }">
-                <el-switch
-                  :model-value="row.enabled"
-                  size="small"
-                  @change="(v: boolean) => onChangeStatus(row, v)"
-                />
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="100" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" text type="danger" @click="onDelete(row)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </template>
-        <EmptyState v-else text="后端暂未实现用户与权限接口" />
-      </el-tab-pane>
-
       <!-- Provider 配置（契约见 api/provider.ts，后端未实现走降级） -->
       <el-tab-pane label="Provider 配置" name="provider">
         <template v-if="!providersUnavailable">
@@ -306,24 +173,6 @@ async function onDeleteHook(toolId: string) {
         <EmptyState v-else text="后端暂未实现 Webhook 接口" />
       </el-tab-pane>
     </el-tabs>
-
-    <el-dialog :model-value="createVisible" title="新建用户" width="440px" @close="createVisible = false">
-      <el-form label-width="80px">
-        <el-form-item label="用户名"><el-input v-model="createForm.username" /></el-form-item>
-        <el-form-item label="密码"><el-input v-model="createForm.password" type="password" /></el-form-item>
-        <el-form-item label="姓名"><el-input v-model="createForm.name" /></el-form-item>
-        <el-form-item label="组织"><el-input v-model="createForm.org_id" placeholder="如 org_1 / org_2" /></el-form-item>
-        <el-form-item label="角色">
-          <el-select v-model="createForm.role">
-            <el-option v-for="(label, val) in ROLE_LABEL" :key="val" :label="label" :value="val" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createVisible = false">取消</el-button>
-        <el-button type="primary" @click="onCreate">创建</el-button>
-      </template>
-    </el-dialog>
 
     <!-- 添加 Provider -->
     <el-dialog :model-value="providerDialog" title="添加 Provider" width="460px" @close="providerDialog = false">
