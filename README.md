@@ -3,7 +3,7 @@
 通用 Agent 平台的管理控制台（Vue 3 + Vite 5 + TypeScript + Pinia + Element Plus），
 按 `docs/02-frontend-design.md`（前端蓝本）与 `docs/03-api-contract.md`（唯一协议依据）实现。
 
-**功能**：对话工作台（SSE 流式 + 工具调用 + 中断确认）· Agent 管理 · 任务管理 · 工具管理 · 知识库 · 记忆 · 系统监控 · 设置（RBAC）。
+**功能**：对话工作台（SSE 流式 + 工具调用 + 中断确认）· 工作区 · 工具管理 · 技能 · 知识库 · 记忆 · 系统监控 · 设置（**单用户本地模式，无登录/无 RBAC**）。
 
 ## 快速开始
 
@@ -12,7 +12,7 @@ npm install
 npm run dev          # http://localhost:5173，默认启用内置 Mock
 ```
 
-Mock 演示账号：`admin/admin123`（管理员）· `dev/dev123`（开发者）· `viewer/viewer123`（访客）。
+单用户本地模式：固定 admin，无登录页、无多角色（`dev/dev123`、`viewer/viewer123` 已随 RBAC 删除）。
 
 ## 脚本
 
@@ -43,11 +43,11 @@ REST 统一信封、SSE 事件流（`message_start → token → tool_call → t
 ### 切换到真实后端
 
 1. 本地联调：`VITE_USE_MOCK=false npm run dev`（或改 `.env.development`），`/api` 会代理到 `VITE_API_PROXY`。
-2. 生产：`.env.production` 已设 `VITE_USE_MOCK=false`，构建产物由 nginx 托管并把 `/api/v1` 反代到后端（见 `nginx.conf`，SSE 需 `proxy_buffering off`）。
+2. 生产（本地单机化）：`.env.production` 已设 `VITE_USE_MOCK=false`；`npm run build` 产物由 FastAPI 静态托管（见根目录《本地单机化改造方案.md》），`/api/v1` 同源；后端需 SPA catch-all 支持深链刷新（交接板）。
 
 ## 流式渲染要点（docs/02 §5）
 
-- SSE 用 `fetch + ReadableStream`（POST 支持 body 与鉴权头），不用 EventSource。
+- SSE 用 `fetch + ReadableStream`（POST 支持 body），不用 EventSource（单用户模式无鉴权头）。
 - 事件信封 `{id, seq, type, ts, payload}`，`seq` 单调递增去重。
 - 流式期显示裸文本（打字机，rAF 合并帧），`done` 后一次性 Markdown 渲染。
 - 渲染管线固定 `DOMPurify 白名单净化 → markdown-it(GFM) → highlight.js`，LLM 输出视为不可信内容。
@@ -60,17 +60,17 @@ REST 统一信封、SSE 事件流（`message_start → token → tool_call → t
 src/
 ├── api/          # http.ts(信封) · sse.ts(fetch-SSE) · 各资源模块
 ├── mock/         # Vite middleware mock（plugin/server/db/stream/util）
-├── stores/       # Pinia：auth/chat/task/agent/tool/kb/memory/system
-├── router/       # 路由 + RBAC 守卫
-├── views/        # 9 个页面（login + 8 页）
+├── stores/       # Pinia：chat/kb/memory/skill/system/tool/trajectory/workspace
+├── router/       # 路由（无守卫，单用户直访）
+├── views/        # 10 个视图（无登录页）
 ├── components/   # layout/ · common/（MarkdownRenderer/JsonViewer/StatusTag…）· business/
 ├── composables/  # useChatStream/useSSE/useTaskPoll/useVirtualList
 ├── types/        # 与 03/04 契约对齐的 TS 类型（snake_case）
-├── utils/        # sse-parser/http-envelope/token/rAF/markdown/format
+├── utils/        # sse-parser/http-envelope/rAF/markdown/format
 └── styles/       # 设计令牌 + Element Plus 覆盖 + markdown
 ```
 
 ## 测试
 
-- 单测：`npm run test:unit`（SSE 解析、useChatStream 状态机、Markdown 渲染 XSS、http 信封、auth store、路由守卫等）。
-- e2e：`npx playwright install chromium` 后 `npm run test:e2e`（登录 → 流式 → 工具确认 → 中断拒绝 → 守卫）。
+- 单测：`npm run test:unit`（SSE 解析、useChatStream 状态机、Markdown 渲染 XSS、http 信封、可用性降级等）。
+- e2e：`npx playwright install chromium` 后 `npm run test:e2e`（直访 /chat → 流式 → 工具确认 → 中断拒绝 → 工作区/轨迹/滚动）。
