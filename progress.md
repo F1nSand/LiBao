@@ -1,5 +1,22 @@
 # 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-20-m7b-workspace.md（M7-B）
 
+## 会话收尾（2026-08-22 存档）
+
+**本会话完成链**（commit 链）：
+1. `104a68b` **工作区硬删 + 文件树操作扩展**（交接板 [open] 收口）——硬删级联 10 表 + 附件连删、rename/mkdir/目录递归删端点、cleanup 脚本补 skills/workspaces 表（修删 org 撞 FK 的既有 bug）
+2. `2c21408` **review/simplify gate**——C1（list_files Windows `\`→`.as_posix()`）/I1（rmtree 安全校验）/I2（类型冲突守卫）/I3（跨 org 隔离测试）/I4（docstring）+ Minor 三项（M1 硬删行锁 / M2 符号链接守卫 / M3 大小写改名）
+3. `d115c4d` **memory_trace 删除 + maintenance 改读 messages + 「轨迹」改名「对话轨迹」**（迁移 0016 已应用）
+4. 前端独立仓库 `6c08ac2`：记忆页清理 + radio 改名
+
+另完成：人设落库（seed 重跑，栗包生效，v3 published）。全量测试演进：375 → 391 → 392 → 393 全绿 + ruff；前端 179 单测 + 38 e2e。
+
+**待议/待办（下次开工从这里接）**：
+- **主动记忆方向**：加记忆工具（`tl_save_memory`/`tl_search_memory`，LLM 决定）vs 接 Mem0——用户未定
+- **M8 热点实测**：重启后端 → 工作区问「今天 GitHub 有哪些热门项目」（GITHUB_TOKEN 已配）
+- 留白（记录不修）：`mcp_server.workspace_id` defer、工作区端到端联调、run_log org 列、webhook 跨 org tool_id 碰撞、测试污染根治 L3
+
+---
+
 ## 删除 memory_trace + maintenance 改读 messages + 「轨迹」改名「对话轨迹」（2026-08-22，L2）
 
 用户拍板：记忆页「轨迹」（memory_trace 原始聊天文本转储，与 messages 冗余）删除；会话轨迹保留并改名「对话轨迹」；主动记忆（记忆工具/Mem0）本轮不做。迁移 **0016**（drop memory_trace 表）。
