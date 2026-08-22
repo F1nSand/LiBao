@@ -24,12 +24,12 @@ function typeOf(v: unknown): string {
       <button class="json-toggle" type="button" @click="expanded = !expanded">
         <span class="json-brace">{{ isArr ? '[' : '{' }}</span>
         <span v-if="!expanded" class="json-ellipsis"> … </span>
-        <span class="json-close-brace">{{ isArr ? ']' : '}' }}</span>
+        <span v-if="!expanded" class="json-close-brace">{{ isArr ? ']' : '}' }}</span>
       </button>
       <div v-show="expanded" class="json-children">
         <div v-for="(entry, i) in entries" :key="entry[0]" class="json-row">
-          <span class="json-key">{{ entry[0] }}</span>
-          <span class="json-colon">: </span>
+          <span v-if="!isArr" class="json-key">{{ entry[0] }}</span>
+          <span v-if="!isArr" class="json-colon">: </span>
           <JsonViewer v-if="typeof entry[1] === 'object' && entry[1] !== null" :data="entry[1]" />
           <span v-else class="json-value" :class="`t-${typeOf(entry[1])}`">
             {{ entry[1] === null ? 'null' : typeof entry[1] === 'string' ? `"${entry[1]}"` : String(entry[1]) }}
@@ -37,6 +37,10 @@ function typeOf(v: unknown): string {
           <span v-if="i < entries.length - 1" class="json-comma">,</span>
         </div>
       </div>
+      <!-- 闭括号放到内容末尾（与开括号同列），展开时才真正「框住」内容 -->
+      <button v-if="expanded" class="json-toggle json-close-toggle" type="button" @click="expanded = !expanded">
+        <span class="json-close-brace">{{ isArr ? ']' : '}' }}</span>
+      </button>
     </template>
     <template v-else>
       <span class="json-value" :class="`t-${typeOf(data)}`">
@@ -59,6 +63,9 @@ function typeOf(v: unknown): string {
   padding: 0;
   font-family: inherit;
   font-size: inherit;
+}
+.json-close-toggle {
+  display: block;
 }
 .json-brace,
 .json-close-brace {
