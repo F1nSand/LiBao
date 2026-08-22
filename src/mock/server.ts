@@ -20,7 +20,7 @@ import {
   systemLogs,
 } from './db'
 import { ok, fail, json, signMockToken, decodeMockToken, paginate, uid, randHex, isoDate, fast } from './util'
-import { buildChatScript, buildResumeScript, buildTaskEventsScript, toEnvelope } from './stream'
+import { buildChatScript, buildResumeScript, toEnvelope } from './stream'
 import { buildLongConversationNodes, buildTrajectoryNodes, paginateTrajectory } from './trajectory'
 
 /* ---------- 工具函数 ---------- */
@@ -501,7 +501,7 @@ export const mockServer = {
       }
       return void json(res, ok(null))
     }
-    /* 打开本地文件夹（交接板 2026-08-21 提案 →后端）：真实后端 OS reveal root_path；mock 返回成功 */
+    /* 打开本地文件夹（交接板 2026-08-21 契约，后端已实现 2f5c9e5；mock 返回成功） */
     p = match(pathname, '/workspaces/:id/reveal')
     if (method === 'POST' && p) {
       const w = workspaces.find((x) => x.id === p!.id)
@@ -509,42 +509,7 @@ export const mockServer = {
       return void json(res, ok(null))
     }
 
-    /* ===== 任务 ===== */
-    if (method === 'GET' && pathname === '/tasks') {
-      const page = Number(query.get('page') ?? 1)
-      const size = Number(query.get('page_size') ?? 20)
-      let list = tasks
-      const st = query.get('status')
-      if (st) list = list.filter((t) => t.status === st)
-      return void json(res, ok(paginate(list, page, size)))
-    }
-    if (method === 'POST' && pathname === '/tasks') {
-      const b = body.json ?? {}
-      const nt = { id: uid('task'), agent_id: DEFAULT_AGENT_ID, status: 'pending' as const, progress: 0, input: b.input, created_at: isoDate(0) }
-      tasks.unshift(nt)
-      return void json(res, ok({ task_id: nt.id }))
-    }
-    p = match(pathname, '/tasks/:id')
-    if (method === 'GET' && p) {
-      const t = tasks.find((x) => x.id === p!.id)
-      if (!t) return void json(res, fail(40402, '任务不存在'))
-      return void json(res, ok(t))
-    }
-    p = match(pathname, '/tasks/:id/events')
-    if ((method === 'GET' || method === 'POST') && p) {
-      // 契约/真实后端/TaskDetail 均为 GET（docs/03 §5.3）；POST 兼容保留
-      return void sendSse(req, res, buildTaskEventsScript(p.id))
-    }
-    p = match(pathname, '/tasks/:id/cancel')
-    if (method === 'POST' && p) {
-      const t = tasks.find((x) => x.id === p!.id)
-      if (t && (t.status === 'done' || t.status === 'cancelled')) return void json(res, fail(40902, '状态不可取消'))
-      if (t) {
-        t.status = 'cancelled'
-        t.updated_at = isoDate(0)
-      }
-      return void json(res, ok(null))
-    }
+    /* ===== 任务（仅中断恢复续流仍由 chat 使用；list/create/detail/events/cancel 已随任务页删除） ===== */
     p = match(pathname, '/tasks/:id/resume')
     if (method === 'POST' && p) {
       const approved = body.json?.confirm?.approved === true
@@ -872,7 +837,7 @@ export const mockServer = {
       return void json(res, ok(null))
     }
 
-    /* ===== Provider 配置（前端契约，mock 演示；真实后端待实现） ===== */
+    /* ===== Provider 配置（前端契约 docs/03 §5.6，后端已实现；mock 演示） ===== */
     if (method === 'GET' && pathname === '/settings/providers') return void json(res, ok(mockProviders))
     if (method === 'POST' && pathname === '/settings/providers') {
       const pv = { id: uid('pv'), ...(body.json ?? {}), has_key: !!body.json?.api_key, enabled: body.json?.enabled ?? true, created_at: isoDate(0) }

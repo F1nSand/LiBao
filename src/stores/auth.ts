@@ -68,10 +68,6 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async fetchMe() {
-      this.user = await apiMe()
-    },
-
     /** 401 联动：清会话并回登录页 */
     resetAndRedirect() {
       this.token = null

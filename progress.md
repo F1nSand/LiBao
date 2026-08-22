@@ -7,6 +7,8 @@
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+> **2026-08-22 存档（前端续作三连，commit 见下）**：①修工作区假降级——`FEATURE.workspacesFiles` 独立，文件子操作（rename/mkdir/目录删）404 不再折叠整页；②恢复 evolution 候选区 UI——独立页挂设置组（admin），还原 git 历史 EvolutionManage 组件 + EvolutionView + 路由/菜单/e2e；③CI 补 e2e + 工程收尾——lint:check、e2e job、.dockerignore、barrel 补 availability/evolution 导出、清死代码（uploads/kb/tool/notifications/auth/sse/mock tasks 路由，**保留 resume**）+ 陈旧注释更新。门禁：typecheck ✓ / lint:check 0err(3 既有 any) / **184 单测** / **38 e2e**（+2 evolution）。交接板 `[open] →后端` 仅剩：工作区硬删 + rename/mkdir/目录删 契约扩展。
+
 [open] 2026-08-21 · →后端 | **工作区删除（硬删）+ 文件树操作契约扩展（rename/mkdir/目录删）** | 用户决策：归档无恢复入口=假删除，改**真删除**；文件树增强行尾三连菜单。
       - 前端已实现（mock 先行 + 真实后端未实现时 catch 404 降级提示）：
         - `DELETE /workspaces/{id}` 前端按**硬删**处理（mock：splice + 级联清理文件树/内容/工作区会话/消息；卡片强确认输入名称防误删）——**请后端把 DELETE 从软删归档改为硬删**（删 root_path 目录 + DB 行 + 级联对话/记忆/文件），docs/03 L393 同步；
@@ -32,9 +34,10 @@
         ④ **兼容拍板**：`workspace_skill` 表**从未实现**（M7-B T7a 就是纯文件扫描，docs 里只是规划残留）——无表要废弃，`.agent/` 文件即事实源；`longterm_memory.workspace_id` 保留（DB 记忆隔离不变）；
         ⑤ docs 00/01/03/04 已同步（移除 `workspace_skill` 表描述、补 `.agent/` 机制）。前端零改动。
 
-[open] 2026-08-21 · →后端 | **POST /workspaces/{id}/reveal（OS 打开 root_path 本地文件夹）** | 工作区资源管理器「打开本地文件夹」按钮（M7-B 增强，用户需求）。
+[done] 2026-08-21 · →后端 | **POST /workspaces/{id}/reveal（OS 打开 root_path 本地文件夹）** | 工作区资源管理器「打开本地文件夹」按钮（M7-B 增强，用户需求）。
       - 前端已实现：api `revealWorkspace` + mock 路由（POST → ok(null)）+ 404 降级（isNotImplementedError → toast + 复制 root_path）；`FEATURE.workspaces.reveal` 独立降级（防 404 误标整个 workspaces 不可用）。
       - 请后端实现：`POST /api/v1/workspaces/{id}/reveal`，workspace 存在校验（40401）+ OS 打开 root_path 所在文件夹（Windows `os.startfile` / Linux `xdg-open`），仅 developer+；`Workspace.root_path` 字段已在契约。未实现时前端自动降级复制路径，不阻塞。
+      - ✅ **后端已实现（2026-08-21，commit 2f5c9e5）**：`WorkspaceService.reveal`（存在校验 + org 隔离）+ `/workspaces/{id}/reveal` 路由（developer+），Windows `os.startfile` / macOS `open` / Linux `xdg-open`。注：workspace 不存在返回 **40416**（非前端写的 40401）；前端 `isNotImplementedError` 只看 HTTP 404、不依赖业务码，无需改动。
 
 [done] 2026-08-20 · ←后端 | **M7-B：工作区后端已落地（workspace + 文件操作 + 项目级 agent）** | 契约如下，前端可先就绪 types/mock/UI。
       - 后端本轮交付：

@@ -34,10 +34,6 @@ export function uploadDocument(collectionId: string, file: File, onProgress?: (p
   })
 }
 
-export function getDocument(id: string) {
-  return httpGet<KbDocument>(`/kb/documents/${id}`)
-}
-
 export function getDocumentStatus(id: string) {
   return httpGet<KbDocumentStatusDetail>(`/kb/documents/${id}/status`)
 }

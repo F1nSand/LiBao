@@ -2,8 +2,8 @@ import { httpGet, httpPost } from './http'
 import type { Candidate, CandidateStatus, Paged } from '@/types'
 
 /**
- * 经验候选区（docs/06 §5 契约提案，mock 演示；真实后端未实现时 FEATURE.evolution 降级）。
- * 闭环：候选 → 验证 → 批准 → 发布 → 回滚。
+ * 经验候选区（docs/06 §5 契约，后端已实现 08-18）：候选 → 验证 → 批准 → 发布 → 回滚。
+ * availability 降级仅兜底。
  */
 export function listCandidates(params: {
   status?: CandidateStatus

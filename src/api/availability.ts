@@ -25,6 +25,7 @@ export const FEATURE = {
   skills: 'skills',
   workspaces: 'workspaces',
   workspaceReveal: 'workspaces.reveal',
+  workspacesFiles: 'workspaces.files',
 } as const
 export type Feature = (typeof FEATURE)[keyof typeof FEATURE]
 
@@ -44,6 +45,8 @@ const FEATURE_ROUTES: Array<[RegExp, Feature]> = [
   [/^\/settings\/providers/, FEATURE.providers],
   [/^\/evolution/, FEATURE.evolution],
   [/^\/skills/, FEATURE.skills],
+  [/^\/workspaces\/[^/]+\/files\/rename/, FEATURE.workspacesFiles],
+  [/^\/workspaces\/[^/]+\/files/, FEATURE.workspacesFiles], // 覆盖 list/content/rename/mkdir/dir-delete；子操作 404 不折叠整页
   [/^\/workspaces\/[^/]+\/reveal/, FEATURE.workspaceReveal],
   [/^\/workspaces/, FEATURE.workspaces],
 ]

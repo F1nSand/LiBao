@@ -116,20 +116,3 @@ export async function streamTaskResume(
     signal,
   }, h)
 }
-
-/** 任务事件订阅：GET /api/v1/tasks/{id}/events（docs/03 §5.3，SSE） */
-export function streamTaskEvents(
-  taskId: string,
-  h: SseHandlers,
-  signal?: AbortSignal,
-): Promise<void> {
-  const token = getToken()
-  return openSseStream(`/api/v1/tasks/${taskId}/events`, {
-    method: 'GET',
-    headers: {
-      Accept: 'text/event-stream',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    signal,
-  }, h)
-}

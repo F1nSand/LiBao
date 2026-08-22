@@ -12,10 +12,6 @@ export function listTools(params: { page?: number; page_size?: number; enabled?:
   return httpGet<Paged<ToolDefinition>>('/tools', { params })
 }
 
-export function getTool(id: string) {
-  return httpGet<ToolDefinition>(`/tools/${id}`)
-}
-
 export function createTool(body: CreateToolRequest) {
   return httpPost<ToolDefinition>('/tools', body)
 }

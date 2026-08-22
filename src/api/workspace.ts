@@ -24,7 +24,7 @@ export function deleteWorkspace(id: string) {
   return httpDelete<null>(`/workspaces/${encodeURIComponent(id)}`)
 }
 
-/** 打开本地文件夹（OS reveal root_path；交接板 2026-08-21 提案，真实后端未实现时前端降级） */
+/** 打开本地文件夹（OS reveal root_path；交接板 2026-08-21 契约，后端已实现 2f5c9e5） */
 export function revealWorkspace(id: string) {
   return httpPost<null>(`/workspaces/${encodeURIComponent(id)}/reveal`)
 }

@@ -27,7 +27,11 @@ describe('availability 路由映射', () => {
     expect(featureForUrl('/skills')).toBe(FEATURE.skills)
     expect(featureForUrl('/skills/sk_001')).toBe(FEATURE.skills)
     expect(featureForUrl('/workspaces')).toBe(FEATURE.workspaces)
-    expect(featureForUrl('/workspaces/ws_001/files')).toBe(FEATURE.workspaces)
+    expect(featureForUrl('/workspaces/ws_001')).toBe(FEATURE.workspaces)
+    // 文件子操作独立成 feature，404 不折叠整页
+    expect(featureForUrl('/workspaces/ws_001/files')).toBe(FEATURE.workspacesFiles)
+    expect(featureForUrl('/workspaces/ws_001/files/content')).toBe(FEATURE.workspacesFiles)
+    expect(featureForUrl('/workspaces/ws_001/files/rename')).toBe(FEATURE.workspacesFiles)
     expect(featureForUrl('/workspaces/ws_001/reveal')).toBe(FEATURE.workspaceReveal)
   })
 

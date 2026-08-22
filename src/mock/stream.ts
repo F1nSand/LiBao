@@ -314,26 +314,6 @@ export function buildResumeScript(taskId: string, approved: boolean): SseScriptI
   ]
 }
 
-/** 任务事件订阅回放：模拟 status → progress → done */
-export function buildTaskEventsScript(taskId: string): SseScriptItem[] {
-  return [
-    { type: 'status', payload: { status: 'running' }, delayMs: delay(60) },
-    { type: 'run_progress', payload: { stage: 'thinking', progress: 20 }, delayMs: delay(120) },
-    {
-      type: 'agent_switch',
-      payload: { from_agent: '通用助手', to_agent: 'proposal_review', reason: '方案需评审' },
-      delayMs: delay(140),
-    },
-    { type: 'status', payload: { status: 'running' }, delayMs: delay(160) },
-    { type: 'run_progress', payload: { stage: 'executing', progress: 80 }, delayMs: delay(200) },
-    {
-      type: 'done',
-      payload: { message_id: `msg_${taskId}`, token_usage: { total_tokens: 120 }, cost: 0.002 },
-      delayMs: delay(180),
-    },
-  ]
-}
-
 /** 生成单个 SSE 信封（由 server 写流） */
 export function toEnvelope(item: SseScriptItem, seq: number): SseEnvelope {
   return { id: `evt_${seq}`, seq, type: item.type, ts: Date.now(), payload: item.payload }

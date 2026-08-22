@@ -1,7 +1,7 @@
 import { httpGet, httpPost, httpPatch, httpDelete } from './http'
 import type { Paged, Skill, CreateSkillRequest, ImportSkillRequest } from '@/types'
 
-/** Skills 管理（M7-A 契约，交接板 2026-08-20；docs/03 §5 待后端补小节） */
+/** Skills 管理（M7-A 契约，交接板 2026-08-20；docs/03 §5.15） */
 export function listSkills(params: { page?: number; page_size?: number } = {}) {
   return httpGet<Paged<Skill>>('/skills', { params })
 }

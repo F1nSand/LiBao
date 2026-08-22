@@ -8,7 +8,3 @@ export function listNotifications(params: { page?: number; page_size?: number } 
 export function markRead(id: string) {
   return httpPatch<Notification>(`/notifications/${id}/read`)
 }
-
-export function markAllRead(ids: string[]) {
-  return Promise.all(ids.map((id) => markRead(id)))
-}
