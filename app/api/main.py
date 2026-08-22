@@ -107,10 +107,20 @@ def create_app() -> FastAPI:
     if dist.is_dir():
 
         class SPAStaticFiles(StaticFiles):
-            """SPA fallback：非 /api 路径 404 → index.html（前端深链刷新可直达）。"""
+            """SPA fallback：非 /api 路径 404 → index.html（前端深链刷新可直达）。
+
+            starlette 1.6：文件缺失时 get_response 抛 HTTPException(404)（非返回响应）。
+            """
 
             async def get_response(self, path: str, scope):
-                response = await super().get_response(path, scope)
+                from starlette.exceptions import HTTPException
+
+                try:
+                    response = await super().get_response(path, scope)
+                except HTTPException as exc:
+                    if exc.status_code == 404 and not path.startswith("api"):
+                        return await super().get_response("index.html", scope)
+                    raise
                 if response.status_code == 404 and not path.startswith("api"):
                     response = await super().get_response("index.html", scope)
                 return response
