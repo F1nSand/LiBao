@@ -13,7 +13,6 @@ import {
   tasks,
   kbCollections,
   kbDocuments,
-  memoryTraces,
   longtermMemories,
   notifications,
   systemLogs,
@@ -635,11 +634,6 @@ export const mockServer = {
     }
 
     /* ===== 记忆 ===== */
-    if (method === 'GET' && pathname === '/memory/traces') {
-      const page = Number(query.get('page') ?? 1)
-      const size = Number(query.get('page_size') ?? 20)
-      return void json(res, ok(paginate(memoryTraces, page, size)))
-    }
     if (method === 'GET' && pathname === '/memory/longterm') return void json(res, ok(longtermMemories))
     if (method === 'POST' && pathname === '/memory/longterm') {
       const b = body.json ?? {}

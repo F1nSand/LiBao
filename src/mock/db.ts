@@ -3,7 +3,6 @@ import type {
   KbCollection,
   KbDocument,
   LongTermMemory,
-  MemoryTrace,
   Message,
   Notification,
   Skill,
@@ -305,11 +304,6 @@ export const kbDocuments: KbDocument[] = [
   { id: 'kbd_001', collection_id: 'kbc_001', name: '入门指南.md', mime_type: 'text/markdown', size: 12_400, status: 'indexed', chunk_count: 18, progress: 100, created_at: isoDate(120) },
   { id: 'kbd_002', collection_id: 'kbc_001', name: 'API 参考.md', mime_type: 'text/markdown', size: 33_800, status: 'indexed', chunk_count: 41, progress: 100, created_at: isoDate(110) },
   { id: 'kbd_003', collection_id: 'kbc_002', name: '代码规范.md', mime_type: 'text/markdown', size: 8_900, status: 'indexed', chunk_count: 12, progress: 100, created_at: isoDate(90) },
-]
-
-export const memoryTraces: MemoryTrace[] = [
-  { id: 'mt_001', conversation_id: 'c_001', summary: '用户询问数学计算', created_at: isoDate(60) },
-  { id: 'mt_002', conversation_id: 'c_002', summary: '用户了解流式协议', created_at: isoDate(30) },
 ]
 
 export const longtermMemories: LongTermMemory[] = [

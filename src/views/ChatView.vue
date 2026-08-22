@@ -132,7 +132,7 @@ function onKeydown(e: KeyboardEvent) {
       <div class="chat-toolbar">
         <el-radio-group v-model="mode" size="small">
           <el-radio-button value="chat">会话</el-radio-button>
-          <el-radio-button value="trajectory" :disabled="!chat.currentId">轨迹</el-radio-button>
+          <el-radio-button value="trajectory" :disabled="!chat.currentId">对话轨迹</el-radio-button>
         </el-radio-group>
         <StatusTag :status="currentStream.status ?? ''" />
       </div>

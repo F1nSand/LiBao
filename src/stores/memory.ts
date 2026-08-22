@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import {
-  listTraces,
   listLongterm,
   createLongterm,
   listLongtermVersions,
@@ -12,21 +11,15 @@ import type {
   LongTermMemory,
   LongTermMemoryVersion,
   MemoryMaintenanceResult,
-  MemoryTrace,
 } from '@/types'
 
-/** 记忆 store（docs/02 §7）：轨迹 + 长期记忆（只增版本化） */
+/** 记忆 store（docs/02 §7）：长期记忆（只增版本化）+ maintenance 整理 */
 export const useMemoryStore = defineStore('memory', {
   state: () => ({
-    traces: [] as MemoryTrace[],
     longterm: [] as LongTermMemory[],
     loading: false,
   }),
   actions: {
-    async listTraces() {
-      const res = await listTraces({ page_size: 50 })
-      this.traces = res.items
-    },
     async listLongterm() {
       this.longterm = await listLongterm()
     },

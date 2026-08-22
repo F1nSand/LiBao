@@ -13,6 +13,8 @@
 
 > **2026-08-22 三次存档（用户判定候选区无用 → 删除，commit 见下）**：**删除设置组「候选区」（/evolution）功能**——用户认为无用，采用「连契约层一起删」干净方案。整删 7 文件（EvolutionView/EvolutionManage/api/evolution/store/evolution/2 spec/e2e）；共享文件删 evolution 片段（routes 菜单+SETTINGS_ROUTES+路由、api/index barrel、availability FEATURE.evolution+路由、types/domain CandidateStatus/ChangeType、types/api Candidate、labels CANDIDATE_*、mock/db candidates 种子、mock/server /evolution 路由）；测试断言同步（availability.spec 改 toBeNull、routes.spec 数组、restructure.spec 计数 6→5）。门禁：typecheck ✓ / lint:check 0err(3 既有 any) / **179 单测**（−5）/ **36 e2e**（−2）。后端 `/evolution/candidates*` 已实现前端不再消费，交接板保持全 [done]。
 
+> **2026-08-22 四次存档（记忆页清理，commit 见下）**：删 **MemoryTrace 契约层**（记忆页「轨迹」tab 无实用价值）——`types/api.ts MemoryTrace` + `api/memory.ts listTraces` + `stores/memory.ts traces state/listTraces` + mock `memoryTraces` 种子 + mock `/memory/traces` 路由 + `MemoryView.vue` 轨迹 tab 全删（保留长期记忆 tab + maintenance）；「轨迹」改「对话轨迹」文案（ChatView/WorkspaceChatPanel 的 radio + restructure.spec 断言同步）。门禁：typecheck ✓ / lint:check 0err(3 既有 any) / **179 单测** / **36 e2e**。交接板保持全 [done]。
+
 [done] 2026-08-21 · →后端（**2026-08-22 后端已实现**） | **工作区删除（硬删）+ 文件树操作契约扩展（rename/mkdir/目录删）** | 用户决策：归档无恢复入口=假删除，改**真删除**；文件树增强行尾三连菜单。
       - 前端已实现（mock 先行 + 真实后端未实现时 catch 404 降级提示）：
         - `DELETE /workspaces/{id}` 前端按**硬删**处理（mock：splice + 级联清理文件树/内容/工作区会话/消息；卡片强确认输入名称防误删）——**请后端把 DELETE 从软删归档改为硬删**（删 root_path 目录 + DB 行 + 级联对话/记忆/文件），docs/03 L393 同步；

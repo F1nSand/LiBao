@@ -347,13 +347,6 @@ export interface KbSearchHit {
 }
 
 /** ---------- 记忆 ---------- */
-export interface MemoryTrace {
-  id: string
-  conversation_id: string
-  summary: string
-  created_at: string
-}
-
 export interface LongTermMemory {
   id: string
   card_type: 'json_card' | 'note'

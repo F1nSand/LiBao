@@ -1,16 +1,10 @@
 import { httpGet, httpPost, httpDelete } from './http'
 import type {
-  Paged,
-  MemoryTrace,
   LongTermMemory,
   LongTermMemoryVersion,
   CreateLongTermMemoryRequest,
   MemoryMaintenanceResult,
 } from '@/types'
-
-export function listTraces(params: { page?: number; page_size?: number; conversation_id?: string } = {}) {
-  return httpGet<Paged<MemoryTrace>>('/memory/traces', { params })
-}
 
 export function listLongterm() {
   return httpGet<LongTermMemory[]>('/memory/longterm')
