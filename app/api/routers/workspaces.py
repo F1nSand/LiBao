@@ -6,7 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_developer
 from app.api.envelope import ok
-from app.api.schemas.workspace import CreateWorkspaceRequest, UpdateWorkspaceRequest, WriteFileRequest
+from app.api.schemas.workspace import (
+    CreateWorkspaceRequest,
+    RenameFileRequest,
+    UpdateWorkspaceRequest,
+    WriteFileRequest,
+)
 from app.services.serializers import serialize_workspace
 from app.services.workspace import WorkspaceService
 from app.storage.models.user import User
@@ -62,7 +67,7 @@ async def delete_workspace(
     user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
-    await WorkspaceService().soft_delete(db, user, workspace_id)
+    await WorkspaceService().hard_delete(db, user, workspace_id)
     return ok()
 
 
@@ -106,7 +111,19 @@ async def write_file(
     user: User = Depends(require_developer),
     db: AsyncSession = Depends(get_db),
 ):
-    return ok(await WorkspaceService().write_file(db, user, workspace_id, req.path, req.content))
+    return ok(await WorkspaceService().write_file(db, user, workspace_id, req.path, req.content, req.is_dir))
+
+
+@router.patch("/workspaces/{workspace_id}/files/rename")
+async def rename_file(
+    workspace_id: str,
+    req: RenameFileRequest,
+    user: User = Depends(require_developer),
+    db: AsyncSession = Depends(get_db),
+):
+    """重命名文件/文件夹（目录子项前缀自动同步；docs 03 §5.14）。"""
+    await WorkspaceService().rename_file(db, user, workspace_id, req.old_path, req.new_path)
+    return ok()
 
 
 @router.delete("/workspaces/{workspace_id}/files")

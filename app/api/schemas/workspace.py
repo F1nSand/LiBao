@@ -18,4 +18,10 @@ class UpdateWorkspaceRequest(BaseModel):
 
 class WriteFileRequest(BaseModel):
     path: str
-    content: str
+    content: str = ""  # is_dir=true 时为空（新建文件夹）
+    is_dir: bool = False  # true = 新建文件夹（幂等），false = 写/创建文件
+
+
+class RenameFileRequest(BaseModel):
+    old_path: str
+    new_path: str

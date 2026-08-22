@@ -1,5 +1,22 @@
 # 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-20-m7b-workspace.md（M7-B）
 
+## 工作区硬删 + 文件树操作扩展（2026-08-22 完成，L2，交接板 [open] 收口）
+
+交接板 `[open]` →后端 项：工作区删除（硬删）+ 文件树操作契约扩展（rename/mkdir/目录递归删）。前端已实现（mock + 404 降级），本轮后端补齐。用户拍板：硬删时附件**连磁盘文件一起删**。plan：`docs/plans/2026-08-22-workspace-hard-delete-file-ops.md`。
+
+- **硬删** `DELETE /workspaces/{id}`：`soft_delete` → `hard_delete`。新增 `_cascade_delete_workspace`（叶子→根逆依赖序：longterm_memory_version→longterm_memory→messages→run_logs→attachments→memory_trace→webhook_configs→candidates→conversations→workspaces，先物化 id/附件路径）+ `_purge_workspace_files`（rmtree + 附件 unlink，best-effort 容 Windows 锁）；事务边界 DB 先 commit 后 `to_thread` 磁盘清理。`WorkspaceRepository.soft_delete` 一并删除。
+- **rename** `PATCH /files/rename`：`rename_file`（old/new 过 `resolve_workspace_path`；禁 root / 源不存在 / 目标已存在 / 自身子路径成环 全 40302；old==new no-op；目录重命名整棵子树跟随）。
+- **mkdir** `POST /files {is_dir:true}`：`WriteFileRequest` 加 `is_dir` + `content` 默认空；`write_file` is_dir 分支幂等建目录 + 空路径守卫。**响应统一 WorkspaceFile 形状** `{name,path,is_dir,size}`（原 `{path,written}` 与前端类型不符，属契约收紧）。
+- **目录递归删** `DELETE /files?path=`：`delete_file` 目录分支 `shutil.rmtree`（to_thread）+ 禁删 root 守卫（原「目录删除暂不支持」移除）。
+- **清理脚本修复**（范围外增项，用户已拍板保留）：`cleanup_test_orgs.py` 漏 M7-A `skills` + M7-B `workspaces` 两张表（删 org 撞 FK）→ 补两行 delete + import。跑通后清理累积污染 org=2887（含 170 工作区、137 skills）→ orgs=1。
+- **测试**：test_workspace_service 删 `test_soft_delete`、增 17 项（硬删级联归零/磁盘删/隔离/40416 + rename 8 边界 + mkdir 4 + 目录递归删 2）；全量 **391 passed + ruff 干净**。
+- **HTTP 冒烟**：建工作区 → 写文件（返回 is_dir:false/size:11）→ mkdir → rename → 目录递归删 → 硬删 → 取回 40416 + root 目录消失，全链通过。
+- **docs 同步**：docs/03 §5.14 L393 DELETE 改硬删 + L401 POST is_dir + L402 目录递归删 + 新增 rename 行 + AC-6e 硬删例外。
+- **交接板**：FrontEnd/progress.md [open] 2026-08-21 → [done]（附后端实现摘要）。
+- **review/simplify gate（2026-08-22 收尾）**：review 2 agent 发现 C1（list_files Windows `\` 破坏前端 rename → 改 `.as_posix()`）+ I1（rmtree 无安全校验 → root 须落 workspaces_root 内才删）+ I2（write 写目录/rename 文件入自身路径 500 → 类型冲突守卫）+ I3（缺跨 org 隔离测试 → 补）+ I4（docstring 与归档行为不符 → 改注释），均修复。simplify 收敛 3 处（`_scalars` 复用 cleanup 模式 / 删未消费标签 / 去冗余 `.resolve()`）。**Minor 记备注未修**：M1 硬删与在途对话竞态（可用 `with_for_update` 行锁）、M2 符号链接解引用（删链接会连真文件删，与既有 file_ops 一致）、M3 Windows 大小写改名（a.md→A.md）被拒。修复后全量 **392 全绿 + ruff**。
+
+---
+
 ## M7-B 工作区（2026-08-20 完成）
 
 任务清单：

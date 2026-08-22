@@ -71,9 +71,3 @@ class WorkspaceRepository:
         )
         self.session.add(ws)
         return ws
-
-    async def soft_delete(self, ws: Workspace) -> None:
-        from datetime import UTC, datetime
-
-        ws.deleted_at = datetime.now(UTC)
-        self.session.add(ws)

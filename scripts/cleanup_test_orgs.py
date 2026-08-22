@@ -49,10 +49,12 @@ from app.storage.models import (
     Org,
     ProviderConfig,
     RunLog,
+    Skill,
     Task,
     ToolDefinition,
     User,
     WebhookConfig,
+    Workspace,
 )
 
 DEFAULT_ORG_NAME = "默认组织"
@@ -126,6 +128,8 @@ async def main(dry_run: bool) -> None:
             ("users", delete(User).where(User.org_id.in_(org_ids))),
             ("tool_definitions", delete(ToolDefinition).where(ToolDefinition.org_id.in_(org_ids))),
             ("mcp_servers", delete(McpServer).where(McpServer.org_id.in_(org_ids))),
+            ("skills", delete(Skill).where(Skill.org_id.in_(org_ids))),
+            ("workspaces", delete(Workspace).where(Workspace.org_id.in_(org_ids))),
             ("agent_configs", delete(AgentConfig).where(AgentConfig.org_id.in_(org_ids))),
             ("provider_configs", delete(ProviderConfig).where(ProviderConfig.org_id.in_(org_ids))),
             ("orgs", delete(Org).where(Org.id.in_(org_ids))),
