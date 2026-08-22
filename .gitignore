@@ -22,4 +22,4 @@ data/
 # 本地单机化数据目录
 .agent/
 kb/
-frontend_dist/
+

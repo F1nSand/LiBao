@@ -98,6 +98,25 @@ def create_app() -> FastAPI:
     ):
         app.include_router(router, prefix=settings.base_url)
 
+    # 本地单机化：前端构建产物静态托管（单端口 8000；SPA 深链 fallback → index.html）
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+
+    dist = Path(settings.frontend_dist)
+    if dist.is_dir():
+
+        class SPAStaticFiles(StaticFiles):
+            """SPA fallback：非 /api 路径 404 → index.html（前端深链刷新可直达）。"""
+
+            async def get_response(self, path: str, scope):
+                response = await super().get_response(path, scope)
+                if response.status_code == 404 and not path.startswith("api"):
+                    response = await super().get_response("index.html", scope)
+                return response
+
+        app.mount("/", SPAStaticFiles(directory=str(dist), html=True), name="frontend")
+
     return app
 
 

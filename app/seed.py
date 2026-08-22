@@ -381,7 +381,7 @@ async def seed_if_first_run(store: FileStore) -> bool:
         )
     )
 
-    ctx = FileContext(store, None)
+    ctx = FileContext(store)
     await ctx.commit()
     logger.info("seed ok: 首次启动已初始化（tools=%d, agent=%s v1）", len(TOOL_SPECS), AGENT_NAME)
     return True
