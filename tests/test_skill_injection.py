@@ -5,7 +5,6 @@ import uuid
 from types import SimpleNamespace
 
 from app.api.schemas.skill import CreateSkillRequest
-from app.core.security import hash_password
 from app.orchestration.stream_core import build_initial_state, skills_route_section
 from app.services.skill import SkillService
 from app.storage.db import init_db, set_sessionmaker
@@ -74,7 +73,7 @@ async def test_load_skill_handler():
             session.add(org)
             await session.flush()
             user = User(
-                username=f"ls_{uid}", password_hash=hash_password("x"), name="L", role="admin", org_id=org.id
+                username=f"ls_{uid}", password_hash="hashed", name="L", role="admin", org_id=org.id
             )
             session.add(user)
             await session.commit()

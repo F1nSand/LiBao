@@ -12,7 +12,6 @@ import pytest
 
 from app.api.schemas.skill import CreateSkillRequest
 from app.core.errors import AppError
-from app.core.security import hash_password
 from app.services.serializers import serialize_skill
 from app.services.skill import SkillService, parse_skill_md
 from app.storage.db import init_db
@@ -61,7 +60,7 @@ async def skill_fixture():
         session.add(org)
         await session.flush()
         user = User(
-            username=f"skills_{uid}", password_hash=hash_password("x"), name="S", role="admin", org_id=org.id
+            username=f"skills_{uid}", password_hash="hashed", name="S", role="admin", org_id=org.id
         )
         session.add(user)
         await session.commit()

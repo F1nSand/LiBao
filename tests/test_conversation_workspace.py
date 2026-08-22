@@ -5,7 +5,6 @@ import uuid
 
 import pytest
 
-from app.core.security import hash_password
 from app.services.conversation import ConversationService
 from app.storage.db import init_db
 from app.storage.file.store import get_store
@@ -24,7 +23,7 @@ async def conv_ws_fixture():
         session.add(org)
         await session.flush()
         user = User(
-            username=f"convws_{uid}", password_hash=hash_password("x"), name="C", role="admin", org_id=org.id
+            username=f"convws_{uid}", password_hash="hashed", name="C", role="admin", org_id=org.id
         )
         session.add(user)
         await session.flush()

@@ -7,7 +7,6 @@ import uuid
 
 import pytest
 
-from app.core.security import hash_password
 from app.storage.db import init_db, set_sessionmaker
 from app.storage.file.store import get_store
 from app.storage.models import KbChunk, KbCollection, KbDocument, Org, User
@@ -29,7 +28,7 @@ async def kb_tool_fixture(clean_mcp_specs):
         org = Org(name=f"测试组织-kbt-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"kbt_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+        user = User(username=f"kbt_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         coll = KbCollection(org_id=org.id, name=f"kb-{uid}")

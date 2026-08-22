@@ -5,7 +5,6 @@ import uuid
 
 import pytest
 
-from app.core.security import hash_password
 from app.storage.db import init_db
 from app.storage.file.store import get_store
 from app.storage.models import Org, User
@@ -25,7 +24,7 @@ async def mem_fixture():
         org = Org(name=f"测试组织-mem-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"mem_{uid}", password_hash=hash_password("x"), name="M", role="admin", org_id=org.id)
+        user = User(username=f"mem_{uid}", password_hash="hashed", name="M", role="admin", org_id=org.id)
         session.add(user)
         await session.commit()
     yield sessionmaker, user

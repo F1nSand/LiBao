@@ -1,54 +1,44 @@
-"""工具定义数据访问（docs 04 §3.5）。DB 是工具元数据事实源；软删过滤；org 数据隔离。"""
+"""工具定义数据访问（docs 04 §3.5）。文件是工具元数据事实源；软删过滤。
+文件化：.agent/tool_definitions.json。"""
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.storage.file.store import get_store
 from app.storage.models.tool_definition import ToolDefinition
 
 
 class ToolDefinitionRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
+    def __init__(self, session=None) -> None:
+        self.session = session  # 兼容调用方传参（FileContext），文件化后不使用
+        self.table = get_store().table("tool_definitions")
 
     async def get_by_id(self, tool_id: uuid.UUID) -> ToolDefinition | None:
-        return await self.session.get(ToolDefinition, tool_id)
+        row = await self.table.get(tool_id)
+        if row is None or row.deleted_at is not None:
+            return None
+        return row
 
     async def get_by_org_name(self, org_id: uuid.UUID, name: str) -> ToolDefinition | None:
-        stmt = select(ToolDefinition).where(
-            ToolDefinition.org_id == org_id,
-            ToolDefinition.name == name,
-            ToolDefinition.deleted_at.is_(None),
+        rows = await self.table.list(
+            filter_fn=lambda t: t.name == name and t.deleted_at is None, limit=1
         )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+        return rows[0] if rows else None
 
     async def name_exists(self, org_id: uuid.UUID, name: str) -> bool:
-        stmt = select(ToolDefinition.id).where(
-            ToolDefinition.org_id == org_id,
-            ToolDefinition.name == name,
-            ToolDefinition.deleted_at.is_(None),
-        )
-        return (await self.session.execute(stmt)).first() is not None
+        return await self.get_by_org_name(org_id, name) is not None
 
     async def name_exists_any_org(self, name: str) -> bool:
-        """全 org 查重（M2.5 I4）：registry 全局化后，任何 org 的同名行都会绑定到同名 spec，
-        跨 org 同名会让启停桥/执行解析指向他人工具——注册与建行必须对称查全 org。"""
-        stmt = select(ToolDefinition.id).where(
-            ToolDefinition.name == name, ToolDefinition.deleted_at.is_(None)
-        )
-        return (await self.session.execute(stmt)).first() is not None
+        """全量查重（M2.5 I4）：同名行绑定同名 spec，注册与建行对称查重。"""
+        rows = await self.table.list(filter_fn=lambda t: t.name == name and t.deleted_at is None, limit=1)
+        return len(rows) > 0
 
     async def names_exist_any_org(self, names: list[str]) -> list[str]:
-        """批量全 org 查重（register 第一遍一条 IN 查询，避免每工具一次往返）。"""
-        stmt = (
-            select(ToolDefinition.name)
-            .where(ToolDefinition.name.in_(names), ToolDefinition.deleted_at.is_(None))
-            .distinct()
-        )
-        return list((await self.session.execute(stmt)).scalars())
+        """批量全量查重（register 第一遍一条查询）。"""
+        rows = await self.table.list(filter_fn=lambda t: t.name in names and t.deleted_at is None)
+        return sorted({t.name for t in rows})
 
     async def list_for_org(
         self,
@@ -58,52 +48,43 @@ class ToolDefinitionRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> list[ToolDefinition]:
-        stmt = select(ToolDefinition).where(ToolDefinition.org_id == org_id, ToolDefinition.deleted_at.is_(None))
-        if enabled is not None:
-            stmt = stmt.where(ToolDefinition.enabled.is_(enabled))
-        stmt = stmt.order_by(ToolDefinition.created_at.desc()).limit(limit).offset(offset)
-        return list((await self.session.execute(stmt)).scalars())
+        return await self.table.list(
+            filter_fn=lambda t: t.deleted_at is None and (enabled is None or t.enabled == enabled),
+            sort_key=lambda t: t.created_at,
+            desc=True,
+            limit=limit,
+            offset=offset,
+        )
 
     async def count_for_org(self, org_id: uuid.UUID, *, enabled: bool | None = None) -> int:
-        stmt = select(func.count()).select_from(ToolDefinition).where(
-            ToolDefinition.org_id == org_id, ToolDefinition.deleted_at.is_(None)
+        return await self.table.count(
+            filter_fn=lambda t: t.deleted_at is None and (enabled is None or t.enabled == enabled)
         )
-        if enabled is not None:
-            stmt = stmt.where(ToolDefinition.enabled.is_(enabled))
-        return int((await self.session.execute(stmt)).scalar_one())
 
     async def list_for_org_all(self) -> list[ToolDefinition]:
-        """全 org 非软删工具（启动同步 DB→registry 用）。"""
-        stmt = select(ToolDefinition).where(ToolDefinition.deleted_at.is_(None))
-        return list((await self.session.execute(stmt)).scalars())
+        """全量非软删工具（启动同步 文件→registry 用）。"""
+        return await self.table.list(filter_fn=lambda t: t.deleted_at is None)
 
     async def list_enabled_names(self, org_id: uuid.UUID) -> list[str]:
-        """本组织已启用的工具名（单通用 Agent 有效工具集：seed 精选 ∪ 已启用，org 隔离）。"""
-        stmt = (
-            select(ToolDefinition.name)
-            .where(
-                ToolDefinition.org_id == org_id,
-                ToolDefinition.enabled.is_(True),
-                ToolDefinition.deleted_at.is_(None),
-            )
-            .order_by(ToolDefinition.name)
+        """已启用的工具名（单通用 Agent 有效工具集：seed 精选 ∪ 已启用）。"""
+        rows = await self.table.list(
+            filter_fn=lambda t: t.enabled and t.deleted_at is None, sort_key=lambda t: t.name
         )
-        return list((await self.session.execute(stmt)).scalars())
+        return [t.name for t in rows]
 
     async def search(self, org_id: uuid.UUID, q: str, *, limit: int = 20) -> list[ToolDefinition]:
-        """工具发现（REST 版 G3）：name/description ILIKE，org 隔离。"""
-        pattern = f"%{q}%"
-        stmt = (
-            select(ToolDefinition)
-            .where(
-                ToolDefinition.org_id == org_id,
-                ToolDefinition.deleted_at.is_(None),
-                (ToolDefinition.name.ilike(pattern)) | (ToolDefinition.description.ilike(pattern)),
-            )
-            .order_by(ToolDefinition.created_at.desc())
-            .limit(limit)
+        """工具发现（REST 版 G3）：name/description 子串匹配。"""
+        pattern = q.lower()
+        rows = await self.table.list(
+            filter_fn=lambda t: (
+                t.deleted_at is None
+                and (pattern in t.name.lower() or pattern in t.description.lower())
+            ),
+            sort_key=lambda t: t.created_at,
+            desc=True,
+            limit=limit,
         )
-        return list((await self.session.execute(stmt)).scalars())
+        return rows
 
     async def create(
         self,
@@ -140,11 +121,8 @@ class ToolDefinitionRepository:
             mcp_tool_name=mcp_tool_name,
             version=1,
         )
-        self.session.add(tool)
+        self.table.register(tool)
         return tool
 
     async def soft_delete(self, tool: ToolDefinition) -> None:
-        from datetime import UTC, datetime
-
         tool.deleted_at = datetime.now(UTC)
-        self.session.add(tool)

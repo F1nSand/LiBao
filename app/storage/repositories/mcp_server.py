@@ -1,52 +1,44 @@
-"""MCP 源连接配置数据访问（docs 04 §3.5 补充）。软删过滤；org 数据隔离。"""
+"""MCP 源连接配置数据访问（docs 04 §3.5 补充）。软删过滤。文件化：.agent/mcp_servers.json。"""
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.storage.file.store import get_store
 from app.storage.models.mcp_server import McpServer
-from app.storage.models.tool_definition import ToolDefinition
 
 
 class McpServerRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
+    def __init__(self, session=None) -> None:
+        self.session = session  # 兼容调用方传参（FileContext），文件化后不使用
+        self.table = get_store().table("mcp_servers")
 
     async def get_by_id_org(self, org_id: uuid.UUID, server_id: uuid.UUID) -> McpServer | None:
-        """org 内未软删的 server。"""
-        stmt = select(McpServer).where(
-            McpServer.org_id == org_id, McpServer.id == server_id, McpServer.deleted_at.is_(None)
-        )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+        row = await self.table.get(server_id)
+        if row is None or row.deleted_at is not None:
+            return None
+        return row
 
     async def get_by_id_including_deleted(self, server_id: uuid.UUID) -> McpServer | None:
         """含软删（启动重建需判断 deleted_at）。"""
-        return await self.session.get(McpServer, server_id)
+        return await self.table.get(server_id)
 
     async def get_by_org_name(self, org_id: uuid.UUID, name: str) -> McpServer | None:
-        stmt = select(McpServer).where(
-            McpServer.org_id == org_id, McpServer.name == name, McpServer.deleted_at.is_(None)
+        rows = await self.table.list(
+            filter_fn=lambda s: s.name == name and s.deleted_at is None, limit=1
         )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+        return rows[0] if rows else None
 
     async def list_for_org(self, org_id: uuid.UUID) -> list[McpServer]:
-        stmt = (
-            select(McpServer)
-            .where(McpServer.org_id == org_id, McpServer.deleted_at.is_(None))
-            .order_by(McpServer.created_at.desc())
+        return await self.table.list(
+            filter_fn=lambda s: s.deleted_at is None, sort_key=lambda s: s.created_at, desc=True
         )
-        return list((await self.session.execute(stmt)).scalars())
 
     async def count_tools(self, org_id: uuid.UUID, mcp_source: str) -> int:
-        stmt = select(func.count()).select_from(ToolDefinition).where(
-            ToolDefinition.org_id == org_id,
-            ToolDefinition.mcp_source == mcp_source,
-            ToolDefinition.deleted_at.is_(None),
+        tools = get_store().table("tool_definitions")
+        return await tools.count(
+            filter_fn=lambda t: t.mcp_source == mcp_source and t.deleted_at is None
         )
-        return int((await self.session.execute(stmt)).scalar_one())
 
     def create(
         self,
@@ -68,9 +60,8 @@ class McpServerRepository:
             headers=headers,
             enabled=enabled,
         )
-        self.session.add(row)
+        self.table.register(row)
         return row
 
     async def soft_delete(self, row: McpServer) -> None:
         row.deleted_at = datetime.now(UTC)
-        self.session.add(row)

@@ -18,8 +18,17 @@ from typing import Any
 from app.core.config import get_settings
 from app.storage.file.rows import Row
 from app.storage.file.tables import FileTable, _append_line
+from app.storage.models.agent import AgentConfig, AgentVersion
+from app.storage.models.attachment import Attachment
 from app.storage.models.conversation import Conversation
+from app.storage.models.mcp_server import McpServer
+from app.storage.models.memory import LongTermMemory
+from app.storage.models.notification import Notification
+from app.storage.models.provider import ProviderConfig
+from app.storage.models.skill import Skill
 from app.storage.models.task import Task
+from app.storage.models.tool_definition import ToolDefinition
+from app.storage.models.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +36,16 @@ logger = logging.getLogger(__name__)
 TABLE_SPECS: dict[str, tuple[str, type]] = {
     "conversations": ("conversations.json", Conversation),
     "tasks": ("tasks.json", Task),
+    "attachments": ("attachments.json", Attachment),
+    "agents": ("agents.json", AgentConfig),
+    "agent_versions": ("agent_versions.json", AgentVersion),
+    "memory_cards": ("memory_cards.json", LongTermMemory),
+    "notifications": ("notifications.json", Notification),
+    "providers": ("providers.json", ProviderConfig),
+    "mcp_servers": ("mcp_servers.json", McpServer),
+    "skills": ("skills.json", Skill),
+    "tool_definitions": ("tool_definitions.json", ToolDefinition),
+    "workspaces": ("workspaces.json", Workspace),
 }
 
 
@@ -58,6 +77,14 @@ class FileStore:
             rel, model = TABLE_SPECS[name]
             self.tables[name] = FileTable(self.root, rel, model)
         return self.tables[name]
+
+    def register_row(self, row: Row) -> None:
+        """按模型类反查注册行到对应表（FileContext.add 对 Row 的兜底：测试/遗留调用点
+        直接 session.add(AgentConfig(...)) 也能落盘；未注册模型（版本 JSONL 等）静默忽略）。"""
+        for name, (_, model) in TABLE_SPECS.items():
+            if isinstance(row, model):
+                self.table(name).register(row)
+                return
 
     # ---- JSONL 分文件（消息/轨迹/版本）----
 
@@ -121,8 +148,11 @@ class FileContext:
         return self._sql.flush()
 
     def add(self, row: Any) -> None:
-        """SQL 行转发；文件行（Row）已由 repository register 到表，无需动作。"""
-        if not isinstance(row, Row) and self._sql is not None:
+        """SQL 行转发；文件行（Row）按模型类自动注册到对应表（commit 时落盘）。"""
+        if isinstance(row, Row):
+            self.store.register_row(row)
+            return
+        if self._sql is not None:
             self._sql.add(row)
 
     async def refresh(self, row: Any) -> None:

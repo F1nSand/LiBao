@@ -14,7 +14,6 @@ from app.storage.redis import (
     worker_cancel_channel,
 )
 
-from app.core.security import hash_password
 from app.orchestration.task_worker import route_cancel
 from app.services.task import TaskService
 from app.storage.db import init_db, set_sessionmaker
@@ -35,7 +34,7 @@ async def cross_cancel_fixture():
         org = Org(name=f"测试组织-cc-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"cc_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+        user = User(username=f"cc_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         agent = AgentConfig(

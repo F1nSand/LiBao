@@ -5,7 +5,6 @@ import uuid
 
 import pytest
 
-from app.core.security import hash_password
 from app.services.provider import ProviderService, serialize_provider
 from app.storage.db import init_db
 from app.storage.file.store import get_store
@@ -23,7 +22,7 @@ async def provider_fixture():
         org = Org(name=f"测试组织-pv-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"pv_{uid}", password_hash=hash_password("x"), name="P", role="admin", org_id=org.id)
+        user = User(username=f"pv_{uid}", password_hash="hashed", name="P", role="admin", org_id=org.id)
         session.add(user)
         await session.commit()
     yield sessionmaker, user

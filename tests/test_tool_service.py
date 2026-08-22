@@ -10,7 +10,6 @@ import pytest
 
 from app.api.schemas.tools import CreateToolRequest
 from app.core.errors import AppError
-from app.core.security import hash_password
 from app.orchestration.context_builder import acis_for_tools
 from app.services.serializers import serialize_tool_definition
 from app.services.tool import ToolService
@@ -34,7 +33,7 @@ async def tool_fixture():
         session.add(org)
         await session.flush()
         user = User(
-            username=f"tools_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id
+            username=f"tools_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id
         )
         session.add(user)
         await session.commit()

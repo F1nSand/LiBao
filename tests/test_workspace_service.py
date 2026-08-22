@@ -11,7 +11,6 @@ from sqlalchemy import func, select
 from app.api.schemas.workspace import CreateWorkspaceRequest, UpdateWorkspaceRequest
 from app.core.config import Settings
 from app.core.errors import AppError
-from app.core.security import hash_password
 from app.services import workspace as ws_module
 from app.services.serializers import serialize_workspace
 from app.services.workspace import WorkspaceService
@@ -19,15 +18,14 @@ from app.storage.db import init_db
 from app.storage.file.store import get_store
 from app.storage.models import (
     AgentConfig,
-    Attachment,
     Candidate,
     LongTermMemory,
     LongTermMemoryVersion,
     Org,
     User,
     WebhookConfig,
-    Workspace,
 )
+from app.storage.repositories.attachment import AttachmentRepository
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.run_log import RunLogRepository
@@ -55,7 +53,7 @@ async def workspace_fixture(tmp_path, monkeypatch):
         session.add(org)
         await session.flush()
         user = User(
-            username=f"ws_{uid}", password_hash=hash_password("x"), name="W", role="admin", org_id=org.id
+            username=f"ws_{uid}", password_hash="hashed", name="W", role="admin", org_id=org.id
         )
         session.add(user)
         await session.commit()
@@ -119,24 +117,27 @@ async def test_hard_delete_cascades_all_workspace_rows(workspace_fixture):
         attach_file.write_bytes(b"x")
         await MessageRepository(session).create(conversation_id=conv_id, role="user", content="hi")
         await RunLogRepository(session).create(trace_id=f"t-{uuid.uuid4().hex}", session_id=conv_id)
+        att = await AttachmentRepository(session).create(
+            user_id=user.id,
+            filename="f.bin",
+            content_type="application/octet-stream",
+            size_bytes=1,
+            storage_path=str(attach_file),
+        )
+        att.conversation_id = conv_id  # 消息回填归属（硬删按 conversation_id 级联）
         session.add_all(
             [
-                Attachment(
-                    user_id=user.id,
-                    conversation_id=conv_id,
-                    filename="f.bin",
-                    content_type="application/octet-stream",
-                    storage_path=str(attach_file),
-                ),
                 WebhookConfig(org_id=user.org_id, tool_id="tl_x", token_hash="h", conversation_id=conv_id),
                 Candidate(org_id=user.org_id, title="c", change_type="prompt", source_conversation_id=conv_id),
             ]
         )
         mem = LongTermMemory(user_id=user.id, workspace_id=wid, card_type="note", content={"text": "m"})
-        session.add(mem)
-        await session.flush()
+        get_store().table("memory_cards").register(mem)
         mem_id = mem.id
-        session.add(LongTermMemoryVersion(memory_id=mem_id, version=1, content={"text": "m"}))
+        await get_store().jsonl_append(
+            f"memory/default/cards/{mem_id}.versions.jsonl",
+            LongTermMemoryVersion(memory_id=mem_id, version=1, content={"text": "m"}).to_dict(),
+        )
         await session.commit()
 
         await WorkspaceService().hard_delete(session, user, str(wid))
@@ -149,12 +150,13 @@ async def test_hard_delete_cascades_all_workspace_rows(workspace_fixture):
         assert not trace_file.exists()
         assert await store.table("conversations").get(conv_id) is None
         # SQL 实体：按行断言归零
-        assert await _count_rows(session, Attachment, "conversation_id", conv_id) == 0
+        atts = await store.table("attachments").list(filter_fn=lambda a: a.conversation_id == conv_id)
+        assert len(atts) == 0
         assert await _count_rows(session, WebhookConfig, "conversation_id", conv_id) == 0
         assert await _count_rows(session, Candidate, "source_conversation_id", conv_id) == 0
-        assert await _count_rows(session, LongTermMemory, "id", mem_id) == 0
-        assert await _count_rows(session, LongTermMemoryVersion, "memory_id", mem_id) == 0
-        assert await _count_rows(session, Workspace, "id", wid) == 0
+        assert await store.table("memory_cards").get(mem_id) is None
+        assert not (store.root / "memory" / "default" / "cards" / f"{mem_id}.versions.jsonl").exists()
+        assert await store.table("workspaces").get(wid) is None
         assert not os.path.exists(root)  # root 目录已删
         assert not os.path.exists(attach_file)  # 附件磁盘文件已删（用户拍板：连删）
 
@@ -175,7 +177,9 @@ async def test_hard_delete_does_not_touch_other_workspace(workspace_fixture):
         await ConversationRepository(session).create(
             user_id=user.id, agent_id=agent.id, title="b", workspace_id=ws_b.id
         )
-        session.add(LongTermMemory(user_id=user.id, workspace_id=ws_a.id, card_type="note", content={"text": "a"}))
+        get_store().table("memory_cards").register(
+            LongTermMemory(user_id=user.id, workspace_id=ws_a.id, card_type="note", content={"text": "a"})
+        )
         await session.commit()
 
         await WorkspaceService().hard_delete(session, user, str(ws_b.id))
@@ -189,7 +193,7 @@ async def test_hard_delete_does_not_touch_other_workspace(workspace_fixture):
         )
         assert len(ws_a_convs) == 1
         assert len(ws_b_convs) == 0
-        assert await _count_rows(session, LongTermMemory, "workspace_id", ws_a.id) == 1
+        assert len(await store.table("memory_cards").list(filter_fn=lambda m: m.workspace_id == ws_a.id)) == 1
         assert os.path.exists(ws_a.root_path)
 
 
@@ -211,7 +215,7 @@ async def test_file_ops_org_isolation_40416(workspace_fixture):
         await session.flush()
         other = User(
             username=f"ws_other_{uuid.uuid4().hex[:8]}",
-            password_hash=hash_password("x"),
+            password_hash="hashed",
             name="O",
             role="admin",
             org_id=other_org.id,

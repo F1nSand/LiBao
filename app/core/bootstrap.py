@@ -1,7 +1,7 @@
 """共享运行时初始化（本地单机化双轨期：文件存储 + SQL 兜底，P4 全文件化后简化）。
 
 backend（app/api/main.py lifespan）与测试共用：内置工具注册 + FileStore 初始化 +
-SQL 引擎（未文件化实体兜底）+ registry 同步。
+SQL 引擎（未文件化实体兜底）+ 工具/Provider registry 文件同步。
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class Runtime:
 
 
 async def init_runtime(settings: Settings | None = None) -> Runtime:
-    """内置工具注册 + FileStore 初始化 + SQL 引擎（双轨）+ 默认组织 registry 同步。"""
+    """内置工具注册 + FileStore 初始化 + SQL 引擎（双轨）+ 工具/Provider 文件同步。"""
     settings = settings or get_settings()
     register_builtin_tools()
     engine, sessionmaker = init_db(settings)
@@ -33,24 +33,14 @@ async def init_runtime(settings: Settings | None = None) -> Runtime:
     await store.init()
     set_store(store)
 
-    # DB tool_definition.enabled 为事实源 → 启动时同步 registry（F7 + I5，P2 改读文件）
+    # 本地单机化：tool_definitions.json enabled 为事实源 → registry 同步 + MCP 行重建
+    from app.seed import seed_if_first_run
+    from app.services.provider import ProviderService
     from app.services.tool import ToolService
 
-    async with sessionmaker() as session:
-        from sqlalchemy import select
-
-        from app.storage.models.org import Org
-
-        org = (
-            await session.execute(select(Org).where(Org.name == "默认组织", Org.deleted_at.is_(None)))
-        ).scalar_one_or_none()
-        if org is not None:
-            await ToolService().sync_registry_from_db(session, org.id)
-            # M6 前：启用 provider → 覆盖 Settings（LLM 即用配置的 provider）
-            from app.services.provider import ProviderService
-
-            await ProviderService().sync_active_to_settings(session, org.id)
-        await ToolService().sync_registry_from_db(session)  # 全量：MCP 行重建（不动已有 spec enabled）
+    await seed_if_first_run(store)  # 首启落种子（幂等）
+    await ToolService().sync_registry_from_file()
+    await ProviderService().sync_active_to_settings()
 
     return Runtime(engine=engine, sessionmaker=sessionmaker, store=store)
 

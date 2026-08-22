@@ -11,7 +11,6 @@ from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
 from app.api.schemas.chat import ChatMessageInput
-from app.core.security import hash_password
 from app.orchestration.chat_stream import chat_stream_events
 from app.orchestration.graph import build_graph
 from app.services.attachment import AttachmentService
@@ -41,7 +40,7 @@ async def chat_att_fixture():
         org = Org(name=f"测试组织-ca-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"ca_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+        user = User(username=f"ca_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         agent = AgentConfig(

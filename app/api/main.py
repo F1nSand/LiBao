@@ -20,7 +20,6 @@ from fastapi.responses import JSONResponse
 from app.api.envelope import fail
 from app.api.routers import (
     attachments,
-    auth,
     chat,
     conversations,
     evals,
@@ -33,7 +32,6 @@ from app.api.routers import (
     system,
     tasks,
     tools,
-    users,
     workspaces,
 )
 from app.api.routers import (
@@ -116,7 +114,6 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=500, content=fail(ERR_INTERNAL, "服务器内部错误"))
 
     for router in (
-        auth.router,
         conversations.router,
         chat.router,
         tools.router,
@@ -125,7 +122,6 @@ def create_app() -> FastAPI:
         kb.router,
         attachments.router,
         notifications.router,
-        users.router,
         evals.router,
         hooks.router,
         settings_router.router,

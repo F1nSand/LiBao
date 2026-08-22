@@ -1,40 +1,33 @@
-"""Provider 配置数据访问（docs 02 /settings）。org 隔离 + 软删。"""
+"""Provider 配置数据访问（docs 02 /settings）。文件化：.agent/providers.json。"""
 from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.storage.file.store import get_store
 from app.storage.models.provider import ProviderConfig
 
 
 class ProviderRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
+    def __init__(self, session=None) -> None:
+        self.session = session  # 兼容调用方传参（FileContext），文件化后不使用
+        self.table = get_store().table("providers")
 
     async def get_by_id(self, provider_id: uuid.UUID) -> ProviderConfig | None:
-        return await self.session.get(ProviderConfig, provider_id)
+        row = await self.table.get(provider_id)
+        if row is None or row.deleted_at is not None:
+            return None
+        return row
 
     async def list_for_org(self, org_id: uuid.UUID) -> list[ProviderConfig]:
-        stmt = (
-            select(ProviderConfig)
-            .where(ProviderConfig.org_id == org_id, ProviderConfig.deleted_at.is_(None))
-            .order_by(ProviderConfig.created_at.asc())
+        return await self.table.list(
+            filter_fn=lambda p: p.deleted_at is None, sort_key=lambda p: p.created_at
         )
-        return list((await self.session.execute(stmt)).scalars())
 
     async def get_enabled(self, org_id: uuid.UUID) -> ProviderConfig | None:
-        stmt = (
-            select(ProviderConfig)
-            .where(
-                ProviderConfig.org_id == org_id,
-                ProviderConfig.enabled.is_(True),
-                ProviderConfig.deleted_at.is_(None),
-            )
-            .order_by(ProviderConfig.created_at.asc())
+        rows = await self.table.list(
+            filter_fn=lambda p: p.enabled and p.deleted_at is None, sort_key=lambda p: p.created_at
         )
-        return (await self.session.execute(stmt)).scalars().first()
+        return rows[0] if rows else None
 
     async def create(
         self, *, org_id: uuid.UUID, name: str, base_url: str | None, model: str | None,
@@ -43,5 +36,5 @@ class ProviderRepository:
         row = ProviderConfig(
             org_id=org_id, name=name, base_url=base_url, model=model, api_key=api_key, enabled=enabled
         )
-        self.session.add(row)
+        self.table.register(row)
         return row

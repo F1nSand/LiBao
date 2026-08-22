@@ -6,7 +6,6 @@ import uuid
 import pytest
 
 from app.core.errors import AppError
-from app.core.security import hash_password
 from app.services.memory import MemoryService
 from app.storage.db import init_db
 from app.storage.file.store import get_store
@@ -24,11 +23,11 @@ async def memory_fixture():
         org = Org(name=f"测试组织-mem-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"mem_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+        user = User(username=f"mem_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         other_user = User(
-            username=f"mem2_{uid}", password_hash=hash_password("x"), name="T2", role="admin", org_id=org.id
+            username=f"mem2_{uid}", password_hash="hashed", name="T2", role="admin", org_id=org.id
         )
         session.add(other_user)
         await session.commit()

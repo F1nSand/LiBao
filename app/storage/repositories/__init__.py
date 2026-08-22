@@ -5,12 +5,10 @@ from app.storage.repositories.agent import AgentRepository
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.run_log import RunLogRepository
-from app.storage.repositories.user import UserRepository
 
 __all__ = [
     "AgentRepository",
     "ConversationRepository",
     "MessageRepository",
     "RunLogRepository",
-    "UserRepository",
 ]

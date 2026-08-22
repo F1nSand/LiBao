@@ -4,10 +4,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from app.services.user import UserService
 
 from app.core.errors import AppError
-from app.core.security import hash_password
-from app.services.user import UserService
 from app.storage.db import init_db
 from app.storage.file.store import get_store
 from app.storage.models import Org, User
@@ -25,12 +24,12 @@ async def user_fixture():
         session.add(org)
         await session.flush()
         admin = User(
-            username=f"admin_{uid}", password_hash=hash_password("x"), name="A", role="admin", org_id=org.id
+            username=f"admin_{uid}", password_hash="hashed", name="A", role="admin", org_id=org.id
         )
         session.add(admin)
         await session.flush()
         dev = User(
-            username=f"dev_{uid}", password_hash=hash_password("x"), name="D", role="developer", org_id=org.id
+            username=f"dev_{uid}", password_hash="hashed", name="D", role="developer", org_id=org.id
         )
         session.add(dev)
         await session.commit()
@@ -88,7 +87,7 @@ async def _create_org_user(session, prefix: str) -> tuple[Org, User]:
     await session.flush()
     user = User(
         username=f"{prefix}_{uuid.uuid4().hex[:6]}",
-        password_hash=hash_password("x"),
+        password_hash="hashed",
         name=prefix.upper(),
         role="viewer",
         org_id=org.id,

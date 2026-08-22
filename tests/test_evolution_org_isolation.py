@@ -6,7 +6,6 @@ import uuid
 import pytest
 
 from app.core.errors import AppError
-from app.core.security import hash_password
 from app.orchestration.graph import build_graph
 from app.services.evolution import EvolutionService
 from app.storage.db import init_db
@@ -26,11 +25,11 @@ async def two_org_evo_fixture():
         session.add_all([org_a, org_b])
         await session.flush()
         user_a = User(
-            username=f"evoa_{uuid.uuid4().hex[:6]}", password_hash=hash_password("x"),
+            username=f"evoa_{uuid.uuid4().hex[:6]}", password_hash="hashed",
             name="A", role="admin", org_id=org_a.id,
         )
         user_b = User(
-            username=f"evob_{uuid.uuid4().hex[:6]}", password_hash=hash_password("x"),
+            username=f"evob_{uuid.uuid4().hex[:6]}", password_hash="hashed",
             name="B", role="admin", org_id=org_b.id,
         )
         session.add_all([user_a, user_b])

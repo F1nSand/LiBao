@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 
 from langchain_core.messages import AIMessage
 
-from app.core.security import hash_password
 from app.orchestration.graph import build_graph
 from app.orchestration.nodes.route import route_node
 from app.orchestration.task_run import run_task_graph
@@ -99,7 +98,7 @@ async def test_task_writes_placeholder_events():
             org = Org(name=f"测试组织-pl-{uid}")
             session.add(org)
             await session.flush()
-            user = User(username=f"pl_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+            user = User(username=f"pl_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
             session.add(user)
             await session.flush()
             agent = AgentConfig(

@@ -12,7 +12,6 @@ from sqlalchemy import select
 
 from app.api.routers.kb import _decode_text
 from app.core.errors import AppError
-from app.core.security import hash_password
 from app.services.kb import KbService
 from app.services.kb_pipeline import process_document
 from app.services.serializers import kb_document_progress
@@ -44,13 +43,13 @@ async def kb_fixture():
         org = Org(name=f"测试组织-kb-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"kb_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+        user = User(username=f"kb_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         org2 = Org(name=f"测试组织-kb2-{uid}")
         session.add(org2)
         await session.flush()
-        user2 = User(username=f"kb2_{uid}", password_hash=hash_password("x"), name="T2", role="admin", org_id=org2.id)
+        user2 = User(username=f"kb2_{uid}", password_hash="hashed", name="T2", role="admin", org_id=org2.id)
         session.add(user2)
         await session.commit()
     yield sessionmaker, user, user2

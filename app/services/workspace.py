@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -23,10 +23,7 @@ from app.core.errors import (
 from app.services.serializers import serialize_workspace
 from app.storage.file.store import get_store
 from app.storage.models import (
-    Attachment,
     Candidate,
-    LongTermMemory,
-    LongTermMemoryVersion,
     WebhookConfig,
 )
 from app.storage.models.user import User
@@ -113,10 +110,10 @@ async def _scalars(db: AsyncSession, stmt) -> list[Any]:
 
 
 async def _cascade_delete_workspace(db: AsyncSession, workspace_id: uuid.UUID) -> list[str]:
-    """级联删除工作区全部关联数据（叶子→根逆依赖序；conversations.workspace_id /
-    longterm_memory.workspace_id 无 FK，DB 无级联须手动）。返回待删附件 storage_path（删行前物化）。
+    """级联删除工作区全部关联数据（叶子→根逆依赖序）。返回待删附件 storage_path（删行前物化）。
 
-    本地单机化双轨：Conversation/Message/RunLog 已文件化（文件删除），其余走 SQL。
+    本地单机化：Conversation/Message/RunLog/Attachment/LongTermMemory/Workspace 已文件化（文件删除），
+    其余（WebhookConfig/Candidate）走 SQL（P4 整体删除）。
     """
     store = get_store()
     # 1. 删除前物化各层 id / 附件路径（避免删除过程中数据被清空）
@@ -124,12 +121,16 @@ async def _cascade_delete_workspace(db: AsyncSession, workspace_id: uuid.UUID) -
         filter_fn=lambda c: c.workspace_id == workspace_id
     )
     conv_ids = [c.id for c in convs]
-    mem_ids = await _scalars(db, select(LongTermMemory.id).where(LongTermMemory.workspace_id == workspace_id))
-    attach_paths = await _scalars(
-        db, select(Attachment.storage_path).where(Attachment.conversation_id.in_(conv_ids))
+    mems = await store.table("memory_cards").list(
+        filter_fn=lambda m: m.workspace_id == workspace_id
     )
+    mem_ids = [m.id for m in mems]
+    attach_rows = await store.table("attachments").list(
+        filter_fn=lambda a: a.conversation_id in conv_ids
+    )
+    attach_paths = [a.storage_path for a in attach_rows]
 
-    # 2. 文件化实体：删会话 JSONL / 轨迹文件 / 会话行 + checkpoint 断点
+    # 2. 文件化实体：删会话 JSONL / 轨迹 / 卡片版本 + 行 + checkpoint 断点
     for cid in conv_ids:
         sid = str(cid)
         (store.root / "sessions" / f"{sid}.jsonl").unlink(missing_ok=True)
@@ -137,6 +138,16 @@ async def _cascade_delete_workspace(db: AsyncSession, workspace_id: uuid.UUID) -
         row = await store.table("conversations").get(cid)
         if row is not None:
             store.table("conversations").delete_row(row)
+    for mid in mem_ids:
+        (store.root / "memory" / "default" / "cards" / f"{mid}.versions.jsonl").unlink(missing_ok=True)
+        row = await store.table("memory_cards").get(mid)
+        if row is not None:
+            store.table("memory_cards").delete_row(row)
+    for arow in attach_rows:
+        store.table("attachments").delete_row(arow)
+    ws_row = await store.table("workspaces").get(workspace_id)
+    if ws_row is not None:
+        store.table("workspaces").delete_row(ws_row)
     from app.orchestration.checkpointer import JsonFileSaver
 
     try:
@@ -145,16 +156,13 @@ async def _cascade_delete_workspace(db: AsyncSession, workspace_id: uuid.UUID) -
             saver.delete_thread(str(cid))
     except Exception:  # noqa: BLE001  断点清理失败不阻断（best-effort）
         pass
-    await store.table("conversations").flush()
+    for table_name in ("conversations", "memory_cards", "attachments", "workspaces"):
+        await store.table(table_name).flush()
 
-    # 3. SQL 实体：叶子→根逆依赖序（in_([]) 编译恒假，空列表安全）
+    # 3. SQL 实体（P4 整体删除）：叶子→根逆依赖序（in_([]) 编译恒假，空列表安全）
     deletes: list[Any] = [
-        delete(LongTermMemoryVersion).where(LongTermMemoryVersion.memory_id.in_(mem_ids)),
-        delete(LongTermMemory).where(LongTermMemory.id.in_(mem_ids)),
-        delete(Attachment).where(Attachment.conversation_id.in_(conv_ids)),
         delete(WebhookConfig).where(WebhookConfig.conversation_id.in_(conv_ids)),
         delete(Candidate).where(Candidate.source_conversation_id.in_(conv_ids)),
-        delete(Workspace).where(Workspace.id == workspace_id),
     ]
     for stmt in deletes:
         await db.execute(stmt)
@@ -224,9 +232,8 @@ class WorkspaceService:
         """硬删工作区：删 DB 行（级联）+ root 目录 + 附件磁盘文件（交接板 2026-08-21，用户拍板真删除）。
         org 隔离经 get_in_org 40416（不存在 / 他 org / 已软删）。"""
         ws = await self.get_in_org(db, user.org_id, workspace_id)
-        # M1 行锁：串行化并发 hard_delete（防同一工作区双删竞态；已删则 40416）
-        locked = await db.execute(select(Workspace).where(Workspace.id == ws.id).with_for_update())
-        locked_ws = locked.scalar_one_or_none()
+        # 二次校验（串行化并发 hard_delete 的等效：文件单进程，双删第二次即 40416）
+        locked_ws = await WorkspaceRepository(db).get_by_id(ws.id)
         if locked_ws is None:
             raise AppError(ERR_WORKSPACE_NOT_FOUND, "工作区不存在或无权访问")
         root = Path(locked_ws.root_path)  # commit 前捕获，供 commit 后磁盘清理

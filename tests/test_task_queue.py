@@ -9,7 +9,6 @@ from app.storage.redis import close_redis, get_redis, get_task_owner, init_redis
 from langchain_core.messages import AIMessage
 from sqlalchemy import select
 
-from app.core.security import hash_password
 from app.orchestration.graph import build_graph
 from app.orchestration.task_worker import process_one
 from app.services.task import TaskService
@@ -40,7 +39,7 @@ async def queue_fixture(monkeypatch):
         org = Org(name=f"测试组织-q-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"q_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+        user = User(username=f"q_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         agent = AgentConfig(

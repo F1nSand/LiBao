@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.core.security import hash_password
 from app.services.conversation import ConversationService
 from app.storage.db import init_db
 from app.storage.file.store import get_store
@@ -25,7 +24,7 @@ async def traj_fixture():
         org = Org(name=f"测试组织-traj-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"traj_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+        user = User(username=f"traj_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         agent = AgentConfig(

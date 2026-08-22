@@ -6,7 +6,6 @@ import uuid
 
 import pytest
 
-from app.core.security import hash_password
 from app.services.notification import (
     NotificationService,
     maybe_notify_from_tool_results,
@@ -31,7 +30,7 @@ async def notif_fixture():
         org = Org(name=f"测试组织-notif-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"notif_{uid}", password_hash=hash_password("x"), name="N", role="admin", org_id=org.id)
+        user = User(username=f"notif_{uid}", password_hash="hashed", name="N", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         agent = AgentConfig(

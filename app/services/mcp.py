@@ -9,7 +9,6 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.tools import McpRegisterRequest
@@ -163,14 +162,11 @@ class McpService:
         if server is None:
             raise AppError(ERR_MCP_SERVER_NOT_FOUND, "MCP 源不存在")
         mcp_source = f"mcp:{server.id}"
-        stmt = select(ToolDefinition).where(
-            ToolDefinition.org_id == user.org_id,
-            ToolDefinition.mcp_source == mcp_source,
-            ToolDefinition.deleted_at.is_(None),
-        )
-        tool_rows = list((await db.execute(stmt)).scalars())
-        server_repo = McpServerRepository(db)
         tool_repo = ToolDefinitionRepository(db)
+        tool_rows = await tool_repo.table.list(
+            filter_fn=lambda t: t.mcp_source == mcp_source and t.deleted_at is None
+        )
+        server_repo = McpServerRepository(db)
         await server_repo.soft_delete(server)
         # 软删行 + 摘除 registry spec（I3：不残留 → 同进程重注册不被假 40903 挡）
         for row in tool_rows:

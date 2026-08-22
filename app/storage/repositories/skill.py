@@ -1,39 +1,32 @@
-"""Skill 数据访问（M7-A，docs 04 §3.11）。org 隔离 + 软删过滤；enabled 开关。
-
-对齐 tool_definition repo 惯用式（list_for_org/count_for_org/name_exists/soft_delete）。
-"""
+"""Skill 数据访问（M7-A，docs 04 §3.11）。软删过滤；enabled 开关。文件化：.agent/skills.json。"""
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.storage.file.store import get_store
 from app.storage.models.skill import Skill
 
 
 class SkillRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
+    def __init__(self, session=None) -> None:
+        self.session = session  # 兼容调用方传参（FileContext），文件化后不使用
+        self.table = get_store().table("skills")
 
     async def get_by_id(self, skill_id: uuid.UUID) -> Skill | None:
-        return await self.session.get(Skill, skill_id)
+        row = await self.table.get(skill_id)
+        if row is None or row.deleted_at is not None:
+            return None
+        return row
 
     async def get_by_org_name(self, org_id: uuid.UUID, name: str) -> Skill | None:
-        stmt = select(Skill).where(
-            Skill.org_id == org_id,
-            Skill.name == name,
-            Skill.deleted_at.is_(None),
+        rows = await self.table.list(
+            filter_fn=lambda s: s.name == name and s.deleted_at is None, limit=1
         )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+        return rows[0] if rows else None
 
     async def name_exists(self, org_id: uuid.UUID, name: str) -> bool:
-        stmt = select(Skill.id).where(
-            Skill.org_id == org_id,
-            Skill.name == name,
-            Skill.deleted_at.is_(None),
-        )
-        return (await self.session.execute(stmt)).first() is not None
+        return await self.get_by_org_name(org_id, name) is not None
 
     async def list_for_org(
         self,
@@ -43,32 +36,24 @@ class SkillRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> list[Skill]:
-        stmt = select(Skill).where(Skill.org_id == org_id, Skill.deleted_at.is_(None))
-        if enabled is not None:
-            stmt = stmt.where(Skill.enabled.is_(enabled))
-        stmt = stmt.order_by(Skill.created_at.desc()).limit(limit).offset(offset)
-        return list((await self.session.execute(stmt)).scalars())
+        return await self.table.list(
+            filter_fn=lambda s: s.deleted_at is None and (enabled is None or s.enabled == enabled),
+            sort_key=lambda s: s.created_at,
+            desc=True,
+            limit=limit,
+            offset=offset,
+        )
 
     async def count_for_org(self, org_id: uuid.UUID, *, enabled: bool | None = None) -> int:
-        stmt = select(func.count()).select_from(Skill).where(
-            Skill.org_id == org_id, Skill.deleted_at.is_(None)
+        return await self.table.count(
+            filter_fn=lambda s: s.deleted_at is None and (enabled is None or s.enabled == enabled)
         )
-        if enabled is not None:
-            stmt = stmt.where(Skill.enabled.is_(enabled))
-        return int((await self.session.execute(stmt)).scalar_one())
 
     async def list_enabled(self, org_id: uuid.UUID) -> list[Skill]:
         """本组织已启用 skills（主 agent 自动使用，镜像 tools list_enabled_names）。"""
-        stmt = (
-            select(Skill)
-            .where(
-                Skill.org_id == org_id,
-                Skill.enabled.is_(True),
-                Skill.deleted_at.is_(None),
-            )
-            .order_by(Skill.name)
+        return await self.table.list(
+            filter_fn=lambda s: s.enabled and s.deleted_at is None, sort_key=lambda s: s.name
         )
-        return list((await self.session.execute(stmt)).scalars())
 
     async def create(
         self,
@@ -88,11 +73,8 @@ class SkillRepository:
             source=source,
             enabled=enabled,
         )
-        self.session.add(skill)
+        self.table.register(skill)
         return skill
 
     async def soft_delete(self, skill: Skill) -> None:
-        from datetime import UTC, datetime
-
         skill.deleted_at = datetime.now(UTC)
-        self.session.add(skill)

@@ -67,9 +67,12 @@ class ProviderService:
         row.deleted_at = datetime.now(UTC)
         await db.commit()
 
-    async def sync_active_to_settings(self, db: AsyncSession, org_id: uuid.UUID) -> None:
-        """启动同步：启用 provider → 覆盖 Settings（LLMService 即用配置的 provider，docs 02 /settings）。"""
-        provider = await ProviderRepository(db).get_enabled(org_id)
+    async def sync_active_to_settings(self, db: AsyncSession | None = None, org_id: uuid.UUID | None = None) -> None:
+        """启动同步：启用 provider → 覆盖 Settings（LLMService 即用配置的 provider，docs 02 /settings）。
+
+        本地单机化：db/org_id 为兼容参数（文件化后忽略），读 providers.json。
+        """
+        provider = await ProviderRepository().get_enabled(org_id or uuid.UUID(int=0))
         if provider is None:
             return
         settings = get_settings()

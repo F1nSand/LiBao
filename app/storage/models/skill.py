@@ -6,22 +6,16 @@ org 级 skill = SKILL.md（name + description 路由描述 + body 正文）。�
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
-
-from app.storage.base import Base, BaseModel
+from app.storage.file.rows import Row
 
 
-class Skill(BaseModel, Base):
-    __tablename__ = "skills"
-
-    org_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("orgs.id"), index=True, nullable=False
-    )
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    body: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    source: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)  # manual/git
-    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+@dataclass(kw_only=True)
+class Skill(Row):
+    org_id: uuid.UUID
+    name: str
+    description: str = ""
+    body: str = ""
+    source: str = "manual"  # manual/git
+    enabled: bool = False

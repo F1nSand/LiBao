@@ -6,31 +6,25 @@ sandbox: none / docker / microvm；tool_type: perception / execution / collabora
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass, field
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
-
-from app.storage.base import Base, BaseModel
+from app.storage.file.rows import Row
 
 
-class ToolDefinition(BaseModel, Base):
-    __tablename__ = "tool_definitions"
-
-    org_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("orgs.id"), index=True, nullable=False
-    )
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    params_schema: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
-    tool_type: Mapped[str] = mapped_column(String(32), default="execution", nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    require_confirm: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    idempotent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    sandbox: Mapped[str] = mapped_column(String(16), default="none", nullable=False)
-    allowlist: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    timeout_ms: Mapped[int] = mapped_column(Integer, default=30000, nullable=False)
-    max_concurrency: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    mcp_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    mcp_tool_name: Mapped[str | None] = mapped_column(String(255), nullable=True)  # MCP 原始工具名（重建 spec 用）
-    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+@dataclass(kw_only=True)
+class ToolDefinition(Row):
+    org_id: uuid.UUID
+    name: str
+    description: str = ""
+    params_schema: dict = field(default_factory=dict)
+    tool_type: str = "execution"
+    enabled: bool = False
+    require_confirm: bool = False
+    idempotent: bool = False
+    sandbox: str = "none"
+    allowlist: list | None = None
+    timeout_ms: int = 30000
+    max_concurrency: int = 1
+    mcp_source: str | None = None
+    mcp_tool_name: str | None = None  # MCP 原始工具名（重建 spec 用）
+    version: int = 1

@@ -10,7 +10,6 @@ import uuid
 import pytest
 from langchain_core.messages import AIMessage
 
-from app.core.security import hash_password
 from app.orchestration.chat_stream import chat_stream_events
 from app.orchestration.graph import build_graph
 from app.storage.db import init_db
@@ -46,7 +45,7 @@ async def chat_fixture():
         org = Org(name=f"测试组织-t10-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"t10_{uid}", password_hash=hash_password("x"), name="T10", role="admin", org_id=org.id)
+        user = User(username=f"t10_{uid}", password_hash="hashed", name="T10", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         agent = AgentConfig(

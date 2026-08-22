@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ERR_TOOL_NAME_CONFLICT, ERR_TOOL_NOT_FOUND, AppError
 from app.services.serializers import serialize_tool_definition
+from app.storage.file.store import get_store
 from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
 from app.storage.repositories.tool_definition import ToolDefinitionRepository
@@ -124,45 +125,27 @@ class ToolService:
         if spec is not None:
             set_enabled(spec.id, False)
 
-    async def sync_registry_from_db(self, db: AsyncSession, org_id: uuid.UUID | None = None) -> None:
-        """启动同步（F7 + I5）：DB tool_definition.enabled 为事实源 → registry spec 跟随。
+    async def sync_registry_from_file(self) -> None:
+        """启动同步（本地单机化）：tool_definitions.json enabled 为事实源 → registry spec 跟随。
 
-        - org_id 指定（默认组织）：已有 spec 的行 set_enabled 跟随（F7 原语义，防测试
-          org 的 enabled=false 行把内置工具打成禁用）。
-        - org_id=None（全量启动）：只做 MCP 行重建（I5：其他 org 的 MCP 工具重启后
-          不能失效），不翻转已有 spec 的 enabled（防跨 org 污染）。
-        MCP 行（mcp_source 非空）：registry 无同名 spec → 从 mcp_servers 重建（惰性 handler）；
-        源已软删/停用 → 工具 spec 强制禁用。
+        已有 spec 的行 set_enabled 跟随；MCP 行（mcp_source 非空）：registry 无同名 spec →
+        从 mcp_servers.json 重建（惰性 handler）；源已软删/停用 → 工具 spec 强制禁用。
         """
-        repo = ToolDefinitionRepository(db)
-        rows = await repo.list_for_org(org_id, limit=10000) if org_id else await repo.list_for_org_all()
-        # MCP 行重建需读 mcp_servers：先批量取齐（一条 IN 查询），避免逐行 N+1（全量启动可达上千行）。
-        servers_by_id = await self._load_mcp_servers(db, [r for r in rows if r.mcp_source])
+        repo = ToolDefinitionRepository()
+        rows = await repo.list_for_org_all()
+        servers_by_id = await self._load_mcp_servers(rows)
         for row in rows:
             spec = get_by_name(row.name)
-            if spec is not None and org_id is not None:
+            if spec is not None:
                 set_enabled(spec.id, row.enabled)
             elif row.mcp_source:
                 self._sync_mcp_spec(row, servers_by_id)
 
-    async def _load_mcp_servers(
-        self, db: AsyncSession, mcp_rows: list[ToolDefinition]
-    ) -> dict[uuid.UUID, Any]:
-        """批量预取 MCP 源行（含软删，语义同 get_by_id_including_deleted），按 server_id 映射。"""
-        from sqlalchemy import select
+    async def _load_mcp_servers(self, mcp_rows: list[ToolDefinition]) -> dict[uuid.UUID, Any]:
+        """读 mcp_servers.json 全量（含软删，语义同 get_by_id_including_deleted），按 server_id 映射。"""
 
-        from app.storage.models.mcp_server import McpServer
-
-        ids: set[uuid.UUID] = set()
-        for row in mcp_rows:
-            try:
-                ids.add(uuid.UUID(row.mcp_source.removeprefix("mcp:")))
-            except ValueError:
-                continue  # M2：脏 mcp_source 行跳过，不击穿启动
-        if not ids:
-            return {}
-        stmt = select(McpServer).where(McpServer.id.in_(ids))
-        return {s.id: s for s in (await db.execute(stmt)).scalars()}
+        rows = await get_store().table("mcp_servers").list()
+        return {s.id: s for s in rows}
 
     def _sync_mcp_spec(self, row: ToolDefinition, servers_by_id: dict[uuid.UUID, Any]) -> None:
         """MCP 行重建：build_mcp_spec 注册 → enabled 跟随 DB 与源状态（server 已批量预取）。"""

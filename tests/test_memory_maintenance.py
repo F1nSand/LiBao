@@ -10,7 +10,6 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from app.core.errors import AppError
-from app.core.security import hash_password
 from app.services.memory import MemoryService, _extract_json, run_maintenance
 from app.storage.db import init_db
 from app.storage.file.store import get_store
@@ -45,7 +44,7 @@ async def maint_fixture():
         org = Org(name=f"测试组织-maint-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"maint_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+        user = User(username=f"maint_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.commit()
     yield sessionmaker, user
@@ -145,23 +144,24 @@ async def test_maintenance_invalid_update_id_60001(maint_fixture):
         assert exc.value.retryable is True
 
 
-async def test_maintenance_version_conflict_60001(maint_fixture):
-    """C4：并发写版本撞 UNIQUE(memory_id, version) → 60001 retryable（IntegrityError 在 commit 处）。"""
+async def test_maintenance_version_append_after_external_write(maint_fixture):
+    """文件化后无 UNIQUE 约束：外部写入 v2 后 maintenance 按 current_version 追加 v3（append-only）。"""
     sessionmaker, user = maint_fixture
     async with get_store().session(sessionmaker) as session:
         svc = MemoryService()
         card = await svc.create_card(session, user.id, "note", "并发", {"text": "v1"})
-        # 模拟另一 maintenance 已写入 version=2
-        session.add(
-            LongTermMemoryVersion(memory_id=card.id, version=2, content={"text": "外部 v2"}, importance=0.5)
+        # 模拟外部已写入 version=2（JSONL append）
+        await get_store().jsonl_append(
+            f"memory/default/cards/{card.id}.versions.jsonl",
+            LongTermMemoryVersion(memory_id=card.id, version=2, content={"text": "外部 v2"}, importance=0.5).to_dict(),
         )
         await session.commit()
     async with get_store().session(sessionmaker) as session:
         plan = {"update": [{"id": str(card.id), "content": {"text": "本会话 v2"}, "importance": 0.8}]}
-        with pytest.raises(AppError) as exc:
-            await run_maintenance(session, user.id, model=FakeMaintainModel(json.dumps(plan)))
-        assert exc.value.code == 60001
-        assert exc.value.retryable is True
+        await run_maintenance(session, user.id, model=FakeMaintainModel(json.dumps(plan)))
+        # 文件化无 UNIQUE 约束：外部 v2 与本会话 v2 并存（append-only 追加，不抛错）
+        versions = await MemoryService().list_versions(session, user.id, card.id)
+        assert len(versions) == 3  # v1 + 外部 v2 + 本会话追加
 
 
 async def test_maintenance_importance_clamped(maint_fixture):

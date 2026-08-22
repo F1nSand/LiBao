@@ -6,7 +6,6 @@ import uuid
 import pytest
 
 from app.core.errors import AppError
-from app.core.security import hash_password
 from app.services.events import drain_events
 from app.services.webhook import WebhookService
 from app.storage.db import init_db
@@ -29,7 +28,7 @@ async def hook_fixture():
         org = Org(name=f"测试组织-hook-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"hook_{uid}", password_hash=hash_password("x"), name="H", role="admin", org_id=org.id)
+        user = User(username=f"hook_{uid}", password_hash="hashed", name="H", role="admin", org_id=org.id)
         session.add(user)
         await session.commit()
     yield sessionmaker, user

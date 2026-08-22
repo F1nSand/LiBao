@@ -11,13 +11,13 @@ import pytest
 
 from app.api.schemas.tools import CreateToolRequest, McpRegisterRequest
 from app.core.errors import AppError
-from app.core.security import hash_password
 from app.services.mcp import McpService
 from app.services.tool import ToolService
 from app.storage.db import init_db
 from app.storage.file.store import get_store
-from app.storage.models import McpServer, Org, User
+from app.storage.models import Org, User
 from app.storage.repositories.mcp_server import McpServerRepository
+from app.storage.repositories.tool_definition import ToolDefinitionRepository
 from app.tools.mcp_client import McpConnectError, McpToolInfo
 from app.tools.registry import get, get_by_name
 from tests.conftest import requires_db
@@ -43,7 +43,7 @@ async def mcp_api_fixture(clean_mcp_specs, monkeypatch):
         org = Org(name=f"测试组织-mcpapi-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"mcpapi_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+        user = User(username=f"mcpapi_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.commit()
     tools_a = _fake_tools(uid)
@@ -73,16 +73,10 @@ async def test_register_creates_server_and_tool_rows(mcp_api_fixture):
         assert res["server"]["tool_count"] == 2
         assert [t["id"] for t in res["tools"]] == [f"mc_demo_{tool_a}", f"mc_demo_{tool_b}"]
         server_id = res["server"]["id"]
-        row = await session.get(McpServer, uuid.UUID(server_id))
+        row = await McpServerRepository().get_by_id_including_deleted(uuid.UUID(server_id))
         assert row.command == "python demo.py"
         # mcp_source 在工具行，不在 server 行
-        from sqlalchemy import select
-
-        from app.storage.models.tool_definition import ToolDefinition
-
-        tools = list(
-            (await session.execute(select(ToolDefinition).where(ToolDefinition.org_id == user.org_id))).scalars()
-        )
+        tools = await ToolDefinitionRepository().list_for_org_all()
         assert {t.name for t in tools} == {tool_a, tool_b}
         assert all(t.mcp_source == f"mcp:{server_id}" for t in tools)
         assert all(t.enabled is False for t in tools)
@@ -217,7 +211,7 @@ async def test_cross_org_custom_tool_blocked_by_mcp_spec(mcp_api_fixture):
         session.add(org_b)
         await session.flush()
         user_b = User(
-            username=f"b_{uuid.uuid4().hex[:6]}", password_hash=hash_password("x"),
+            username=f"b_{uuid.uuid4().hex[:6]}", password_hash="hashed",
             name="B", role="admin", org_id=org_b.id,
         )
         session.add(user_b)
@@ -239,7 +233,7 @@ async def test_cross_org_mcp_register_blocked_by_other_org_row(mcp_api_fixture, 
         session.add(org_b)
         await session.flush()
         user_b = User(
-            username=f"b_{uuid.uuid4().hex[:6]}", password_hash=hash_password("x"),
+            username=f"b_{uuid.uuid4().hex[:6]}", password_hash="hashed",
             name="B", role="admin", org_id=org_b.id,
         )
         session.add(user_b)

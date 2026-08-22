@@ -6,7 +6,6 @@ import uuid
 import pytest
 
 from app.core.config import get_settings
-from app.core.security import hash_password
 from app.storage.db import get_sessionmaker, init_db, set_sessionmaker
 from app.storage.file.store import get_store
 from app.storage.models import Attachment, Org, User
@@ -29,7 +28,7 @@ async def analyze_fixture(clean_mcp_specs, tmp_path, monkeypatch):
         org = Org(name=f"测试组织-ai-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"ai_{uid}", password_hash=hash_password("x"), name="T", role="admin", org_id=org.id)
+        user = User(username=f"ai_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         fpath = tmp_path / f"note-{uid}.txt"

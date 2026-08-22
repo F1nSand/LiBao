@@ -8,7 +8,6 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from app.core.errors import AppError
-from app.core.security import hash_password
 from app.orchestration.graph import build_graph
 from app.services.agent import AgentService
 from app.services.evolution import EvolutionService
@@ -47,7 +46,7 @@ async def evo_fixture():
         org = Org(name=f"测试组织-evo-{uid}")
         session.add(org)
         await session.flush()
-        user = User(username=f"evo_{uid}", password_hash=hash_password("x"), name="E", role="admin", org_id=org.id)
+        user = User(username=f"evo_{uid}", password_hash="hashed", name="E", role="admin", org_id=org.id)
         session.add(user)
         await session.flush()
         agent = AgentConfig(

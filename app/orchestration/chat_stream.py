@@ -22,7 +22,6 @@ from app.services.skill import SkillService
 from app.services.task import TaskService, push_event
 from app.services.tool import ToolService
 from app.storage.models.agent import AgentConfig
-from app.storage.models.attachment import Attachment
 from app.storage.models.conversation import Conversation
 from app.storage.models.message import Message
 from app.storage.models.task import Task
@@ -36,14 +35,12 @@ from app.storage.repositories.task import TaskRepository
 async def _backfill_attachments(
     db: AsyncSession, attachment_ids: list[str], conversation_id: uuid.UUID, message_id: uuid.UUID
 ) -> None:
-    """附件回填 conversation_id/message_id（消息回放时附件可解析归属）。"""
-    from sqlalchemy import update
+    """附件回填 conversation_id/message_id（消息回放时附件可解析归属）。文件化：逐行回填。"""
+    from app.storage.repositories.attachment import AttachmentRepository
 
-    await db.execute(
-        update(Attachment)
-        .where(Attachment.id.in_([uuid.UUID(a) for a in attachment_ids]))
-        .values(conversation_id=conversation_id, message_id=message_id)
-    )
+    repo = AttachmentRepository(db)
+    for aid in attachment_ids:
+        await repo.backfill_conversation(uuid.UUID(aid), conversation_id, message_id)
 
 logger = logging.getLogger(__name__)
 
