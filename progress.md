@@ -13,7 +13,8 @@
 - **HTTP 冒烟**：建工作区 → 写文件（返回 is_dir:false/size:11）→ mkdir → rename → 目录递归删 → 硬删 → 取回 40416 + root 目录消失，全链通过。
 - **docs 同步**：docs/03 §5.14 L393 DELETE 改硬删 + L401 POST is_dir + L402 目录递归删 + 新增 rename 行 + AC-6e 硬删例外。
 - **交接板**：FrontEnd/progress.md [open] 2026-08-21 → [done]（附后端实现摘要）。
-- **review/simplify gate（2026-08-22 收尾）**：review 2 agent 发现 C1（list_files Windows `\` 破坏前端 rename → 改 `.as_posix()`）+ I1（rmtree 无安全校验 → root 须落 workspaces_root 内才删）+ I2（write 写目录/rename 文件入自身路径 500 → 类型冲突守卫）+ I3（缺跨 org 隔离测试 → 补）+ I4（docstring 与归档行为不符 → 改注释），均修复。simplify 收敛 3 处（`_scalars` 复用 cleanup 模式 / 删未消费标签 / 去冗余 `.resolve()`）。**Minor 记备注未修**：M1 硬删与在途对话竞态（可用 `with_for_update` 行锁）、M2 符号链接解引用（删链接会连真文件删，与既有 file_ops 一致）、M3 Windows 大小写改名（a.md→A.md）被拒。修复后全量 **392 全绿 + ruff**。
+- **review/simplify gate（2026-08-22 收尾）**：review 2 agent 发现 C1（list_files Windows `\` 破坏前端 rename → 改 `.as_posix()`）+ I1（rmtree 无安全校验 → root 须落 workspaces_root 内才删）+ I2（write 写目录/rename 文件入自身路径 500 → 类型冲突守卫）+ I3（缺跨 org 隔离测试 → 补）+ I4（docstring 与归档行为不符 → 改注释），均修复。simplify 收敛 3 处（`_scalars` 复用 cleanup 模式 / 删未消费标签 / 去冗余 `.resolve()`）。修复后全量 **392 全绿 + ruff**。
+- **Minor 三项后补（2026-08-22，commit 待定）**：M1 `hard_delete` 加 `with_for_update` 行锁（串行化并发/重复删除 → 第二次 40416）+ 测试；M2 `delete_file`/`rename_file` 符号链接按链接本身删/改（不解引用真实目标，防误删指向文件）+ 测试（本机无开发者模式自动跳过，逻辑已审）；M3 `rename_file` Windows 大小写仅改名特例（a.md→A.md 不再误报目标已存在）+ 测试。seed 重跑落库「栗包」人设（agent v3 published，system_prompt 含栗包 + 自称统一用我）。全量 **394 通过 + 2 跳过（符号链接）** + ruff。**遗留**：`mcp_server.workspace_id` defer、工作区端到端联调（真实 LLM，前端已联调核验 PASS）、run_log org 列、测试污染根治 L3。
 
 ---
 

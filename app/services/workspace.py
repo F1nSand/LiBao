@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import uuid
@@ -205,8 +206,13 @@ class WorkspaceService:
         """硬删工作区：删 DB 行（级联）+ root 目录 + 附件磁盘文件（交接板 2026-08-21，用户拍板真删除）。
         org 隔离经 get_in_org 40416（不存在 / 他 org / 已软删）。"""
         ws = await self.get_in_org(db, user.org_id, workspace_id)
-        root = Path(ws.root_path)  # commit 前捕获，供 commit 后磁盘清理
-        attach_paths = await _cascade_delete_workspace(db, ws.id)
+        # M1 行锁：串行化并发 hard_delete（防同一工作区双删竞态；已删则 40416）
+        locked = await db.execute(select(Workspace).where(Workspace.id == ws.id).with_for_update())
+        locked_ws = locked.scalar_one_or_none()
+        if locked_ws is None:
+            raise AppError(ERR_WORKSPACE_NOT_FOUND, "工作区不存在或无权访问")
+        root = Path(locked_ws.root_path)  # commit 前捕获，供 commit 后磁盘清理
+        attach_paths = await _cascade_delete_workspace(db, locked_ws.id)
         await db.commit()
         # DB 是事实源：先 commit，rmtree 失败只是磁盘残留孤儿目录（可手动清理），与附件 soft_delete 模式一致
         await asyncio.to_thread(_purge_workspace_files, root, attach_paths)
@@ -281,6 +287,21 @@ class WorkspaceService:
             raise AppError(ERR_WORKSPACE_PATH_FORBIDDEN, "源路径不存在")
         if old_target == new_target:
             return  # old==new：POSIX 本为 no-op、Windows 会抛 FileExistsError，显式短路保证跨平台一致
+        # M2 符号链接优先：old 是链接时按链接本身重命名（old_target 已解引用到目标，target 语义检查会错位）
+        if (root / old_path).is_symlink():
+            # 大小写仅改名特例（Windows：link.txt → LINK.TXT）
+            if os.path.normcase(str(root / old_path)) == os.path.normcase(str(new_target)):
+                (root / old_path).rename(new_target)
+                return
+            if new_target.exists():
+                raise AppError(ERR_WORKSPACE_PATH_FORBIDDEN, "目标路径已存在")
+            new_target.parent.mkdir(parents=True, exist_ok=True)
+            (root / old_path).rename(new_target)
+            return
+        # M3 Windows 大小写仅改名特例（普通文件/目录：a.md → A.md），normcase 相等但字符串不同
+        if os.name == "nt" and os.path.normcase(str(old_target)) == os.path.normcase(str(new_target)):
+            old_target.rename(new_target)
+            return
         if new_target.exists():
             raise AppError(ERR_WORKSPACE_PATH_FORBIDDEN, "目标路径已存在")
         if new_target.is_relative_to(old_target):
@@ -294,6 +315,10 @@ class WorkspaceService:
         target = resolve_workspace_path(root, path)
         if target == root.resolve():
             raise AppError(ERR_WORKSPACE_PATH_FORBIDDEN, "不能删除工作区根目录")
+        # M2 符号链接：删链接本身，不解引用真实目标（防删链接误删其指向的文件/目录）
+        if (root / path).is_symlink():
+            await asyncio.to_thread((root / path).unlink, missing_ok=True)
+            return
         if target.is_dir():
             # 目录递归删（best-effort 容 Windows 文件锁；rmtree 默认按 lstat 删链，不跟随目录符号链接）
             await asyncio.to_thread(shutil.rmtree, target, ignore_errors=True)

@@ -223,6 +223,65 @@ async def test_file_ops_org_isolation_40416(workspace_fixture):
             assert exc.value.code == 40416
 
 
+async def test_hard_delete_twice_second_40416(workspace_fixture):
+    """重复硬删串行化（review M1 行锁语义）：第二次返回 40416。"""
+    sessionmaker, user, _ = workspace_fixture
+    async with sessionmaker() as session:
+        ws = await WorkspaceService().create(session, user, CreateWorkspaceRequest(name="dd"))
+        wid = str(ws.id)
+        await WorkspaceService().hard_delete(session, user, wid)
+        with pytest.raises(AppError) as exc:
+            await WorkspaceService().hard_delete(session, user, wid)
+        assert exc.value.code == 40416
+
+
+async def test_delete_symlink_removes_link_not_target(workspace_fixture):
+    """符号链接删除：删链接本身，真实目标保留（review M2）。无符号链接权限则跳过。"""
+    sessionmaker, user, _ = workspace_fixture
+    async with sessionmaker() as session:
+        ws = await WorkspaceService().create(session, user, CreateWorkspaceRequest(name="sym-del"))
+        wid = str(ws.id)
+        root = Path(ws.root_path)
+        (root / "real.txt").write_text("secret", encoding="utf-8")
+        try:
+            (root / "link.txt").symlink_to("real.txt")
+        except (OSError, NotImplementedError):
+            pytest.skip("当前环境不支持创建符号链接（需开发者模式/管理员）")
+        await WorkspaceService().delete_file(session, user, wid, "link.txt")
+        assert not (root / "link.txt").exists()
+        assert (root / "real.txt").read_text(encoding="utf-8") == "secret"
+
+
+async def test_rename_symlink_renames_link_not_target(workspace_fixture):
+    """符号链接重命名：链接本身移动，真实目标保留（review M2）。无符号链接权限则跳过。"""
+    sessionmaker, user, _ = workspace_fixture
+    async with sessionmaker() as session:
+        ws = await WorkspaceService().create(session, user, CreateWorkspaceRequest(name="sym-rn"))
+        wid = str(ws.id)
+        root = Path(ws.root_path)
+        (root / "real.txt").write_text("secret", encoding="utf-8")
+        try:
+            (root / "link.txt").symlink_to("real.txt")
+        except (OSError, NotImplementedError):
+            pytest.skip("当前环境不支持创建符号链接（需开发者模式/管理员）")
+        await WorkspaceService().rename_file(session, user, wid, "link.txt", "renamed.txt")
+        assert (root / "renamed.txt").is_symlink()
+        assert not (root / "link.txt").exists()
+        assert (root / "real.txt").read_text(encoding="utf-8") == "secret"
+
+
+async def test_rename_case_only(workspace_fixture):
+    """大小写仅改名（a.md → A.md）：Windows 特例应成功而非误报目标已存在（review M3）；POSIX 下是普通改名。"""
+    sessionmaker, user, _ = workspace_fixture
+    async with sessionmaker() as session:
+        ws = await WorkspaceService().create(session, user, CreateWorkspaceRequest(name="rn-case"))
+        wid = str(ws.id)
+        await WorkspaceService().write_file(session, user, wid, "readme.md", "x")
+        await WorkspaceService().rename_file(session, user, wid, "readme.md", "README.md")
+        out = await WorkspaceService().read_file_content(session, user, wid, "README.md")
+        assert "x" in out["content"]
+
+
 async def test_file_ops_roundtrip(workspace_fixture):
     sessionmaker, user, _ = workspace_fixture
     async with sessionmaker() as session:
