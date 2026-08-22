@@ -3,7 +3,7 @@ import { ref } from 'vue'
 /**
  * 后端接口可用性注册表（接真实后端用）。
  *
- * 背景：mock 对全部接口实现；真实后端尚未实现的端点（trajectory/notifications/users/system 部分）
+ * 背景：mock 对全部接口实现；真实后端尚未实现的端点（trajectory/notifications/system 部分）
  * 未注册路由 → FastAPI 默认 HTTP 404（非信封）。业务 404xx 走 AppError handler → HTTP 200 + 信封，
  * 两者在线上不重叠，故「HTTP 404」是「端点未实现」的可靠判别。
  *
@@ -16,7 +16,6 @@ export const FEATURE = {
   notificationsStream: 'notifications.stream',
   systemLogs: 'system.logs',
   systemTrace: 'system.trace',
-  hooks: 'hooks',
   providers: 'settings.providers',
   skills: 'skills',
   workspaces: 'workspaces',
@@ -34,7 +33,6 @@ const FEATURE_ROUTES: Array<[RegExp, Feature]> = [
   [/^\/notifications/, FEATURE.notifications],
   [/^\/system\/logs\/trace/, FEATURE.systemTrace],
   [/^\/system\/logs/, FEATURE.systemLogs],
-  [/^\/hooks/, FEATURE.hooks],
   [/^\/settings\/providers/, FEATURE.providers],
   [/^\/skills/, FEATURE.skills],
   [/^\/workspaces\/[^/]+\/files\/rename/, FEATURE.workspacesFiles],

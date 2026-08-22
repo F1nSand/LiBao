@@ -9,18 +9,12 @@ import type {
   SystemLog,
   Task,
   ToolDefinition,
-  User,
   Workspace,
   WorkspaceFile,
 } from '@/types'
 import { isoDate } from './util'
 
 /** Mock 种子数据（内存态，dev 重启即重置） */
-
-// 单用户本地模式：只保留固定 admin（mock 不再校验 token，用户数据仅用于归属字段）
-export const users: User[] = [
-  { id: 'u_admin', username: 'admin', name: '管理员', role: 'admin', org_id: 'org_1', org_name: '默认组织', enabled: true, created_at: isoDate(60) },
-]
 
 // 单通用 Agent 模型：chat/conversation/task 固定用组织默认通用 Agent（无 /agents 端点）
 export const DEFAULT_AGENT_ID = 'ag_default'

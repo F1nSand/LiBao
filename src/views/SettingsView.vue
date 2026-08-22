@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listHooks, registerHook, unregisterHook } from '@/api/hooks'
 import { listProviders, createProvider, updateProvider, deleteProvider } from '@/api/provider'
 import { FEATURE, isUnavailable } from '@/api/availability'
 import { swallowNotImplemented } from '@/utils/http-envelope'
-import { formatDate } from '@/utils/format'
 import EmptyState from '@/components/common/EmptyState.vue'
-import type { ProviderConfig, WebhookConfig } from '@/types'
+import type { ProviderConfig } from '@/types'
 
-/** 设置（docs/02 §4 / docs/03 §5.1）：单用户本地模式 → Provider 配置 + Webhook 管理 */
+/** 设置（docs/02 §4 / docs/03 §5.1）：单用户本地模式 → Provider 配置 */
 const tab = ref('provider')
 
 /* ---------- Provider 配置（契约见 api/provider.ts，后端未实现走降级） ---------- */
@@ -19,15 +17,8 @@ const providerDialog = ref(false)
 const providerForm = reactive({ name: 'openai', base_url: '', api_key: '', model: '' })
 const providerLoading = ref(false)
 
-/* ---------- Webhook 管理（docs/03 §5.10） ---------- */
-const hooks = ref<WebhookConfig[]>([])
-const hooksUnavailable = computed(() => isUnavailable(FEATURE.hooks))
-const hookDialog = ref(false)
-const hookForm = reactive({ tool_id: '', token: '', conversation_id: '' })
-
 onMounted(() => {
   void loadProviders()
-  void loadHooks()
 })
 
 /* ---------- Provider 配置 ---------- */
@@ -74,38 +65,6 @@ async function onDeleteProvider(id: string) {
   ElMessage.success('已删除')
   await loadProviders()
 }
-
-/* ---------- Webhook 管理 ---------- */
-async function loadHooks() {
-  const list = await swallowNotImplemented(listHooks())
-  if (list) hooks.value = list
-}
-
-async function registerWebhook() {
-  if (!hookForm.tool_id.trim() || !hookForm.token.trim()) {
-    ElMessage.warning('请填写 tool_id 与 token')
-    return
-  }
-  const created = await swallowNotImplemented(
-    registerHook(hookForm.tool_id.trim(), {
-      token: hookForm.token.trim(),
-      conversation_id: hookForm.conversation_id.trim() || undefined,
-    }),
-  )
-  if (created === undefined) return
-  hookDialog.value = false
-  Object.assign(hookForm, { tool_id: '', token: '', conversation_id: '' })
-  ElMessage.success('Webhook 已注册')
-  await loadHooks()
-}
-
-async function onDeleteHook(toolId: string) {
-  await ElMessageBox.confirm(`删除 ${toolId} 的 webhook？`, '确认删除', { type: 'warning' })
-  const ok = await swallowNotImplemented(unregisterHook(toolId))
-  if (ok === undefined) return
-  ElMessage.success('已删除')
-  await loadHooks()
-}
 </script>
 
 <template>
@@ -113,7 +72,7 @@ async function onDeleteHook(toolId: string) {
     <div class="app-page-header">
       <div>
         <h2 class="app-page-title">设置</h2>
-        <p class="app-page-subtitle">Provider 配置 / Webhook 管理</p>
+        <p class="app-page-subtitle">Provider 配置</p>
       </div>
     </div>
 
@@ -145,33 +104,6 @@ async function onDeleteHook(toolId: string) {
         </template>
         <EmptyState v-else text="后端暂未实现 Provider 配置接口（契约已发交接板）" />
       </el-tab-pane>
-
-      <!-- Webhook 管理（docs/03 §5.10） -->
-      <el-tab-pane label="Webhook 管理" name="hooks">
-        <template v-if="!hooksUnavailable">
-          <div class="users-toolbar">
-            <el-button type="primary" :icon="'Plus'" @click="hookDialog = true">注册 Webhook</el-button>
-          </div>
-          <el-table :data="hooks" size="small">
-            <el-table-column prop="tool_id" label="tool_id" width="160" />
-            <el-table-column label="目标会话" min-width="260">
-              <template #default="{ row }"><span class="mono">{{ row.conversation_id ?? '—' }}</span></template>
-            </el-table-column>
-            <el-table-column label="启用" width="80">
-              <template #default="{ row }">{{ row.enabled ? '是' : '否' }}</template>
-            </el-table-column>
-            <el-table-column prop="created_at" label="创建时间" width="180">
-              <template #default="{ row }">{{ row.created_at ? formatDate(row.created_at) : '—' }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="80">
-              <template #default="{ row }">
-                <el-button size="small" text type="danger" @click="onDeleteHook(row.tool_id)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </template>
-        <EmptyState v-else text="后端暂未实现 Webhook 接口" />
-      </el-tab-pane>
     </el-tabs>
 
     <!-- 添加 Provider -->
@@ -195,28 +127,11 @@ async function onDeleteHook(toolId: string) {
         <el-button type="primary" @click="saveProvider">保存</el-button>
       </template>
     </el-dialog>
-
-    <!-- 注册 Webhook -->
-    <el-dialog :model-value="hookDialog" title="注册 Webhook" width="460px" @close="hookDialog = false">
-      <el-form label-width="90px">
-        <el-form-item label="tool_id"><el-input v-model="hookForm.tool_id" placeholder="事件型工具的 id，如 tl_demo_notify" /></el-form-item>
-        <el-form-item label="Token"><el-input v-model="hookForm.token" placeholder="共享密钥（只存 hash，调用方需保管）" /></el-form-item>
-        <el-form-item label="目标会话"><el-input v-model="hookForm.conversation_id" placeholder="事件投递目标会话（可选）" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="hookDialog = false">取消</el-button>
-        <el-button type="primary" @click="registerWebhook">注册</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .users-toolbar {
   margin-bottom: 10px;
-}
-.mono {
-  font-family: var(--app-font-mono);
-  font-size: 12px;
 }
 </style>

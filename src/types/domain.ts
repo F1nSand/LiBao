@@ -1,7 +1,5 @@
 /** 领域枚举与常量（对齐 docs/03 §2.3、docs/04 §3） */
 
-export type Role = 'admin' | 'developer' | 'viewer'
-
 export type TaskStatus = 'pending' | 'running' | 'waiting_confirm' | 'cancelled' | 'done' | 'failed'
 
 export type ToolType = 'perception' | 'execution' | 'collaboration' | 'user_comms' | 'event' | 'agent_control'

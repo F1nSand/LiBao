@@ -4,7 +4,6 @@ import type {
   KbDocumentStatus,
   LogLevel,
   MessageRole,
-  Role,
   TaskStatus,
   ToolType,
   TokenUsage,
@@ -24,18 +23,6 @@ export interface Paged<T> {
   total: number
   page: number
   page_size: number
-}
-
-/** ---------- 用户（契约保留：role 为被动字段，前端单用户化后不再消费） ---------- */
-export interface User {
-  id: string
-  name: string
-  username?: string
-  role: Role
-  org_id?: string
-  org_name?: string
-  enabled?: boolean
-  created_at?: string
 }
 
 /** ---------- 对话 / 消息 ---------- */
@@ -425,20 +412,6 @@ export interface Notification {
   level: 'info' | 'success' | 'warning' | 'error'
   read: boolean
   created_at: string
-}
-
-/** ---------- Webhook（docs/03 §5.10） ---------- */
-export interface WebhookConfig {
-  id: string
-  tool_id: string
-  conversation_id?: string | null
-  enabled?: boolean
-  created_at?: string
-}
-
-export interface RegisterHookRequest {
-  token: string
-  conversation_id?: string
 }
 
 /** ---------- Provider 配置（前端定义契约 docs/03 §5.6，后端已实现 08-17） ---------- */

@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ChatRequest, KbCollection, KbDocument, Skill, ToolDefinition, Workspace } from '@/types'
 import {
-  users,
   DEFAULT_AGENT_ID,
   tools,
   skills,
@@ -22,7 +21,7 @@ import { buildChatScript, buildResumeScript, toEnvelope } from './stream'
 import { buildLongConversationNodes, buildTrajectoryNodes, paginateTrajectory } from './trajectory'
 
 /** 单用户本地模式：固定当前用户 = admin（mock 不再校验 token，用户仅用于归属字段） */
-const CURRENT_USER = users[0]
+const CURRENT_USER = { id: 'u_admin', org_id: 'org_1' }
 
 /* ---------- 工具函数 ---------- */
 
@@ -31,10 +30,7 @@ interface ParsedBody {
   files?: Array<{ name: string; filename: string; mimeType: string; size: number }>
 }
 
-/** mock webhook / provider 配置（内存态；provider 契约见 api/provider.ts） */
-const mockHooks: Array<Record<string, unknown>> = [
-  { id: 'hk_001', tool_id: 'tl_demo_notify', conversation_id: 'c_001', enabled: true, created_at: isoDate(120) },
-]
+/** mock provider 配置（内存态；provider 契约见 api/provider.ts） */
 const mockProviders: Array<Record<string, unknown>> = [
   { id: 'pv_001', name: 'openai', base_url: 'https://api.openai.com/v1', model: 'gpt-4o', enabled: true, has_key: true, created_at: isoDate(200) },
   { id: 'pv_002', name: 'deepseek', base_url: '', model: 'deepseek-chat', enabled: false, has_key: true, created_at: isoDate(100) },
@@ -620,21 +616,6 @@ export const mockServer = {
         }),
       )
     }
-    /* ===== Webhook（docs 03 §5.10） ===== */
-    if (method === 'GET' && pathname === '/hooks') return void json(res, ok(mockHooks))
-    p = match(pathname, '/hooks/:tool_id/register')
-    if (method === 'POST' && p) {
-      const hk = { id: uid('hk'), tool_id: p.tool_id, conversation_id: body.json?.conversation_id ?? null, enabled: true, created_at: isoDate(0) }
-      mockHooks.push(hk)
-      return void json(res, ok(hk))
-    }
-    p = match(pathname, '/hooks/:tool_id')
-    if (method === 'DELETE' && p) {
-      const toolId = p.tool_id
-      mockHooks.splice(mockHooks.findIndex((h) => h.tool_id === toolId), 1)
-      return void json(res, ok(null))
-    }
-
     /* ===== Provider 配置（前端契约 docs/03 §5.6，后端已实现；mock 演示） ===== */
     if (method === 'GET' && pathname === '/settings/providers') return void json(res, ok(mockProviders))
     if (method === 'POST' && pathname === '/settings/providers') {
