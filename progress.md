@@ -1,3 +1,28 @@
+# 进度账本 — 本地单机化改造（2026-08-22/23，L3，plan: agent-c-users-admin1-desktop-agent-md-cozy-walrus.md）
+
+## 会话收尾（2026-08-23 存档）
+
+**本地单机化改造全部完成**（P0-P8，commit 链 82c74d8 → 68553f3，tag v0-db-baseline → v4-modules-cut）：
+
+- **P0 基线**：393 passed + 2 skipped（符号链接环境跳过）@ 4a095d1，tag `v0-db-baseline`
+- **P0.5 LanceDB 验证**：Windows lancedb 0.37.1 connect/建表/merge_insert/cosine/过滤/目录可移植全过（无需降级）
+- **P1 存储基础层**（82c74d8，tag v1-file-core）：`app/storage/file/`（Row 数据类 + FileTable/JsonlTable + FileStore/FileContext 双轨）+ conversation/message/run_log/task 4 实体文件化（conversations.json / sessions JSONL / trace JSONL / tasks.json）+ JsonFileSaver（BaseCheckpointSaver 子类，.agent/checkpoints/）+ Redis 删除面（redis.py/worker.py/task_queue.py/instance.py 删，live-tail 进程内化，spawn_run/route_cancel 保留）
+- **P2 其余实体+认证折叠**（81201b1，tag v2-auth-folded）：9 实体文件化 + FileContext.add 自动注册兜底 + 固定 admin（constants.py DEFAULT_ORG_ID/ADMIN_USER/ADMIN_USER_ID）+ seed 重写 seed_if_first_run（16 工具启停 + 栗包人设）+ bootstrap 文件同步（sync_registry_from_file）
+- **P3 KB 检索层**（32c2ecb，tag v3-kb-lancedb）：kb 模型转 Row + KbRepository 文件化（集合 FileTable + kb/<coll>/index.json + documents/<doc_id>.md）+ LanceDB 向量（merge_insert upsert）+ bm25.py（rank_bm25 + space_cjk 复刻）+ hybrid_search/RRF/rerank/降级链代码原样保留 + kb_pipeline 去 sessionmaker
+- **P4 模块砍除+依赖清理**（428949d，tag v4-modules-cut）：删 eval/evolution/webhook 全套 + org 概念 + SQLAlchemy 依赖面（base.py/db.py/pyproject 全清）+ alembic/Dockerfile/docker-compose 删 + config/.env.example 单机化 + main.py 删 SelectorEventLoop/CORS；3 子代理并行修复 15 个测试文件 fixture
+- **P5 静态托管**（d911f66 + 668b7bc）：SPAStaticFiles 挂载 frontend_dist/（starlette 1.6 404 抛异常需捕获 HTTPException）+ start.sh/cmd 单进程启动
+- **P6 前端改造**（前端仓库 49b363c/c7ed798/c4f2f6f + 080cdaf）：删登录/鉴权/users/hooks + SettingsView 删用户与权限/Webhook tab + mock/e2e 同步；dist 复制 frontend_dist/ 进后端 git（拷贝即走）
+- **P7 测试与 CI**（cc8853a + 72c2fbe）：conftest 删 requires_db/redis + 4 新增测试（file_store/json_file_saver/bm25/seed_local）+ **BM25 IDF 恒正修复**（原负 IDF 致中文常见词排序反转，覆写 _calc_idf）+ ci.yml 简化
+- **P8 端到端验收**（68553f3）：**JsonFileSaver get_next_version 格式修复**（uuid4 → '{n:032}.{rand:016}' 对齐 MemorySaver，否则 langgraph 续跑解析版本失败 → 第二轮起图短路秒回旧 final_state）——HTTP 多轮对话/断点重启恢复/KB 上传→LanceDB 索引→混合检索命中/换机模拟（git archive + uv sync + 数据完整）全通；356 passed + 2 skipped + ruff 全过；docker ps 为空
+
+**验收（方案 §7 五项全达成）**：单进程无 Docker/Redis；建会话→发消息→断点续跑→重启恢复；KB 文档→分块/向量化进 LanceDB→混合检索命中（RRF 0.0164）；拷文件夹换机（仅装 Python）→ uv sync → 填 .env → 数据完整（含向量库目录）；docker ps 为空。
+
+**交接板**：前端 3 张 [open]（静态托管/去鉴权/死端点）已划 [done]（前端 commit 080cdaf）。
+
+**遗留（记录不修）**：JsonViewer.vue 曾有未提交改动被 lint 覆盖（git 层面无丢失，HEAD 为稳定版）；docs/（Desktop/Agent/docs/）9 篇架构文档未同步单机化改造（文档描述仍为 SQL/Redis 架构）；主动记忆（记忆工具/Mem0）仍待议。
+
+---
+
 # 进度账本 — plan: C:\Users\Admin1\Desktop\Agent\docs\plans\2026-08-20-m7b-workspace.md（M7-B）
 
 ## 会话收尾（2026-08-22 存档）
