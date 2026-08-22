@@ -182,7 +182,7 @@ async function onInterruptConfirm(approved: boolean) {
     <div class="ws-chat-toolbar">
       <el-radio-group v-model="mode" size="small">
         <el-radio-button value="chat">会话</el-radio-button>
-        <el-radio-button value="trajectory" :disabled="!currentId">对话轨迹</el-radio-button>
+        <el-radio-button value="trajectory" :disabled="!currentId">轨迹</el-radio-button>
       </el-radio-group>
       <StatusTag :status="currentStream.status ?? ''" />
     </div>

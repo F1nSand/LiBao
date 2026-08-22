@@ -28,5 +28,6 @@ const cfg = computed(() => MAP[props.status] ?? { type: 'info', label: props.sta
 </script>
 
 <template>
-  <el-tag :type="cfg.type" size="small" disable-transitions>{{ cfg.label }}</el-tag>
+  <!-- 空/未知状态不渲染气泡（如流式初始 status=null，避免出现空的 tag） -->
+  <el-tag v-if="cfg.label" :type="cfg.type" size="small" disable-transitions>{{ cfg.label }}</el-tag>
 </template>

@@ -8,8 +8,8 @@ test.describe('布局重构', () => {
     await page.locator('.conv-item').first().click()
     await expect(page.locator('.composer textarea')).toBeVisible()
 
-    // 切「对话轨迹」→ 内嵌时间轴出现、composer 隐藏
-    await page.locator('.el-radio-button', { hasText: '对话轨迹' }).click()
+    // 切「轨迹」→ 内嵌时间轴出现、composer 隐藏
+    await page.locator('.el-radio-button', { hasText: '轨迹' }).click()
     await expect(page.locator('.tj-timeline')).toBeVisible()
     await expect(page.locator('.composer textarea')).toBeHidden()
 
