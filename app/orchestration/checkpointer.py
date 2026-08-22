@@ -13,9 +13,9 @@ import asyncio
 import hashlib
 import json
 import os
+import random
 import tempfile
 import threading
-import uuid
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
@@ -85,8 +85,15 @@ class JsonFileSaver(BaseCheckpointSaver):
     # ---- BaseCheckpointSaver 同步核心 ----
 
     def get_next_version(self, current: Any, channel: Any) -> str:
-        # langgraph 只要求版本"每次调用不同"（用于 channel 更新检测），uuid4 即满足
-        return str(uuid.uuid4())
+        """版本格式与 MemorySaver 对齐：`{n:032}.{rand:016}`（langgraph 续跑时解析
+        int(version.split('.')[0]) 比较 channel 更新——uuid4 字符串会解析失败致续跑短路）。"""
+        if current is None:
+            current_v = 0
+        elif isinstance(current, int):
+            current_v = current
+        else:
+            current_v = int(str(current).split(".")[0])
+        return f"{current_v + 1:032}.{random.random():016}"
 
     def put(
         self,
