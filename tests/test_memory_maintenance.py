@@ -11,9 +11,8 @@ from langchain_core.messages import AIMessage
 
 from app.core.errors import AppError
 from app.services.memory import MemoryService, _extract_json, run_maintenance
-from app.storage.db import init_db
 from app.storage.file.store import get_store
-from app.storage.models import AgentConfig, Org, User
+from app.storage.models import AgentConfig, User
 from app.storage.models.memory import LongTermMemoryVersion
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
@@ -38,17 +37,13 @@ class FakeMaintainModel:
 
 @pytest.fixture
 async def maint_fixture():
-    engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with get_store().session(sessionmaker) as session:
-        org = Org(name=f"测试组织-maint-{uid}")
-        session.add(org)
+    async with get_store().session() as session:
         await session.flush()
-        user = User(username=f"maint_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
+        user = User(username=f"maint_{uid}", password_hash="hashed", name="T", role="admin", org_id=uuid.UUID(int=0))
         session.add(user)
         await session.commit()
-    yield sessionmaker, user
-    await engine.dispose()
+    yield user
 
 
 def test_extract_json_plain_and_fenced():
@@ -60,15 +55,15 @@ def test_extract_json_plain_and_fenced():
 
 
 async def test_maintenance_applies_plan(maint_fixture):
-    sessionmaker, user = maint_fixture
-    async with get_store().session(sessionmaker) as session:
+    user = maint_fixture
+    async with get_store().session() as session:
         svc = MemoryService()
         keep = await svc.create_card(session, user.id, "note", "保留", {"text": "keep"})
         upd = await svc.create_card(session, user.id, "note", "更新", {"text": "old"}, importance=0.3)
         dele = await svc.create_card(session, user.id, "note", "删除", {"text": "bye"})
         # maintenance 改读 messages：造一条 user 消息作为整理原料
         agent = AgentConfig(
-            org_id=user.org_id, name="maint-agent", model="fake", system_prompt="x", tools=[], max_steps=5,
+            org_id=uuid.UUID(int=0), name="maint-agent", model="fake", system_prompt="x", tools=[], max_steps=5,
             status="published",
         )
         session.add(agent)
@@ -107,8 +102,8 @@ async def test_maintenance_applies_plan(maint_fixture):
 
 
 async def test_maintenance_fenced_json(maint_fixture):
-    sessionmaker, user = maint_fixture
-    async with get_store().session(sessionmaker) as session:
+    user = maint_fixture
+    async with get_store().session() as session:
         plan = {"keep": [], "update": [], "create": [], "delete": []}
         result = await run_maintenance(
             session, user.id, model=FakeMaintainModel(f"```json\n{json.dumps(plan)}\n```")
@@ -117,8 +112,8 @@ async def test_maintenance_fenced_json(maint_fixture):
 
 
 async def test_maintenance_invalid_json_60001(maint_fixture):
-    sessionmaker, user = maint_fixture
-    async with get_store().session(sessionmaker) as session:
+    user = maint_fixture
+    async with get_store().session() as session:
         with pytest.raises(AppError) as exc:
             await run_maintenance(session, user.id, model=FakeMaintainModel("这不是 JSON"))
         assert exc.value.code == 60001
@@ -126,8 +121,8 @@ async def test_maintenance_invalid_json_60001(maint_fixture):
 
 
 async def test_maintenance_llm_error_60001(maint_fixture):
-    sessionmaker, user = maint_fixture
-    async with get_store().session(sessionmaker) as session:
+    user = maint_fixture
+    async with get_store().session() as session:
         with pytest.raises(AppError) as exc:
             await run_maintenance(session, user.id, model=FakeMaintainModel("{}", raise_error=True))
         assert exc.value.code == 60001
@@ -135,8 +130,8 @@ async def test_maintenance_llm_error_60001(maint_fixture):
 
 async def test_maintenance_invalid_update_id_60001(maint_fixture):
     """C2/S4：LLM 输出合法 JSON 但 update id 非法 UUID → 60001 retryable（非裸 500）。"""
-    sessionmaker, user = maint_fixture
-    async with get_store().session(sessionmaker) as session:
+    user = maint_fixture
+    async with get_store().session() as session:
         plan = {"update": [{"id": "not-a-uuid", "content": {"text": "x"}}], "create": [], "delete": []}
         with pytest.raises(AppError) as exc:
             await run_maintenance(session, user.id, model=FakeMaintainModel(json.dumps(plan)))
@@ -146,8 +141,8 @@ async def test_maintenance_invalid_update_id_60001(maint_fixture):
 
 async def test_maintenance_version_append_after_external_write(maint_fixture):
     """文件化后无 UNIQUE 约束：外部写入 v2 后 maintenance 按 current_version 追加 v3（append-only）。"""
-    sessionmaker, user = maint_fixture
-    async with get_store().session(sessionmaker) as session:
+    user = maint_fixture
+    async with get_store().session() as session:
         svc = MemoryService()
         card = await svc.create_card(session, user.id, "note", "并发", {"text": "v1"})
         # 模拟外部已写入 version=2（JSONL append）
@@ -156,7 +151,7 @@ async def test_maintenance_version_append_after_external_write(maint_fixture):
             LongTermMemoryVersion(memory_id=card.id, version=2, content={"text": "外部 v2"}, importance=0.5).to_dict(),
         )
         await session.commit()
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         plan = {"update": [{"id": str(card.id), "content": {"text": "本会话 v2"}, "importance": 0.8}]}
         await run_maintenance(session, user.id, model=FakeMaintainModel(json.dumps(plan)))
         # 文件化无 UNIQUE 约束：外部 v2 与本会话 v2 并存（append-only 追加，不抛错）
@@ -165,8 +160,8 @@ async def test_maintenance_version_append_after_external_write(maint_fixture):
 
 
 async def test_maintenance_importance_clamped(maint_fixture):
-    sessionmaker, user = maint_fixture
-    async with get_store().session(sessionmaker) as session:
+    user = maint_fixture
+    async with get_store().session() as session:
         plan = {
             "keep": [],
             "update": [],
@@ -180,10 +175,10 @@ async def test_maintenance_importance_clamped(maint_fixture):
 
 async def test_maintenance_reads_recent_messages(maint_fixture):
     """run_maintenance 改读 messages（memory_trace 已删）：LLM 收到最近对话含 user+assistant 消息。"""
-    sessionmaker, user = maint_fixture
-    async with get_store().session(sessionmaker) as session:
+    user = maint_fixture
+    async with get_store().session() as session:
         agent = AgentConfig(
-            org_id=user.org_id, name="maint-agent", model="fake", system_prompt="x", tools=[], max_steps=5,
+            org_id=uuid.UUID(int=0), name="maint-agent", model="fake", system_prompt="x", tools=[], max_steps=5,
             status="published",
         )
         session.add(agent)
@@ -201,7 +196,7 @@ async def test_maintenance_reads_recent_messages(maint_fixture):
             captured["prompt"] = messages[0].content
             return AIMessage(content=json.dumps({"keep": [], "update": [], "create": [], "delete": []}))
 
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         await run_maintenance(session, user.id, model=CaptureModel("{}"))  # content 占位，ainvoke 被覆写
     assert "用户说喜欢喝咖啡" in captured["prompt"]
     assert "已记录偏好" in captured["prompt"]

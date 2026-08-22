@@ -2,6 +2,7 @@
 
 缓存键 = sha256({model, system_prompt, tools(sorted)})；任何静态前缀改动即产生新 hash。
 """
+
 from __future__ import annotations
 
 import hashlib

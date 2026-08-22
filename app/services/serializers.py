@@ -1,11 +1,11 @@
 """ORM → API 契约 dict（docs 03 §5 / FrontEnd types，字段 snake_case）。"""
+
 from __future__ import annotations
 
 from typing import Any
 
 from app.storage.models.attachment import Attachment
 from app.storage.models.conversation import Conversation
-from app.storage.models.eval import EvalCase, EvalResult, EvalRun, EvalSet
 from app.storage.models.kb import KbCollection, KbDocument
 from app.storage.models.mcp_server import McpServer
 from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion
@@ -245,56 +245,6 @@ def serialize_notification(n: Notification) -> dict[str, Any]:
         "level": n.level,
         "read": n.read,
         "created_at": _dt(n.created_at),
-    }
-
-
-def serialize_eval_set(s: EvalSet, case_count: int = 0) -> dict[str, Any]:
-    """评估集（docs 03 §5.8 / FrontEnd EvalSet）。"""
-    return {
-        "id": str(s.id),
-        "name": s.name,
-        "description": s.description,
-        "case_count": case_count,
-        "created_at": _dt(s.created_at),
-    }
-
-
-def serialize_eval_case(c: EvalCase) -> dict[str, Any]:
-    """评估用例（FrontEnd EvalCase）。"""
-    return {
-        "id": str(c.id),
-        "eval_set_id": str(c.eval_set_id),
-        "input": c.input,
-        "expected": c.expected,
-        "layer": c.layer,  # L1-L5 分层（docs 06 §3.1）
-        "active": c.active,
-    }
-
-
-def serialize_eval_run(r: EvalRun) -> dict[str, Any]:
-    """评估运行（FrontEnd EvalRun）。progress 0-1。"""
-    return {
-        "id": str(r.id),
-        "eval_set_id": str(r.eval_set_id),
-        "baseline_run_id": str(r.baseline_run_id) if r.baseline_run_id else None,  # 配对比较基线（docs 06 §2.4）
-        "status": r.status,
-        "progress": r.progress,
-        "pass_rate": r.pass_rate,
-        "created_at": _dt(r.created_at),
-    }
-
-
-def serialize_eval_result(r: EvalResult) -> dict[str, Any]:
-    """评估结果（FrontEnd EvalCaseResult）。"""
-    return {
-        "case_id": str(r.case_id),
-        "input": r.input,
-        "expected": r.expected,
-        "actual": r.actual,
-        "pass": r.pass_,
-        "score": r.score,
-        "latency_ms": r.latency_ms,
-        "cost": r.cost,
     }
 
 

@@ -1,4 +1,5 @@
 """工作区 schema（M7-B，docs 03 §5.14）。"""
+
 from __future__ import annotations
 
 from pydantic import BaseModel

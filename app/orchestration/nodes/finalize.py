@@ -2,6 +2,7 @@
 
 final_message shape：{role, content, tool_calls[], token_usage, trace_id?}；tool_calls 来自 tool_results（独立核对）。
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional

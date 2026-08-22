@@ -3,6 +3,7 @@
 org 级 skill = SKILL.md（name + description 路由描述 + body 正文）。默认 enabled=false（约束优先）。
 主 agent 自动使用 org 内 enabled skills：路由描述进 system_prompt 前缀，正文经 tl_load_skill 按需取回。
 """
+
 from __future__ import annotations
 
 import uuid

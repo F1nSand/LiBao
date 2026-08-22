@@ -4,6 +4,7 @@
 （主 Agent 只传「任务描述 + 已确认事实 + 文件路径」，subagent 只回传结论）。
 内置注册表（代码定义）；用户自建 subagent / 工作流属于后续「工作区」项目（docs 07）。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

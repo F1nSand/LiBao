@@ -4,6 +4,7 @@ token 级流式不在此 yield：T10 用 graph.astream(stream_mode=["messages"])
 测试注入：config["configurable"]["model"] 可覆盖模型（mock LLM）。
 run_log（type=llm）与 totals（token 累计）在此收集，T10 统一落库。
 """
+
 from __future__ import annotations
 
 import time

@@ -1,5 +1,6 @@
 """内置工具注册。M1 tl_time_now / M2 tl_demo_notify / M2.5 tl_tool_search / M3 tl_kb_search /
 M3.5 tl_fetch_url + tl_analyze_image（docs 07 RM-8 / docs 04 F4）/ M4.5 tl_dispatch_subagent（单主 Agent 派发）。"""
+
 from __future__ import annotations
 
 from app.tools.builtin import (

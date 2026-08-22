@@ -5,6 +5,7 @@ M4 完整版最小闭环（docs 01 §5.3.1/§5.3.2）+ M5/M6 前补强：
 - 占位任务超 TTL（看门狗）→ 发超时回填 tool_result（placeholder:false + error）+ 移除；
 - urgent 事件置顶进 context（「紧急」优先响应；regular 排后；light 预留）。
 """
+
 from __future__ import annotations
 
 import time

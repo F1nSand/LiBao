@@ -2,6 +2,7 @@
 
 文件化：.agent/sessions/<conversation_id>.jsonl（append-only，追加即落盘）。
 """
+
 from __future__ import annotations
 
 import uuid

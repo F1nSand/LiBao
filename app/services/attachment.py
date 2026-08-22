@@ -3,12 +3,12 @@
 状态机：uploaded → analyzing → ready | failed（前端 2.5s 轮询 /attachments/{id}/analysis）。
 分析链：图片 → ready + 视觉降级文本（I2，无 VLM）；txt/md → utf-8 提取；pdf/office → 仅 metadata。
 """
+
 from __future__ import annotations
 
 import uuid
 from pathlib import Path
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any
 
 from app.core.config import get_settings
 from app.core.errors import (
@@ -29,7 +29,7 @@ from app.storage.repositories.attachment import AttachmentRepository
 class AttachmentService:
     async def save_upload(
         self,
-        db: AsyncSession,
+        db: Any,
         user: User,
         filename: str,
         content_type: str,
@@ -58,7 +58,7 @@ class AttachmentService:
         _spawn_analyze(row.id)
         return row
 
-    async def get_attachment(self, db: AsyncSession, user: User, attachment_id: uuid.UUID) -> Attachment:
+    async def get_attachment(self, db: Any, user: User, attachment_id: uuid.UUID) -> Attachment:
         row = await AttachmentRepository(db).get(user.id, attachment_id)
         if row is None:
             raise AppError(ERR_ATTACHMENT_NOT_FOUND, "附件不存在或无权访问")
@@ -70,7 +70,7 @@ class AttachmentService:
         except OSError as exc:
             raise AppError(ERR_ATTACH_STORAGE_FAILURE, f"附件读取失败: {exc}") from exc
 
-    async def get_analysis(self, db: AsyncSession, user: User, attachment_id: uuid.UUID) -> dict:
+    async def get_analysis(self, db: Any, user: User, attachment_id: uuid.UUID) -> dict:
         att = await self.get_attachment(db, user, attachment_id)
         if att.status == "failed":
             raise AppError(ERR_ATTACH_ANALYSIS_FAILURE, att.error or "附件分析失败")
@@ -82,7 +82,7 @@ class AttachmentService:
             "error": att.error,
         }
 
-    async def soft_delete(self, db: AsyncSession, user: User, attachment_id: uuid.UUID) -> None:
+    async def soft_delete(self, db: Any, user: User, attachment_id: uuid.UUID) -> None:
         att = await self.get_attachment(db, user, attachment_id)
         await AttachmentRepository(db).soft_delete(att)
         await db.commit()

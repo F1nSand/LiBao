@@ -12,9 +12,8 @@ from langchain_core.messages import AIMessage
 
 from app.orchestration.chat_stream import chat_stream_events
 from app.orchestration.graph import build_graph
-from app.storage.db import init_db
 from app.storage.file.store import get_store
-from app.storage.models import AgentConfig, Conversation, Org, User
+from app.storage.models import AgentConfig, Conversation, User
 from app.storage.repositories.message import MessageRepository
 from tests.conftest import requires_db
 
@@ -39,17 +38,14 @@ class FakeChatModel:
 
 @pytest.fixture
 async def chat_fixture():
-    engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with get_store().session(sessionmaker) as session:
-        org = Org(name=f"测试组织-t10-{uid}")
-        session.add(org)
+    async with get_store().session() as session:
         await session.flush()
-        user = User(username=f"t10_{uid}", password_hash="hashed", name="T10", role="admin", org_id=org.id)
+        user = User(username=f"t10_{uid}", password_hash="hashed", name="T10", role="admin", org_id=uuid.UUID(int=0))
         session.add(user)
         await session.flush()
         agent = AgentConfig(
-            org_id=org.id,
+            org_id=uuid.UUID(int=0),
             name="T10时间助手",
             model="fake",
             system_prompt="你是时间助手。",
@@ -62,18 +58,17 @@ async def chat_fixture():
         conv = Conversation(user_id=user.id, agent_id=agent.id, title="t10会话")
         session.add(conv)
         await session.commit()
-    yield sessionmaker, org, user, agent, conv
-    await engine.dispose()
+    yield user, agent, conv
 
 
 async def test_chat_stream_event_sequence(chat_fixture):
     from app.tools.builtin import register_builtin_tools
 
     register_builtin_tools()
-    sessionmaker, org, user, agent, conv = chat_fixture
+    user, agent, conv = chat_fixture
     graph = build_graph()
 
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         frames = []
         async for frame in chat_stream_events(
             db=session,
@@ -128,10 +123,10 @@ async def test_message_seal_carries_cost(chat_fixture):
     from app.tools.builtin import register_builtin_tools
 
     register_builtin_tools()
-    sessionmaker, org, user, agent, conv = chat_fixture
+    user, agent, conv = chat_fixture
     graph = build_graph()
 
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         frames = []
         async for frame in chat_stream_events(
             db=session, graph=graph, conversation=conv, agent=agent, user=user,
@@ -158,7 +153,7 @@ async def test_thinking_event_and_persistence(chat_fixture):
     from app.tools.builtin import register_builtin_tools
 
     register_builtin_tools()
-    sessionmaker, org, user, agent, conv = chat_fixture
+    user, agent, conv = chat_fixture
 
     class ThinkingModel(FakeChatModel):
         async def ainvoke(self, messages):
@@ -167,7 +162,7 @@ async def test_thinking_event_and_persistence(chat_fixture):
             return resp
 
     graph = build_graph()
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         frames = []
         async for frame in chat_stream_events(
             db=session, graph=graph, conversation=conv, agent=agent, user=user,

@@ -2,6 +2,7 @@
 
 api_key 只写不读：API 响应仅 has_key 布尔；明文仅存文件（供启动同步到 LLM 客户端），永不回传。
 """
+
 from __future__ import annotations
 
 import uuid

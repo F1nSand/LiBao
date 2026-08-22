@@ -7,9 +7,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.services.conversation import ConversationService
-from app.storage.db import init_db
 from app.storage.file.store import get_store
-from app.storage.models import AgentConfig, Conversation, Org, User
+from app.storage.models import AgentConfig, Conversation, User
 from app.storage.repositories.message import MessageRepository
 from tests.conftest import requires_db
 
@@ -18,17 +17,15 @@ pytestmark = requires_db
 
 @pytest.fixture
 async def traj_fixture():
-    engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with get_store().session(sessionmaker) as session:
-        org = Org(name=f"测试组织-traj-{uid}")
-        session.add(org)
+    async with get_store().session() as session:
         await session.flush()
-        user = User(username=f"traj_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
+        user = User(username=f"traj_{uid}", password_hash="hashed", name="T", role="admin", org_id=uuid.UUID(int=0))
         session.add(user)
         await session.flush()
         agent = AgentConfig(
-            org_id=org.id, name="轨迹助手", model="fake", system_prompt="x", tools=[], max_steps=5, status="published"
+            org_id=uuid.UUID(int=0), name="轨迹助手", model="fake", system_prompt="x",
+            tools=[], max_steps=5, status="published"
         )
         session.add(agent)
         await session.flush()
@@ -62,13 +59,12 @@ async def traj_fixture():
         m3 = await repo.create(conversation_id=conv.id, role="user", content="第二条", trace_id="t3")
         m3.created_at = base + timedelta(seconds=2)
         await session.commit()
-    yield sessionmaker, user, conv
-    await engine.dispose()
+    yield user, conv
 
 
 async def test_trajectory_mapping_and_pagination(traj_fixture):
-    sessionmaker, user, conv = traj_fixture
-    async with get_store().session(sessionmaker) as session:
+    user, conv = traj_fixture
+    async with get_store().session() as session:
         data = await ConversationService().trajectory(session, conv)
         assert data["conversation_id"] == str(conv.id)
         assert data["has_more"] is False

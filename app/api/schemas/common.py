@@ -1,4 +1,5 @@
 """通用分页（docs 03 §5 契约：Paged<T> = {items, total, page, page_size}）。"""
+
 from __future__ import annotations
 
 from typing import Any

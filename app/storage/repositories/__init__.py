@@ -1,4 +1,5 @@
 """repositories 统一出口。"""
+
 from __future__ import annotations
 
 from app.storage.repositories.agent import AgentRepository

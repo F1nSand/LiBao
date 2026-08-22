@@ -4,12 +4,11 @@ DB tool_definition 是元数据事实源，registry 是可执行实现宿主，�
 API id = registry spec.id（内置）或 "tl_" + name（无 spec 的 DB 工具）。
 PATCH/DELETE 经 registry.set_enabled 同步启用态（默认关闭原则实时生效）。
 """
+
 from __future__ import annotations
 
 import uuid
 from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ERR_TOOL_NAME_CONFLICT, ERR_TOOL_NOT_FOUND, AppError
 from app.services.serializers import serialize_tool_definition
@@ -28,7 +27,7 @@ def resolve_name(tool_id: str) -> str:
 
 class ToolService:
     async def list_for_org(
-        self, db: AsyncSession, org_id: uuid.UUID, page: int, page_size: int, enabled: bool | None = None
+        self, db: Any, org_id: uuid.UUID, page: int, page_size: int, enabled: bool | None = None
     ) -> dict[str, Any]:
         repo = ToolDefinitionRepository(db)
         items = await repo.list_for_org(org_id, enabled=enabled, limit=page_size, offset=(page - 1) * page_size)
@@ -37,7 +36,7 @@ class ToolService:
 
         return paged([serialize_tool_definition(t) for t in items], total, page, page_size)
 
-    async def get_in_org(self, db: AsyncSession, org_id: uuid.UUID, tool_id: str) -> ToolDefinition:
+    async def get_in_org(self, db: Any, org_id: uuid.UUID, tool_id: str) -> ToolDefinition:
         # spec.id（内置 tl_* / MCP mc_*）优先解析为 spec.name；无 spec 的 DB 工具走 tl_ 前缀
         spec = get(tool_id)
         name = spec.name if spec is not None else resolve_name(tool_id)
@@ -46,7 +45,7 @@ class ToolService:
             raise AppError(ERR_TOOL_NOT_FOUND, "工具不存在或无权访问")
         return row
 
-    async def create(self, db: AsyncSession, user: User, req: Any) -> ToolDefinition:
+    async def create(self, db: Any, user: User, req: Any) -> ToolDefinition:
         repo = ToolDefinitionRepository(db)
         # I4：org 内查重 + 全局 registry 查重（registry 全局化：同名 spec 会让本行绑定到他人工具）。
         # tl_* 内置 spec 是平台拥有的（M2 既定模式：DB 行绑定内置实现，如 time_now），不挡。
@@ -71,7 +70,7 @@ class ToolService:
         await db.refresh(row)
         return row
 
-    async def update(self, db: AsyncSession, user: User, tool_id: str, req: Any) -> ToolDefinition:
+    async def update(self, db: Any, user: User, tool_id: str, req: Any) -> ToolDefinition:
         repo = ToolDefinitionRepository(db)
         row = await self.get_in_org(db, user.org_id, tool_id)
         if req.name is not None and req.name != row.name:
@@ -105,7 +104,7 @@ class ToolService:
             )
         return row
 
-    async def set_enabled(self, db: AsyncSession, user: User, tool_id: str, enabled: bool) -> ToolDefinition:
+    async def set_enabled(self, db: Any, user: User, tool_id: str, enabled: bool) -> ToolDefinition:
         row = await self.get_in_org(db, user.org_id, tool_id)
         row.enabled = enabled
         await db.commit()
@@ -116,7 +115,7 @@ class ToolService:
             set_enabled(spec.id, enabled)
         return row
 
-    async def soft_delete(self, db: AsyncSession, user: User, tool_id: str) -> None:
+    async def soft_delete(self, db: Any, user: User, tool_id: str) -> None:
         row = await self.get_in_org(db, user.org_id, tool_id)
         await ToolDefinitionRepository(db).soft_delete(row)
         await db.commit()
@@ -165,7 +164,7 @@ class ToolService:
         # 已注册或刚重建：同步 enabled（多行同名时最后处理的行决定状态；生产被 I4 挡同名，防脏数据）
         set_enabled(mcp_spec_id(server.name, row.name), usable)
 
-    async def search(self, db: AsyncSession, org_id: uuid.UUID, q: str) -> list[dict[str, Any]]:
+    async def search(self, db: Any, org_id: uuid.UUID, q: str) -> list[dict[str, Any]]:
         rows = await ToolDefinitionRepository(db).search(org_id, q)
         # id 派生规则与 serialize_tool_definition 一致（单一来源）；排除 meta 工具（平台发现层不自发现）
         return [
@@ -174,7 +173,7 @@ class ToolService:
             if (spec := get_by_name(t.name)) is None or not spec.meta
         ]
 
-    async def enabled_tool_ids(self, db: AsyncSession, org_id: uuid.UUID) -> list[str]:
+    async def enabled_tool_ids(self, db: Any, org_id: uuid.UUID) -> list[str]:
         """本组织已启用工具 → registry spec id（MCP/自定义启用即对通用助手开放，org 隔离）。"""
         names = await ToolDefinitionRepository(db).list_enabled_names(org_id)
         ids = []
@@ -183,7 +182,7 @@ class ToolService:
             ids.append(spec.id if spec is not None else f"tl_{n}")
         return ids
 
-    async def test(self, db: AsyncSession, org_id: uuid.UUID, tool_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def test(self, db: Any, org_id: uuid.UUID, tool_id: str, params: dict[str, Any]) -> dict[str, Any]:
         row = await self.get_in_org(db, org_id, tool_id)
         spec = get_by_name(row.name)
         if spec is None:

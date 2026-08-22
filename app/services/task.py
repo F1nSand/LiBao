@@ -4,6 +4,7 @@
 live-tail：进程内订阅表直投（本地单机化，Redis 已删）。
 I8 规则：resume 前置校验——不存在/软删→40402；status≠waiting_confirm→40902；pending_confirm 超 TTL→40902。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -11,8 +12,6 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import ERR_STATE_NOT_CANCELLABLE, ERR_TASK_NOT_FOUND, AppError
@@ -60,14 +59,14 @@ async def unsubscribe(task_id: str, q: asyncio.Queue) -> None:
 
 class TaskService:
     # ---- 查询 ----
-    async def get_owned(self, db: AsyncSession, task_id: uuid.UUID, user_id: uuid.UUID) -> Task:
+    async def get_owned(self, db: Any, task_id: uuid.UUID, user_id: uuid.UUID) -> Task:
         task = await TaskRepository(db).get_by_id(task_id)
         if task is None or str(task.user_id) != str(user_id):
             raise AppError(ERR_TASK_NOT_FOUND, "任务不存在或无权访问")
         return task
 
     async def list_owned(
-        self, db: AsyncSession, user_id: uuid.UUID, page: int, page_size: int, status: str | None = None
+        self, db: Any, user_id: uuid.UUID, page: int, page_size: int, status: str | None = None
     ) -> dict[str, Any]:
         repo = TaskRepository(db)
         items = await repo.list_for_user(user_id, status=status, limit=page_size, offset=(page - 1) * page_size)
@@ -77,7 +76,7 @@ class TaskService:
         return paged([serialize_task(t) for t in items], total, page, page_size)
 
     # ---- 提交 / 状态迁移 ----
-    async def submit(self, db: AsyncSession, user: User, agent_id: uuid.UUID, input: dict[str, Any]) -> Task:
+    async def submit(self, db: Any, user: User, agent_id: uuid.UUID, input: dict[str, Any]) -> Task:
         task = await TaskRepository(db).create(user_id=user.id, agent_id=agent_id, input=input, status="pending")
         await db.commit()
         await db.refresh(task)
@@ -85,7 +84,7 @@ class TaskService:
 
     async def create_waiting_confirm(
         self,
-        db: AsyncSession,
+        db: Any,
         *,
         user: User,
         agent_id: uuid.UUID,
@@ -110,18 +109,18 @@ class TaskService:
         await db.refresh(task)
         return task
 
-    async def set_running(self, db: AsyncSession, task: Task) -> None:
+    async def set_running(self, db: Any, task: Task) -> None:
         await TaskRepository(db).update_status(task, "running", progress=0.5)
         task.started_at = task.started_at or datetime.now(UTC)
         await db.commit()
         await db.refresh(task)
 
-    async def set_cancelled(self, db: AsyncSession, task: Task) -> None:
+    async def set_cancelled(self, db: Any, task: Task) -> None:
         await TaskRepository(db).update_status(task, "cancelled")
         await db.commit()
         await db.refresh(task)
 
-    async def set_done(self, db: AsyncSession, task: Task, final_message: dict[str, Any]) -> None:
+    async def set_done(self, db: Any, task: Task, final_message: dict[str, Any]) -> None:
         await TaskRepository(db).update_finish(task, status="done", output=final_message)
         await db.commit()
         await db.refresh(task)
@@ -135,7 +134,7 @@ class TaskService:
                 body=str((final_message or {}).get("content", ""))[:200] or None,
             )
 
-    async def set_failed(self, db: AsyncSession, task: Task, message: str) -> None:
+    async def set_failed(self, db: Any, task: Task, message: str) -> None:
         await TaskRepository(db).update_finish(task, status="failed", error={"code": "task_error", "message": message})
         await db.commit()
         await db.refresh(task)
@@ -146,7 +145,7 @@ class TaskService:
             )
 
     # ---- 取消 / 恢复 ----
-    async def cancel(self, db: AsyncSession, task: Task) -> None:
+    async def cancel(self, db: Any, task: Task) -> None:
         if task.status in ("done", "cancelled"):
             raise AppError(ERR_STATE_NOT_CANCELLABLE, "任务已完成或已取消，不可再取消")
         await self.set_cancelled(db, task)
@@ -162,7 +161,7 @@ class TaskService:
         pending = task.pending_confirm or {}
         return str(pending.get("thread_id") or pending.get("conversation_id") or task.id)
 
-    async def resume_precheck(self, db: AsyncSession, task: Task) -> None:
+    async def resume_precheck(self, db: Any, task: Task) -> None:
         """I8 前置校验（docs 01 §3.4）：状态必须 waiting_confirm 且载荷未超 TTL。"""
         if task.status != "waiting_confirm":
             raise AppError(ERR_STATE_NOT_CANCELLABLE, "任务状态不允许恢复（非等待确认中）")

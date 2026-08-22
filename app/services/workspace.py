@@ -1,4 +1,5 @@
 """工作区领域服务（M7-B，docs 03 §5.14）。root_path 后端托管；本地文件夹随 create 创建。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,9 +11,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.config import get_settings
 from app.core.errors import (
     ERR_WORKSPACE_NAME_CONFLICT,
@@ -22,10 +20,6 @@ from app.core.errors import (
 )
 from app.services.serializers import serialize_workspace
 from app.storage.file.store import get_store
-from app.storage.models import (
-    Candidate,
-    WebhookConfig,
-)
 from app.storage.models.user import User
 from app.storage.models.workspace import Workspace
 from app.storage.repositories.workspace import WorkspaceRepository
@@ -104,12 +98,12 @@ def _purge_workspace_files(root: Path, attach_paths: list[str]) -> None:
             pass
 
 
-async def _scalars(db: AsyncSession, stmt) -> list[Any]:
+async def _scalars(db: Any, stmt) -> list[Any]:
     """物化查询结果为 Python list（删除前先取 id，避免删除过程中子查询被清空）。"""
     return list((await db.execute(stmt)).scalars())
 
 
-async def _cascade_delete_workspace(db: AsyncSession, workspace_id: uuid.UUID) -> list[str]:
+async def _cascade_delete_workspace(db: Any, workspace_id: uuid.UUID) -> list[str]:
     """级联删除工作区全部关联数据（叶子→根逆依赖序）。返回待删附件 storage_path（删行前物化）。
 
     本地单机化：Conversation/Message/RunLog/Attachment/LongTermMemory/Workspace 已文件化（文件删除），
@@ -159,18 +153,11 @@ async def _cascade_delete_workspace(db: AsyncSession, workspace_id: uuid.UUID) -
     for table_name in ("conversations", "memory_cards", "attachments", "workspaces"):
         await store.table(table_name).flush()
 
-    # 3. SQL 实体（P4 整体删除）：叶子→根逆依赖序（in_([]) 编译恒假，空列表安全）
-    deletes: list[Any] = [
-        delete(WebhookConfig).where(WebhookConfig.conversation_id.in_(conv_ids)),
-        delete(Candidate).where(Candidate.source_conversation_id.in_(conv_ids)),
-    ]
-    for stmt in deletes:
-        await db.execute(stmt)
     return attach_paths
 
 
 class WorkspaceService:
-    async def list_for_org(self, db: AsyncSession, org_id: uuid.UUID, page: int, page_size: int) -> dict[str, Any]:
+    async def list_for_org(self, db: Any, org_id: uuid.UUID, page: int, page_size: int) -> dict[str, Any]:
         repo = WorkspaceRepository(db)
         items = await repo.list_for_org(org_id, limit=page_size, offset=(page - 1) * page_size)
         total = await repo.count_for_org(org_id)
@@ -178,7 +165,7 @@ class WorkspaceService:
 
         return paged([serialize_workspace(w) for w in items], total, page, page_size)
 
-    async def get_in_org(self, db: AsyncSession, org_id: uuid.UUID, workspace_id: str) -> Workspace:
+    async def get_in_org(self, db: Any, org_id: uuid.UUID, workspace_id: str) -> Workspace:
         """按 id 或 name 解析；org 隔离。"""
         repo = WorkspaceRepository(db)
         row: Workspace | None = None
@@ -192,7 +179,7 @@ class WorkspaceService:
             raise AppError(ERR_WORKSPACE_NOT_FOUND, "工作区不存在或无权访问")
         return row
 
-    async def create(self, db: AsyncSession, user: User, req: Any) -> Workspace:
+    async def create(self, db: Any, user: User, req: Any) -> Workspace:
         repo = WorkspaceRepository(db)
         if await repo.name_exists(user.org_id, req.name):
             raise AppError(ERR_WORKSPACE_NAME_CONFLICT, "同组织下已存在同名工作区")
@@ -213,7 +200,7 @@ class WorkspaceService:
         await db.refresh(row)
         return row
 
-    async def update(self, db: AsyncSession, user: User, workspace_id: str, req: Any) -> Workspace:
+    async def update(self, db: Any, user: User, workspace_id: str, req: Any) -> Workspace:
         repo = WorkspaceRepository(db)
         row = await self.get_in_org(db, user.org_id, workspace_id)
         if req.name is not None and req.name != row.name:
@@ -228,7 +215,7 @@ class WorkspaceService:
         await db.refresh(row)
         return row
 
-    async def hard_delete(self, db: AsyncSession, user: User, workspace_id: str) -> None:
+    async def hard_delete(self, db: Any, user: User, workspace_id: str) -> None:
         """硬删工作区：删 DB 行（级联）+ root 目录 + 附件磁盘文件（交接板 2026-08-21，用户拍板真删除）。
         org 隔离经 get_in_org 40416（不存在 / 他 org / 已软删）。"""
         ws = await self.get_in_org(db, user.org_id, workspace_id)
@@ -244,7 +231,7 @@ class WorkspaceService:
 
     # ---- 文件（资源管理器，docs 03 §5.14）----
 
-    async def list_files(self, db: AsyncSession, user: User, workspace_id: str, path: str) -> list[dict[str, Any]]:
+    async def list_files(self, db: Any, user: User, workspace_id: str, path: str) -> list[dict[str, Any]]:
         ws = await self.get_in_org(db, user.org_id, workspace_id)
         root = Path(ws.root_path)
         target = resolve_workspace_path(root, path or "")
@@ -263,7 +250,7 @@ class WorkspaceService:
             )
         return entries
 
-    async def read_file_content(self, db: AsyncSession, user: User, workspace_id: str, path: str) -> dict[str, Any]:
+    async def read_file_content(self, db: Any, user: User, workspace_id: str, path: str) -> dict[str, Any]:
         ws = await self.get_in_org(db, user.org_id, workspace_id)
         target = resolve_workspace_path(ws.root_path, path)
         if not target.is_file():
@@ -276,7 +263,7 @@ class WorkspaceService:
 
     async def write_file(
         self,
-        db: AsyncSession,
+        db: Any,
         user: User,
         workspace_id: str,
         path: str,
@@ -300,7 +287,7 @@ class WorkspaceService:
         target.write_text(content[:100000], encoding="utf-8")
         return {"name": target.name, "path": path, "is_dir": False, "size": target.stat().st_size}
 
-    async def rename_file(self, db: AsyncSession, user: User, workspace_id: str, old_path: str, new_path: str) -> None:
+    async def rename_file(self, db: Any, user: User, workspace_id: str, old_path: str, new_path: str) -> None:
         """重命名文件/文件夹（目录重命名 = 整棵子树搬移，子项自动跟随；docs 03 §5.14）。"""
         ws = await self.get_in_org(db, user.org_id, workspace_id)
         root = Path(ws.root_path)
@@ -334,7 +321,7 @@ class WorkspaceService:
         new_target.parent.mkdir(parents=True, exist_ok=True)  # 允许移入未建子目录
         old_target.rename(new_target)
 
-    async def delete_file(self, db: AsyncSession, user: User, workspace_id: str, path: str) -> None:
+    async def delete_file(self, db: Any, user: User, workspace_id: str, path: str) -> None:
         ws = await self.get_in_org(db, user.org_id, workspace_id)
         root = Path(ws.root_path)
         target = resolve_workspace_path(root, path)
@@ -351,7 +338,7 @@ class WorkspaceService:
         if target.is_file():
             target.unlink()
 
-    async def reveal(self, db: AsyncSession, user: User, workspace_id: str) -> None:
+    async def reveal(self, db: Any, user: User, workspace_id: str) -> None:
         """OS 打开 root_path 所在文件夹（M7-B 增强，docs 03 §5.14）。存在校验 + org 隔离，仅 developer+。"""
         ws = await self.get_in_org(db, user.org_id, workspace_id)
         root = Path(ws.root_path)

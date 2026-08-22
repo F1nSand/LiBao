@@ -3,6 +3,7 @@
 trace_id 存于 ContextVar，随请求贯穿 API→编排→工具→LLM；
 ASGI 中间件在 api/main.py 中设置。JSON 日志为 M5 观测性增强，M1 用 key=value 行即可。
 """
+
 from __future__ import annotations
 
 import logging

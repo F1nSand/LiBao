@@ -3,6 +3,7 @@
 出站黑名单（Settings.fetch_url_denylist，默认空 = 全放行；精确域名或 *.example.com 通配）；
 内容清洗（D3：剥 script/style + 折叠空白）；默认不启用（管理员显式开启）。异常兜底 error。
 """
+
 from __future__ import annotations
 
 import html.parser

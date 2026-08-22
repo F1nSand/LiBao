@@ -3,6 +3,7 @@
 依赖方向：api → services → storage。本地单机化：get_current_user 恒返回固定 admin
 （单用户折叠，无 JWT/登录）；get_db 返回文件存储请求上下文（FileContext）。
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -21,9 +22,9 @@ async def get_settings_dep() -> object:
 
 
 async def get_db(request: Request) -> AsyncIterator[FileContext]:
-    """请求级文件存储上下文（双轨：文件实体 flush + SQL session 转发，P4 全文件化后简化）。"""
+    """请求级文件存储上下文。"""
     store = get_store()
-    if store is None or store.sql_sessionmaker is None:
+    if store is None:
         raise RuntimeError("存储未初始化")
     async with store.session() as ctx:
         yield ctx

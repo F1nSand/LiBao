@@ -3,6 +3,7 @@
 五层约束下工具层→存储层合法：经 FileStore + KbRepository.hybrid_search（RRF 单一来源）。
 本地单机化：org 上下文缺失 → 恒用默认 org（折叠）。
 """
+
 from __future__ import annotations
 
 import uuid

@@ -1,10 +1,11 @@
 """文件存储核心（本地单机化）：FileStore 进程单例 + FileContext 请求上下文。
 
-- `FileStore`：目录骨架 + 实体表注册（惰性）+ JSONL 分文件追加/读取 + SQL sessionmaker 桥（双轨期）。
-- `FileContext`：替代 AsyncSession 的请求级上下文。未文件化 repository 的 SQL 调用（execute/flush/
-  refresh/add）转发给内部真实 AsyncSession；文件化实体的提交由 `commit()` 全量 flush 落盘。
-- 桥函数：`set_store/get_store`（替代原 storage/db.py 的 set_sessionmaker/get_sessionmaker）。
+- `FileStore`：目录骨架 + 实体表注册（惰性）+ JSONL 分文件追加/读取 + KB BM25 索引挂载。
+- `FileContext`：请求级上下文（替代 AsyncSession）。`commit()` 全量 flush 落盘（tmp+replace 原子），
+  `rollback()` 全量重载；`add(row)` 按模型类自动注册（遗留 session.add 调用点兜底）。
+- 桥函数：`set_store/get_store`。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -52,7 +53,7 @@ TABLE_SPECS: dict[str, tuple[str, type]] = {
 
 
 class FileStore:
-    """进程单例：目录骨架 + 表注册 + JSONL 分文件 + SQL 桥。"""
+    """进程单例：目录骨架 + 表注册 + JSONL 分文件 + KB BM25 索引。"""
 
     def __init__(self, settings: Any = None) -> None:
         settings = settings or get_settings()
@@ -60,7 +61,6 @@ class FileStore:
         self.kb_root = Path(settings.kb_root)
         self.tables: dict[str, FileTable] = {}
         self._jsonl_locks: dict[str, asyncio.Lock] = {}
-        self.sql_sessionmaker: Any = None  # 双轨期：真实 SQL sessionmaker（P4 全文件化后删除）
         self.bm25: Any = None  # KB BM25 索引（bootstrap 构建，kb repository 读写）
 
     # ---- 初始化 ----
@@ -108,84 +108,51 @@ class FileStore:
 
     # ---- 上下文 ----
 
-    def context(self, sql_session: Any = None) -> FileContext:
-        """请求级上下文：文件脏行 + SQL session 双轨。"""
-        if sql_session is None and self.sql_sessionmaker is not None:
-            sql_session = self.sql_sessionmaker()
-        return FileContext(self, sql_session)
-
     @asynccontextmanager
     async def session(self, sessionmaker: Any = None) -> AsyncIterator[FileContext]:
-        """统一会话入口：SQL session（未文件化实体兜底）+ FileContext（文件 flush）双轨。
+        """请求级文件上下文（sessionmaker 参数为历史兼容，忽略）。
 
-        用法：`async with get_store().session() as db: ...`（P4 全文件化后简化为纯 FileContext）。
+        用法：`async with get_store().session() as db: ...`。
         """
-        sm = sessionmaker or self.sql_sessionmaker
-        if sm is None:
-            yield self.context(None)
-            return
-        async with sm() as sql, self.context(sql) as ctx:
-            yield ctx
+        yield FileContext(self)
 
 
 class FileContext:
-    """替代 AsyncSession 的请求上下文（双轨：文件 flush + SQL 转发）。"""
+    """替代 AsyncSession 的请求级上下文（纯文件）。"""
 
-    def __init__(self, store: FileStore, sql_session: Any = None) -> None:
+    def __init__(self, store: FileStore) -> None:
         self.store = store
-        self._sql = sql_session
-
-    def __getattr__(self, name: str) -> Any:
-        """未显式实现的方法（get/scalar/scalars/delete 等）转发给内部 SQL session（双轨兜底）。"""
-        sql = self.__dict__.get("_sql")
-        if sql is not None:
-            return getattr(sql, name)
-        raise AttributeError(name)
-
-    # ---- SQL 转发（未文件化 repository 用；P4 全文件化后删除分支）----
-
-    def execute(self, stmt: Any) -> Any:
-        return self._sql.execute(stmt)
-
-    async def flush(self) -> None:
-        if self._sql is not None:
-            await self._sql.flush()
 
     def add(self, row: Any) -> None:
-        """SQL 行转发；文件行（Row）按模型类自动注册到对应表（commit 时落盘）。"""
+        """Row 按模型类自动注册到对应表（commit 时落盘）。"""
         if isinstance(row, Row):
             self.store.register_row(row)
-            return
-        if self._sql is not None:
-            self._sql.add(row)
+
+    # ---- 兼容 API（历史调用点；文件行无需 flush/refresh）----
+
+    async def flush(self) -> None:
+        """no-op（文件行 id 在 __init__ 已生成，无需 flush 拿 id）。"""
 
     async def refresh(self, row: Any) -> None:
-        if isinstance(row, Row):
-            return  # 文件行内存即最新（no-op）
-        await self._sql.refresh(row)
+        """no-op（文件行内存即最新）。"""
 
     # ---- 提交 / 回滚 ----
 
     async def commit(self) -> None:
-        """文件侧：全部表全量序列化落盘（tmp+replace 原子）；SQL 侧：转发 commit。"""
+        """全部表全量序列化落盘（tmp+replace 原子）。"""
         for table in self.store.tables.values():
             await table.flush()
-        if self._sql is not None:
-            await self._sql.commit()
 
     async def rollback(self) -> None:
-        """文件侧：全部表从磁盘重载（丢弃内存未提交修改）；SQL 侧：转发 rollback。"""
+        """全部表从磁盘重载（丢弃内存未提交修改）。"""
         for table in self.store.tables.values():
             await table.reload()
-        if self._sql is not None:
-            await self._sql.rollback()
 
     async def __aenter__(self) -> FileContext:
         return self
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        if self._sql is not None:
-            await self._sql.close()
+        return None
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -200,7 +167,7 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return out
 
 
-# ---- 全局桥（替代 storage/db.py 的 sessionmaker 桥）----
+# ---- 全局桥 ----
 
 _store: FileStore | None = None
 

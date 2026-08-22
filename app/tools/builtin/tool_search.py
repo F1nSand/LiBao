@@ -4,6 +4,7 @@
 名称 + 路由描述（何时用/何时别用），**不含全量 ACI 参数 schema**。
 I4 降级：空 → 提示创建；检索挂 → 降级全量目录（仅名称+路由描述）；disabled → 标注"未启用"。
 """
+
 from __future__ import annotations
 
 from typing import Any

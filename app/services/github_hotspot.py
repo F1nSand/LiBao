@@ -4,6 +4,7 @@ trending（无官方 API）→ 复用 gtrending 库爬 github.com/trending；搜
 落库到工作区本地 `github-hotspot/` 目录（trending 快照 + repo 概况 + index.json 新鲜度），对话优先搜本地。
 所有失败降级为结构化 error（不抛），与 file_ops 降级风格一致。
 """
+
 from __future__ import annotations
 
 import json

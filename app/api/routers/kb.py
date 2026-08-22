@@ -1,10 +1,11 @@
 """知识库路由（docs 03 §5.6）。集合/文档 CRUD + 检索。"""
+
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, UploadFile
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_developer
 from app.api.envelope import ok
@@ -28,7 +29,7 @@ def _decode_text(data: bytes) -> str:
 @router.get("/kb/collections")
 async def list_collections(
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     svc = KbService()
     rows = await svc.list_collections(db, user)
@@ -40,7 +41,7 @@ async def list_collections(
 async def create_collection(
     req: CreateCollectionRequest,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     coll = await KbService().create_collection(db, user, req.name, req.chunk_size, req.overlap, req.description)
     return ok(serialize_kb_collection(coll, 0))
@@ -50,7 +51,7 @@ async def create_collection(
 async def delete_collection(
     collection_id: uuid.UUID,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     await KbService().delete_collection(db, user, collection_id)
     return ok()
@@ -60,7 +61,7 @@ async def delete_collection(
 async def list_documents(
     collection_id: uuid.UUID,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     svc = KbService()
     await svc.get_collection(db, user, collection_id)
@@ -73,7 +74,7 @@ async def upload_document(
     collection_id: uuid.UUID,
     file: UploadFile = File(...),
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     """multipart 上传：txt/md 提取文本入库 → uploaded → 后台处理链。"""
     svc = KbService()
@@ -90,7 +91,7 @@ async def upload_document(
 async def get_document(
     document_id: uuid.UUID,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     doc = await KbService().get_document(db, user, document_id)
     return ok(serialize_kb_document(doc))
@@ -100,7 +101,7 @@ async def get_document(
 async def get_document_status(
     document_id: uuid.UUID,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     doc = await KbService().get_document(db, user, document_id)
     return ok(
@@ -117,7 +118,7 @@ async def get_document_status(
 async def reindex_document(
     document_id: uuid.UUID,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     await KbService().reindex_document(db, user, document_id)
     return ok()
@@ -128,7 +129,7 @@ async def patch_document_status(
     document_id: uuid.UUID,
     req: KbStatusRequest,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     await KbService().archive_document(db, user, document_id, req.status)
     return ok()
@@ -138,7 +139,7 @@ async def patch_document_status(
 async def delete_document(
     document_id: uuid.UUID,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     await KbService().delete_document(db, user, document_id)
     return ok()
@@ -148,7 +149,7 @@ async def delete_document(
 async def search_kb(
     req: KbSearchRequest,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     hits = await KbService().search(db, user, req.collection_ids, req.query, req.top_k, req.hybrid)
     return ok(hits)

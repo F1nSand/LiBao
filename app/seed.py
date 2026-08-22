@@ -3,6 +3,7 @@
 运行：init_runtime 自动调用（.agent/ 无数据时幂等落盘）；也可 `uv run python -m app.seed`。
 内容对齐旧 seed（DB 版）：16 个内置工具（enabled 状态）+「栗包」人设通用助手 + AgentVersion v1。
 """
+
 from __future__ import annotations
 
 import asyncio

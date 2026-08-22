@@ -3,6 +3,7 @@
 窗口规则：每块 chunk_size 字符，下一块起点 = 起点 + (chunk_size - overlap)；
 overlap ≥ chunk_size 时归一化为 chunk_size - 1（防无限回退）。
 """
+
 from __future__ import annotations
 
 

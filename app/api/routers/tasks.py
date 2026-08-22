@@ -1,12 +1,13 @@
 """任务路由（docs 03 §5.3）。提交/列表/详情/取消/resume（双轨）/events（回放+live-tail）。"""
+
 from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
@@ -25,7 +26,7 @@ from app.storage.models.user import User
 router = APIRouter()
 
 
-async def _task_event_stream(db: AsyncSession, task: Task) -> AsyncIterator[str]:
+async def _task_event_stream(db: Any, task: Task) -> AsyncIterator[str]:
     """任务事件流：按当前状态回放 → live-tail 订阅至终态哨兵。"""
     emit = sse_emitter()
 
@@ -78,7 +79,7 @@ async def submit_task(
     req: SubmitTaskRequest,
     request: Request,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     agent = await AgentService().get_default(db, user.org_id)  # 单通用 Agent，不接收 agent_id
     task = await TaskService().submit(db, user, agent.id, req.input)
@@ -98,7 +99,7 @@ async def list_tasks(
     page_size: int = Query(20, ge=1, le=100),
     status: str | None = Query(None),
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     data = await TaskService().list_owned(db, user.id, page, page_size, status=status)
     return ok(data)
@@ -108,7 +109,7 @@ async def list_tasks(
 async def get_task(
     task_id: uuid.UUID,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     task = await TaskService().get_owned(db, task_id, user.id)
     return ok(serialize_task(task))
@@ -118,7 +119,7 @@ async def get_task(
 async def task_events(
     task_id: uuid.UUID,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     task = await TaskService().get_owned(db, task_id, user.id)
     return StreamingResponse(
@@ -132,7 +133,7 @@ async def task_events(
 async def cancel_task(
     task_id: uuid.UUID,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     task = await TaskService().get_owned(db, task_id, user.id)
     await TaskService().cancel(db, task)
@@ -147,7 +148,7 @@ async def resume_task(
     req: TaskResumeRequest,
     request: Request,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     task = await TaskService().get_owned(db, task_id, user.id)
     await TaskService().resume_precheck(db, task)

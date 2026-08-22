@@ -6,9 +6,8 @@ import uuid
 import pytest
 
 from app.core.config import get_settings
-from app.storage.db import get_sessionmaker, init_db, set_sessionmaker
 from app.storage.file.store import get_store
-from app.storage.models import Attachment, Org, User
+from app.storage.models import Attachment, User
 from app.tools import executor
 from app.tools.builtin import register_builtin_tools
 from app.tools.registry import get
@@ -22,13 +21,10 @@ async def analyze_fixture(clean_mcp_specs, tmp_path, monkeypatch):
     register_builtin_tools()
     s = get_settings()
     monkeypatch.setattr(s, "upload_dir", str(tmp_path))
-    engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with get_store().session(sessionmaker) as session:
-        org = Org(name=f"测试组织-ai-{uid}")
-        session.add(org)
+    async with get_store().session() as session:
         await session.flush()
-        user = User(username=f"ai_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
+        user = User(username=f"ai_{uid}", password_hash="hashed", name="T", role="admin", org_id=uuid.UUID(int=0))
         session.add(user)
         await session.flush()
         fpath = tmp_path / f"note-{uid}.txt"
@@ -41,10 +37,7 @@ async def analyze_fixture(clean_mcp_specs, tmp_path, monkeypatch):
         await session.flush()
         att_id = att.id
         await session.commit()
-    set_sessionmaker(sessionmaker)
-    yield sessionmaker, user, att_id
-    set_sessionmaker(None)
-    await engine.dispose()
+    yield user, att_id
 
 
 async def test_registered_default_off(analyze_fixture):
@@ -57,7 +50,7 @@ async def test_registered_default_off(analyze_fixture):
 
 
 async def test_handler_text_extraction(analyze_fixture):
-    sessionmaker, user, att_id = analyze_fixture
+    user, att_id = analyze_fixture
     spec = get("tl_analyze_image")
     result = await executor.execute(spec, {"attachment_id": str(att_id)})
     assert result.ok is True
@@ -82,12 +75,15 @@ async def test_attachment_not_found(analyze_fixture):
 
 
 async def test_no_bridge_degrades(analyze_fixture):
-    sessionmaker, user, att_id = analyze_fixture
-    original = get_sessionmaker()
-    set_sessionmaker(None)
+    """存储不可用（store 被摘除）→ 降级 error 结果，不击穿工具调用。"""
+    from app.storage.file.store import get_store, set_store
+
+    user, att_id = analyze_fixture
+    original = get_store()
+    set_store(None)
     try:
         result = await executor.execute(get("tl_analyze_image"), {"attachment_id": str(att_id)})
         assert result.ok is True
         assert "error" in result.output
     finally:
-        set_sessionmaker(original)
+        set_store(original)

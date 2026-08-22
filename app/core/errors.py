@@ -3,6 +3,7 @@
 
 0 成功；业务错误一般 HTTP 200 + envelope code；401xx/403xx 同时映射到对应 HTTP 状态（前端 http.ts 两者都处理）。
 """
+
 from __future__ import annotations
 
 # ---- 请求 400xx ----

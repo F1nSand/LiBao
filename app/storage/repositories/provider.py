@@ -1,4 +1,5 @@
 """Provider 配置数据访问（docs 02 /settings）。文件化：.agent/providers.json。"""
+
 from __future__ import annotations
 
 import uuid

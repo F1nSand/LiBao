@@ -3,6 +3,7 @@
 长期记忆（版本化只增：改写 = 新版本行）。maintenance（LLM 整理）：读卡片 + 最近 messages
 （memory_trace 已删改读 messages，见迁移 0016）→ LLM 输出整理计划 → 单事务应用（只增原则）。
 """
+
 from __future__ import annotations
 
 import json
@@ -11,8 +12,6 @@ import uuid
 from typing import Any
 
 from langchain_core.messages import HumanMessage
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import ERR_LLM_FAILURE, ERR_MEMORY_NOT_FOUND, AppError
@@ -38,7 +37,7 @@ class MemoryService:
 
     async def create_card(
         self,
-        db: AsyncSession,
+        db: Any,
         user_id: uuid.UUID,
         card_type: str,
         title: str | None,
@@ -59,7 +58,7 @@ class MemoryService:
 
     async def update_card(
         self,
-        db: AsyncSession,
+        db: Any,
         user_id: uuid.UUID,
         card_id: uuid.UUID,
         content: dict,
@@ -75,21 +74,21 @@ class MemoryService:
         await db.commit()
         return card
 
-    async def list_cards(self, db: AsyncSession, user_id: uuid.UUID) -> list[LongTermMemory]:
+    async def list_cards(self, db: Any, user_id: uuid.UUID) -> list[LongTermMemory]:
         return await MemoryRepository(db).list_cards(user_id)
 
-    async def get_card(self, db: AsyncSession, user_id: uuid.UUID, card_id: uuid.UUID) -> LongTermMemory:
+    async def get_card(self, db: Any, user_id: uuid.UUID, card_id: uuid.UUID) -> LongTermMemory:
         card = await MemoryRepository(db).get_card(user_id, card_id)
         if card is None:
             raise AppError(ERR_MEMORY_NOT_FOUND, "记忆卡片不存在")
         return card
 
-    async def soft_delete(self, db: AsyncSession, user_id: uuid.UUID, card_id: uuid.UUID) -> None:
+    async def soft_delete(self, db: Any, user_id: uuid.UUID, card_id: uuid.UUID) -> None:
         card = await self.get_card(db, user_id, card_id)
         await MemoryRepository(db).soft_delete(card)
         await db.commit()
 
-    async def list_versions(self, db: AsyncSession, user_id: uuid.UUID, card_id: uuid.UUID) -> list[dict]:
+    async def list_versions(self, db: Any, user_id: uuid.UUID, card_id: uuid.UUID) -> list[dict]:
         card = await self.get_card(db, user_id, card_id)
         return [serialize_longterm_version(v, card.title) for v in await MemoryRepository(db).list_versions(card.id)]
 
@@ -111,7 +110,7 @@ def _extract_json(text: Any) -> dict:
     return json.loads(stripped[start : end + 1])
 
 
-async def run_maintenance(db: AsyncSession, user_id: uuid.UUID, model: Any = None) -> dict[str, Any]:
+async def run_maintenance(db: Any, user_id: uuid.UUID, model: Any = None) -> dict[str, Any]:
     """LLM 整理（OA6）：读卡片+轨迹 → 计划 → 单事务应用（create/update=只增版本/delete=软删）。
 
     model 可注入（测试 FakeChatModel）；LLM 失败/解析失败 → 60001 retryable。
@@ -170,11 +169,9 @@ async def run_maintenance(db: AsyncSession, user_id: uuid.UUID, model: Any = Non
             if card is not None:
                 await repo.soft_delete(card)
                 deleted += 1
-        # C4：IntegrityError（版本 UNIQUE 冲突）在 commit 处抛——try 必须包住末尾 commit
+        # C4（原 IntegrityError 版本冲突）：文件化后无 UNIQUE 约束，commit 不抛冲突；
+        # 保留 rollback 兜底（LLM 输出形状错等异常统一走下一分支）
         await db.commit()
-    except IntegrityError as exc:
-        await db.rollback()
-        raise AppError(ERR_LLM_FAILURE, "记忆整理失败: 版本冲突，请重试", retryable=True) from exc
     except (KeyError, ValueError, TypeError) as exc:
         # C2/S4：LLM 输出合法 JSON 但形状错（缺 id/UUID 非法/importance 非数字）→ 60001 retryable，不裸 500
         await db.rollback()

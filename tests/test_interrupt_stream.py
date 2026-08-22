@@ -13,9 +13,8 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from app.orchestration.chat_stream import chat_stream_events, resume_stream_events
 from app.orchestration.graph import build_graph
-from app.storage.db import init_db
 from app.storage.file.store import get_store
-from app.storage.models import AgentConfig, Conversation, Org, User
+from app.storage.models import AgentConfig, Conversation, User
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.task import TaskRepository
 from app.tools.registry import ToolSpec, register, unregister
@@ -56,17 +55,14 @@ async def interrupt_fixture():
             handler=lambda msg: {"delivered": True, "msg": msg},
         )
     )
-    engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with get_store().session(sessionmaker) as session:
-        org = Org(name=f"测试组织-int-{uid}")
-        session.add(org)
+    async with get_store().session() as session:
         await session.flush()
-        user = User(username=f"int_{uid}", password_hash="hashed", name="I", role="admin", org_id=org.id)
+        user = User(username=f"int_{uid}", password_hash="hashed", name="I", role="admin", org_id=uuid.UUID(int=0))
         session.add(user)
         await session.flush()
         agent = AgentConfig(
-            org_id=org.id,
+            org_id=uuid.UUID(int=0),
             name="中断测试助手",
             model="fake",
             system_prompt="你是测试助手。",
@@ -79,9 +75,8 @@ async def interrupt_fixture():
         conv = Conversation(user_id=user.id, agent_id=agent.id, title="中断会话")
         session.add(conv)
         await session.commit()
-    yield sessionmaker, org, user, agent, conv
+    yield user, agent, conv
     unregister("tl_confirm_test")  # 裸 _REGISTRY.pop 会残留 _NAME_INDEX（I6 后 name 遮蔽误伤）
-    await engine.dispose()
 
 
 def _frames_to_events(frames: list[str]) -> list[dict]:
@@ -96,8 +91,8 @@ def _frames_to_events(frames: list[str]) -> list[dict]:
 
 async def _run_interrupt(chat_fixture, graph, fake) -> tuple[list[dict], uuid.UUID]:
     """跑 chat_stream_events 到中断，返回 (events, task_id)。"""
-    sessionmaker, org, user, agent, conv = chat_fixture
-    async with get_store().session(sessionmaker) as session:
+    user, agent, conv = chat_fixture
+    async with get_store().session() as session:
         frames = []
         async for frame in chat_stream_events(
             db=session,
@@ -134,12 +129,12 @@ async def test_chat_interrupt_creates_task(interrupt_fixture):
 
 
 async def test_resume_approved_done(interrupt_fixture):
-    sessionmaker, org, user, agent, conv = interrupt_fixture
+    user, agent, conv = interrupt_fixture
     graph = build_graph(checkpointer=MemorySaver())  # resume 需 checkpointer 恢复中断点
     fake = FakeChatModel()
     _, task_id = await _run_interrupt(interrupt_fixture, graph, fake)
 
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         task = await TaskRepository(session).get_by_id(task_id)
         frames = []
         async for frame in resume_stream_events(
@@ -170,12 +165,12 @@ async def test_resume_approved_done(interrupt_fixture):
 
 
 async def test_resume_denied_cancelled(interrupt_fixture):
-    sessionmaker, org, user, agent, conv = interrupt_fixture
+    user, agent, conv = interrupt_fixture
     graph = build_graph(checkpointer=MemorySaver())  # resume 需 checkpointer 恢复中断点
     fake = FakeChatModel()
     _, task_id = await _run_interrupt(interrupt_fixture, graph, fake)
 
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         task = await TaskRepository(session).get_by_id(task_id)
         frames = []
         async for frame in resume_stream_events(

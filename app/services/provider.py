@@ -3,13 +3,12 @@
 安全约定（前端契约）：api_key 只写不读——响应仅 has_key 布尔；明文只存库供启动同步到 LLM 客户端。
 启动同步：lifespan 把启用 provider 的 base_url/model/api_key 覆盖到 Settings，LLMService 即用配置的 provider。
 """
+
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
 from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import ERR_PROVIDER_NOT_FOUND, AppError
@@ -31,11 +30,11 @@ def serialize_provider(p: ProviderConfig) -> dict[str, Any]:
 
 
 class ProviderService:
-    async def list(self, db: AsyncSession, user: User) -> list[dict[str, Any]]:
+    async def list(self, db: Any, user: User) -> list[dict[str, Any]]:
         return [serialize_provider(p) for p in await ProviderRepository(db).list_for_org(user.org_id)]
 
     async def create(
-        self, db: AsyncSession, user: User, *, name: str, base_url: str | None, model: str | None,
+        self, db: Any, user: User, *, name: str, base_url: str | None, model: str | None,
         api_key: str | None, enabled: bool,
     ) -> ProviderConfig:
         row = await ProviderRepository(db).create(
@@ -46,7 +45,7 @@ class ProviderService:
         return row
 
     async def patch(
-        self, db: AsyncSession, user: User, provider_id: uuid.UUID, **fields: Any
+        self, db: Any, user: User, provider_id: uuid.UUID, **fields: Any
     ) -> ProviderConfig:
         repo = ProviderRepository(db)
         row = await repo.get_by_id(provider_id)
@@ -59,7 +58,7 @@ class ProviderService:
         await db.refresh(row)
         return row
 
-    async def delete(self, db: AsyncSession, user: User, provider_id: uuid.UUID) -> None:
+    async def delete(self, db: Any, user: User, provider_id: uuid.UUID) -> None:
         repo = ProviderRepository(db)
         row = await repo.get_by_id(provider_id)
         if row is None or row.org_id != user.org_id or row.deleted_at is not None:
@@ -67,7 +66,7 @@ class ProviderService:
         row.deleted_at = datetime.now(UTC)
         await db.commit()
 
-    async def sync_active_to_settings(self, db: AsyncSession | None = None, org_id: uuid.UUID | None = None) -> None:
+    async def sync_active_to_settings(self, db: Any | None = None, org_id: uuid.UUID | None = None) -> None:
         """启动同步：启用 provider → 覆盖 Settings（LLMService 即用配置的 provider，docs 02 /settings）。
 
         本地单机化：db/org_id 为兼容参数（文件化后忽略），读 providers.json。

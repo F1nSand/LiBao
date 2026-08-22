@@ -3,6 +3,7 @@
 文件化：.agent/memory_cards.json（卡片 FileTable）+ .agent/memory/default/cards/<card_id>.versions.jsonl。
 recent_messages_for_maintenance 走会话 JSONL 扫描。
 """
+
 from __future__ import annotations
 
 import uuid

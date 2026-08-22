@@ -2,6 +2,7 @@
 
 文件化：.agent/tasks.json（FileTable，内存过滤/排序/分页；字段赋值经 Row 标脏，commit 落盘）。
 """
+
 from __future__ import annotations
 
 import uuid

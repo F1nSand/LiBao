@@ -1,4 +1,5 @@
 """记忆 schema（docs 03 §5.7）。创建/维护共用；body 恒为 dict（note 存 {"text": str}）。"""
+
 from __future__ import annotations
 
 from typing import Any

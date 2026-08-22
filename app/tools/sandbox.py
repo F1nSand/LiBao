@@ -1,4 +1,5 @@
 """沙盒分级（docs 01 §7.3 D1）。M1 只用 none（本地进程）；docker/microvm 为 M2 接缝，抛 NotImplementedError。"""
+
 from __future__ import annotations
 
 import enum

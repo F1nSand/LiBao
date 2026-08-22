@@ -6,6 +6,7 @@ tl_dispatch_subagent 派发（嵌套 LLM 循环，主图拓扑不变，docs 01 �
 M3：memory_inject 每轮在 LLM 前注入长期记忆（user_id 缺失/桥未设时静默跳过）。
 max_steps 守卫：steps 达上限后 tool_execute 直接转 context_update（死亡螺旋防护 OC10）。
 """
+
 from __future__ import annotations
 
 from typing import Any

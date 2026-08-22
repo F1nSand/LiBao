@@ -3,6 +3,7 @@
 org 级 skill = SKILL.md（YAML frontmatter：name + description 路由描述 + body 正文）。
 默认 enabled=false（约束优先）；支持 git 导入（clone → 扫描 SKILL.md → 单事务入库）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -12,8 +13,6 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import (
     ERR_SKILL_IMPORT_FAILED,
@@ -119,7 +118,7 @@ def discover_workspace_agent(root_path: str | Path) -> dict[str, Any]:
 
 class SkillService:
     async def list_for_org(
-        self, db: AsyncSession, org_id: uuid.UUID, page: int, page_size: int, enabled: bool | None = None
+        self, db: Any, org_id: uuid.UUID, page: int, page_size: int, enabled: bool | None = None
     ) -> dict[str, Any]:
         repo = SkillRepository(db)
         items = await repo.list_for_org(org_id, enabled=enabled, limit=page_size, offset=(page - 1) * page_size)
@@ -128,12 +127,12 @@ class SkillService:
 
         return paged([serialize_skill(s) for s in items], total, page, page_size)
 
-    async def enabled_skill_routes(self, db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, str]]:
+    async def enabled_skill_routes(self, db: Any, org_id: uuid.UUID) -> list[dict[str, str]]:
         """本组织已启用 skills 的路由描述（主 agent 注入静态前缀，镜像 tools enabled_tool_ids）。"""
         rows = await SkillRepository(db).list_enabled(org_id)
         return [{"name": s.name, "description": s.description} for s in rows]
 
-    async def get_in_org(self, db: AsyncSession, org_id: uuid.UUID, skill_id: str) -> Skill:
+    async def get_in_org(self, db: Any, org_id: uuid.UUID, skill_id: str) -> Skill:
         """按 id 或 name 解析（REST 用 id；tl_load_skill 用 name）。org 隔离。"""
         repo = SkillRepository(db)
         row: Skill | None = None
@@ -147,7 +146,7 @@ class SkillService:
             raise AppError(ERR_SKILL_NOT_FOUND, "skill 不存在或无权访问")
         return row
 
-    async def create(self, db: AsyncSession, user: User, req: Any) -> Skill:
+    async def create(self, db: Any, user: User, req: Any) -> Skill:
         repo = SkillRepository(db)
         if await repo.name_exists(user.org_id, req.name):
             raise AppError(ERR_SKILL_NAME_CONFLICT, "同组织下已存在同名 skill")
@@ -163,19 +162,19 @@ class SkillService:
         await db.refresh(row)
         return row
 
-    async def set_enabled(self, db: AsyncSession, user: User, skill_id: str, enabled: bool) -> Skill:
+    async def set_enabled(self, db: Any, user: User, skill_id: str, enabled: bool) -> Skill:
         row = await self.get_in_org(db, user.org_id, skill_id)
         row.enabled = enabled
         await db.commit()
         await db.refresh(row)
         return row
 
-    async def soft_delete(self, db: AsyncSession, user: User, skill_id: str) -> None:
+    async def soft_delete(self, db: Any, user: User, skill_id: str) -> None:
         row = await self.get_in_org(db, user.org_id, skill_id)
         await SkillRepository(db).soft_delete(row)
         await db.commit()
 
-    async def import_from_git(self, db: AsyncSession, user: User, url: str) -> dict[str, Any]:
+    async def import_from_git(self, db: Any, user: User, url: str) -> dict[str, Any]:
         """git clone → 扫描 SKILL.md → 解析 → 单事务入库（重名跳过，失败整体回滚）。"""
         parsed: list[dict[str, str]] = []
         with tempfile.TemporaryDirectory() as tmp:

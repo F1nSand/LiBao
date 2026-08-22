@@ -1,9 +1,11 @@
 """对话流式路由（docs 03 §5.2 ★ M1 核心端点 POST /chat/stream）。"""
+
 from __future__ import annotations
+
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.api.schemas.chat import ChatRequest
@@ -24,7 +26,7 @@ async def chat_stream(
     req: ChatRequest,
     request: Request,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     conv_service = ConversationService()
     # 单通用 Agent：所有会话固定用组织默认通用 Agent（不接收 agent_id）

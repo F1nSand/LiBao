@@ -3,18 +3,15 @@
 Windows 关键：psycopg async 需 SelectorEventLoop，而 Windows 默认 ProactorEventLoop 不兼容；
 在模块顶层设置策略，使 uvicorn 创建事件循环时即用 Selector（langgraph AsyncPostgresSaver 依赖）。
 """
+
 from __future__ import annotations
 
-import asyncio
 import logging
-import sys
 import uuid
 from contextlib import asynccontextmanager
 
-import uvicorn.config as _uvicorn_config
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.envelope import fail
@@ -22,9 +19,6 @@ from app.api.routers import (
     attachments,
     chat,
     conversations,
-    evals,
-    evolution,
-    hooks,
     kb,
     memory,
     notifications,
@@ -44,21 +38,6 @@ from app.core.logging import set_trace_id, setup_logging
 from app.orchestration.checkpointer import build_checkpointer
 from app.orchestration.graph import build_graph
 
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-
-def selector_loop_factory(use_subprocess: bool = False) -> type[asyncio.AbstractEventLoop]:
-    """uvicorn loop 工厂：Windows 上强制 SelectorEventLoop（psycopg async 不兼容 Proactor）。"""
-    return asyncio.SelectorEventLoop
-
-
-if sys.platform == "win32":
-    # uvicorn 用自身 loop 工厂（忽略事件循环策略）；覆盖 auto/asyncio 指向 selector，
-    # 使 `uvicorn app.api.main:app` 无需附加参数即可运行（psycopg async 硬性要求）。
-    _uvicorn_config.LOOP_FACTORIES["auto"] = "app.api.main:selector_loop_factory"
-    _uvicorn_config.LOOP_FACTORIES["asyncio"] = "app.api.main:selector_loop_factory"
-
 logger = logging.getLogger(__name__)
 
 
@@ -66,8 +45,6 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     runtime = await init_runtime(settings)
-    app.state.engine = runtime.engine
-    app.state.sessionmaker = runtime.sessionmaker
     app.state.store = runtime.store
     # 本地单机化：JsonFileSaver（.agent/checkpoints/），resume 语义与 PostgresSaver 等价
     saver = build_checkpointer(settings)
@@ -83,14 +60,6 @@ def create_app() -> FastAPI:
     setup_logging(settings.log_level)
     app = FastAPI(title="Agent Backend", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     @app.middleware("http")
     async def trace_id_middleware(request: Request, call_next):
@@ -122,11 +91,8 @@ def create_app() -> FastAPI:
         kb.router,
         attachments.router,
         notifications.router,
-        evals.router,
-        hooks.router,
         settings_router.router,
         system.router,
-        evolution.router,
         skills.router,
         workspaces.router,
     ):

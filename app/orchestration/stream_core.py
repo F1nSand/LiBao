@@ -5,6 +5,7 @@ producer/queue/keepalive + messages/updates/values 三模式映射。
 M2 扩展：tool_call.require_confirm 取自 spec；拒绝分支（status=cancelled）不发 tool_result；
 __interrupt__ 分支 → on_interrupt 落 Task + 发 interrupt 事件后结束流（等 resume）。
 """
+
 from __future__ import annotations
 
 import asyncio

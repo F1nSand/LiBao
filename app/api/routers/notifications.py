@@ -1,12 +1,13 @@
 """通知路由（docs 03 §5.11）。分页列表 / 已读 / SSE 实时流（按 user_id）。"""
+
 from __future__ import annotations
 
 import asyncio
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
@@ -25,7 +26,7 @@ async def list_notifications(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     return ok(await NotificationService().list_paged(db, user.id, page, page_size))
 
@@ -34,7 +35,7 @@ async def list_notifications(
 async def mark_read(
     notification_id: uuid.UUID,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     return ok(serialize_notification(await NotificationService().mark_read(db, user, notification_id)))
 

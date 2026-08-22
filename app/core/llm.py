@@ -3,6 +3,7 @@
 LiteLLM 一家接多家：DeepSeek（默认，国内直连）/ Ollama（本地）/ OpenAI 等。
 build_model(model) 返回 streaming 的 ChatLiteLLM；api_key / api_base 从 Settings 注入（凭证只走 env，不入库）。
 """
+
 from __future__ import annotations
 
 from typing import Any

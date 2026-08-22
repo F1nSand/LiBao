@@ -2,13 +2,14 @@
 
 api_key 只写不读：请求可带 api_key，响应仅 has_key 布尔（永不回传明文）。
 """
+
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_admin
 from app.api.envelope import ok
@@ -36,7 +37,7 @@ class ProviderPatchRequest(BaseModel):
 @router.get("/settings/providers")
 async def list_providers(
     user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     return ok(await ProviderService().list(db, user))
 
@@ -45,7 +46,7 @@ async def list_providers(
 async def create_provider(
     req: ProviderWriteRequest,
     user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     row = await ProviderService().create(
         db, user, name=req.name, base_url=req.base_url, model=req.model,
@@ -59,7 +60,7 @@ async def patch_provider(
     provider_id: uuid.UUID,
     req: ProviderPatchRequest,
     user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     row = await ProviderService().patch(
         db, user, provider_id,
@@ -72,7 +73,7 @@ async def patch_provider(
 async def delete_provider(
     provider_id: uuid.UUID,
     user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     await ProviderService().delete(db, user, provider_id)
     return ok()

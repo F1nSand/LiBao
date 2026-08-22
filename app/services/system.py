@@ -1,10 +1,9 @@
 """系统观测领域服务（docs 03 §5.8 / docs 07 M5）。成本聚合逻辑收敛于此（M5 观测模块化）。"""
+
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cost import provider_for
 from app.storage.repositories.run_log import RunLogRepository
@@ -13,7 +12,7 @@ from app.storage.repositories.run_log import RunLogRepository
 class SystemService:
     async def get_cost(
         self,
-        db: AsyncSession,
+        db: Any,
         *,
         start: datetime | None = None,
         end: datetime | None = None,

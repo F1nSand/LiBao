@@ -1,4 +1,5 @@
 """MCP 源连接配置数据访问（docs 04 §3.5 补充）。软删过滤。文件化：.agent/mcp_servers.json。"""
+
 from __future__ import annotations
 
 import uuid

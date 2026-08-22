@@ -3,11 +3,11 @@
 上传即提取文本入库（txt/md，UTF-8 严格），KB 不落磁盘 → reindex 零磁盘依赖。
 后台处理链 process_document 由调用方 create_task 触发（M4 队列接缝）。
 """
+
 from __future__ import annotations
 
 import uuid
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any
 
 from app.core.config import get_settings
 from app.core.errors import (
@@ -32,7 +32,7 @@ class KbService:
 
     async def create_collection(
         self,
-        db: AsyncSession,
+        db: Any,
         user: User,
         name: str,
         chunk_size: int = 512,
@@ -46,22 +46,22 @@ class KbService:
         await db.commit()
         return coll
 
-    async def get_collection(self, db: AsyncSession, user: User, collection_id: uuid.UUID) -> KbCollection:
+    async def get_collection(self, db: Any, user: User, collection_id: uuid.UUID) -> KbCollection:
         coll = await KbRepository(db).get_collection(user.org_id, collection_id)
         if coll is None:
             raise AppError(ERR_COLLECTION_NOT_FOUND, "集合不存在或无权访问")
         return coll
 
-    async def list_collections(self, db: AsyncSession, user: User) -> list[KbCollection]:
+    async def list_collections(self, db: Any, user: User) -> list[KbCollection]:
         return await KbRepository(db).list_collections(user.org_id)
 
     async def document_counts(
-        self, db: AsyncSession, user: User, collection_ids: list[uuid.UUID]
+        self, db: Any, user: User, collection_ids: list[uuid.UUID]
     ) -> dict[uuid.UUID, int]:
         """各集合非软删文档数（S11：经服务层转发 repo，五层依赖约束）。"""
         return await KbRepository(db).document_counts(user.org_id, collection_ids)
 
-    async def delete_collection(self, db: AsyncSession, user: User, collection_id: uuid.UUID) -> None:
+    async def delete_collection(self, db: Any, user: User, collection_id: uuid.UUID) -> None:
         """软删集合 + 软删其文档 + 硬删 chunks。"""
         repo = KbRepository(db)
         coll = await self.get_collection(db, user, collection_id)
@@ -75,7 +75,7 @@ class KbService:
 
     async def upload_document(
         self,
-        db: AsyncSession,
+        db: Any,
         user: User,
         collection_id: uuid.UUID,
         filename: str,
@@ -104,16 +104,16 @@ class KbService:
         _spawn_pipeline(doc.id)
         return doc
 
-    async def get_document(self, db: AsyncSession, user: User, document_id: uuid.UUID) -> KbDocument:
+    async def get_document(self, db: Any, user: User, document_id: uuid.UUID) -> KbDocument:
         doc = await KbRepository(db).get_document(user.org_id, document_id)
         if doc is None:
             raise AppError(ERR_DOCUMENT_NOT_FOUND, "文档不存在或无权访问")
         return doc
 
-    async def list_docs(self, db: AsyncSession, collection_id: uuid.UUID) -> list[KbDocument]:
+    async def list_docs(self, db: Any, collection_id: uuid.UUID) -> list[KbDocument]:
         return await KbRepository(db).list_documents(collection_id)
 
-    async def reindex_document(self, db: AsyncSession, user: User, document_id: uuid.UUID) -> None:
+    async def reindex_document(self, db: Any, user: User, document_id: uuid.UUID) -> None:
         """重索引：仅允许 indexed/failed/archived 发起（处理中 → 40901）。"""
         doc = await self.get_document(db, user, document_id)
         if doc.status in {"chunking", "indexing"}:
@@ -123,14 +123,14 @@ class KbService:
         await KbRepository(db).persist_document(doc)  # index.json 落盘（不走 FileTable）
         _spawn_pipeline(document_id)
 
-    async def archive_document(self, db: AsyncSession, user: User, document_id: uuid.UUID, status: str) -> None:
+    async def archive_document(self, db: Any, user: User, document_id: uuid.UUID, status: str) -> None:
         doc = await self.get_document(db, user, document_id)
         if doc.status in {"chunking", "indexing"}:
             raise AppError(ERR_TASK_RUNNING, "文档正在处理中")
         doc.status = status  # archived
         await KbRepository(db).persist_document(doc)  # index.json 落盘（不走 FileTable）
 
-    async def delete_document(self, db: AsyncSession, user: User, document_id: uuid.UUID) -> None:
+    async def delete_document(self, db: Any, user: User, document_id: uuid.UUID) -> None:
         """软删文档 + 硬删 chunks。"""
         repo = KbRepository(db)
         doc = await self.get_document(db, user, document_id)
@@ -142,7 +142,7 @@ class KbService:
 
     async def search(
         self,
-        db: AsyncSession,
+        db: Any,
         user: User,
         coll_ids: list[uuid.UUID],
         query: str,

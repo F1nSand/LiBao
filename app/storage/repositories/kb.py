@@ -8,6 +8,7 @@
 
 混合检索（hybrid_search）代码原样保留：双通道换源，RRF k=60 + rerank + 降级链不变。
 """
+
 from __future__ import annotations
 
 import json

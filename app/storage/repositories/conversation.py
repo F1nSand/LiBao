@@ -2,6 +2,7 @@
 
 文件化：.agent/conversations.json（FileTable，内存过滤/排序/分页等价原 SQL 语义）。
 """
+
 from __future__ import annotations
 
 import uuid

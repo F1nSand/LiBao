@@ -4,6 +4,7 @@
 测试可用 MockTransport 干净注入。API key 走 Settings（.env），不入库。
 维度 EMBED_DIM 与迁移 0004 的 vector(1024) 一致（见 models/kb.py）。
 """
+
 from __future__ import annotations
 
 import asyncio

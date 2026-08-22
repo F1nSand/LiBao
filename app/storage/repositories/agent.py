@@ -2,6 +2,7 @@
 
 文件化：.agent/agents.json（AgentConfig）+ .agent/agent_versions.json（AgentVersion 快照）。
 """
+
 from __future__ import annotations
 
 import uuid

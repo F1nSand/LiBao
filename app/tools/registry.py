@@ -4,6 +4,7 @@ ToolSpec 字段即 M2 工具系统的接缝（sandbox/require_confirm/allowlist/
 aci() 生成 OpenAI function schema，函数名取 spec.name（LLM 侧）；注册表键为 spec.id（稳定唯一）。
 acis() 按 id 排序输出，保证静态前缀字节稳定。
 """
+
 from __future__ import annotations
 
 import enum

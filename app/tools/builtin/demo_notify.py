@@ -2,6 +2,7 @@
 
 require_confirm=True（不可逆/对外副作用操作需确认），用户确认后才真正"发送"。
 """
+
 from __future__ import annotations
 
 

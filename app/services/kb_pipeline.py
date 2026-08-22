@@ -3,6 +3,7 @@
 本地单机化：process_document(document_id) 直连 FileStore（无 sessionmaker 参数）；
 每个状态迁移前 re-read 行（防并发覆盖，F4 模式）；embedding 失败 → failed + error。
 """
+
 from __future__ import annotations
 
 import uuid

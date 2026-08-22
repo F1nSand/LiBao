@@ -3,6 +3,7 @@
 repository 层 org_id 过滤参数签名保留、实现忽略（org 恒为默认值）；deps.get_current_user
 恒返回 ADMIN_USER。将来放开多用户仅需改此文件。
 """
+
 from __future__ import annotations
 
 import uuid

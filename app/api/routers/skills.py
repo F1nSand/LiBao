@@ -1,8 +1,10 @@
 """Skill 路由（M7-A，docs 03 §5.14）。CRUD + git 导入（developer+）。"""
+
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_developer
 from app.api.envelope import ok
@@ -18,7 +20,7 @@ router = APIRouter()
 async def import_skills(
     req: SkillImportRequest,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     return ok(await SkillService().import_from_git(db, user, req.url))
 
@@ -29,7 +31,7 @@ async def list_skills(
     page_size: int = Query(20, ge=1, le=100),
     enabled: bool | None = Query(None),
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     data = await SkillService().list_for_org(db, user.org_id, page, page_size, enabled=enabled)
     return ok(data)
@@ -39,7 +41,7 @@ async def list_skills(
 async def create_skill(
     req: CreateSkillRequest,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     row = await SkillService().create(db, user, req)
     return ok(serialize_skill(row))
@@ -49,7 +51,7 @@ async def create_skill(
 async def get_skill(
     skill_id: str,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     row = await SkillService().get_in_org(db, user.org_id, skill_id)
     return ok(serialize_skill(row))
@@ -60,7 +62,7 @@ async def toggle_skill(
     skill_id: str,
     req: SkillToggleRequest,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     row = await SkillService().set_enabled(db, user, skill_id, req.enabled)
     return ok(serialize_skill(row))
@@ -70,7 +72,7 @@ async def toggle_skill(
 async def delete_skill(
     skill_id: str,
     user: User = Depends(require_developer),
-    db: AsyncSession = Depends(get_db),
+    db: Any = Depends(get_db),
 ):
     await SkillService().soft_delete(db, user, skill_id)
     return ok()

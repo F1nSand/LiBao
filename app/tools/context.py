@@ -5,6 +5,7 @@ async handler 与节点同 task 直读；asyncio.to_thread 亦拷贝 context。
 dispatch ctx 由 stream_graph_events 在 producer 启动前设置：tl_dispatch_subagent handler
 读它发 agent_switch 事件（chat 路径 emit=sse_emitter，task 路径 emit=薄转发）。
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

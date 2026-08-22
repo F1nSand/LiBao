@@ -1,4 +1,5 @@
 """内置工具 tl_time_now：返回当前时间（docs 01 §7；只读/确定性/幂等/无 confirm）。"""
+
 from __future__ import annotations
 
 from datetime import datetime

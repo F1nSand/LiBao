@@ -6,7 +6,6 @@ import uuid
 import pytest
 
 from app.services.serializers import serialize_run_log, serialize_trace_event
-from app.storage.db import init_db
 from app.storage.file.store import get_store
 from app.storage.repositories.run_log import RunLogRepository
 from tests.conftest import requires_db
@@ -16,9 +15,8 @@ pytestmark = requires_db
 
 @pytest.fixture
 async def log_fixture():
-    engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         repo = RunLogRepository(session)
         await repo.create(
             trace_id=f"tr_{uid}", node="agent_execute", type="llm", status="ok",
@@ -31,13 +29,12 @@ async def log_fixture():
         )
         await repo.create(trace_id=f"other_{uid}", node="agent_execute", type="llm", status="retried", output={})
         await session.commit()
-    yield sessionmaker, uid
-    await engine.dispose()
+    yield uid
 
 
 async def test_list_paged_and_filters(log_fixture):
-    sessionmaker, uid = log_fixture
-    async with get_store().session(sessionmaker) as session:
+    uid = log_fixture
+    async with get_store().session() as session:
         repo = RunLogRepository(session)
         _, total = await repo.list_paged(limit=20, offset=0)
         assert total >= 3  # 共享 DB：其他测试残留 run_logs，只断言下限
@@ -49,8 +46,8 @@ async def test_list_paged_and_filters(log_fixture):
 
 
 async def test_serialize_run_log_maps_level(log_fixture):
-    sessionmaker, uid = log_fixture
-    async with get_store().session(sessionmaker) as session:
+    uid = log_fixture
+    async with get_store().session() as session:
         repo = RunLogRepository(session)
         tr_logs, _ = await repo.list_paged(limit=20, offset=0, trace_id=f"tr_{uid}")
         other_logs, _ = await repo.list_paged(limit=20, offset=0, trace_id=f"other_{uid}")
@@ -63,8 +60,8 @@ async def test_serialize_run_log_maps_level(log_fixture):
 
 
 async def test_trace_events(log_fixture):
-    sessionmaker, uid = log_fixture
-    async with get_store().session(sessionmaker) as session:
+    uid = log_fixture
+    async with get_store().session() as session:
         repo = RunLogRepository(session)
         logs = await repo.list_by_trace_id(f"tr_{uid}")
         events = [serialize_trace_event(lg) for lg in logs]
@@ -75,8 +72,8 @@ async def test_trace_events(log_fixture):
 
 async def test_aggregate_llm_groups_by_day_model(log_fixture):
     """M6-1 回归：token_usage.cost 需进聚合（旧 SQL 违反 GROUP BY → /system/cost 50001）。"""
-    sessionmaker, uid = log_fixture
-    async with get_store().session(sessionmaker) as session:
+    uid = log_fixture
+    async with get_store().session() as session:
         repo = RunLogRepository(session)
         for cost in (0.5, 0.3):  # 同 model 两行，cost 应求和
             await repo.create(
@@ -85,7 +82,7 @@ async def test_aggregate_llm_groups_by_day_model(log_fixture):
                 token_usage={"cost": cost},
             )
         await session.commit()
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         rows = await RunLogRepository(session).aggregate_llm()
         agg = next(((d, m, c, co) for d, m, c, co in rows if m == "deepseek-agg"), None)
         assert agg is not None

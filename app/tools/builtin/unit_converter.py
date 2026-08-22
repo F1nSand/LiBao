@@ -3,6 +3,7 @@
 category: length / weight / temperature / speed；value + from_unit + to_unit。
 温度用公式（非线性），其余用换算因子。异常兜底 error。
 """
+
 from __future__ import annotations
 
 from typing import Any

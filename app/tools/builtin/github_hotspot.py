@@ -6,6 +6,7 @@ trending 走 gtrending 库（爬 github.com/trending，无官方 API）；搜索
 返回值约定：**成功返回 markdown 字符串**（executor `_summarize` 对 str 原样透传、对 dict 截断 500 字符，
 故展示型结果必须返回 str 才能让 LLM 看全）；失败返回 `{"error": ...}` dict（结构化降级）。
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -4,6 +4,7 @@
 后台延迟 N 秒后 emit `job_done` 事件 → 轮边界（route 节点）排空 → 匹配占位任务
 回填 tool_result（placeholder:false）+ 事件备注进 context（模型下一轮可见）。
 """
+
 from __future__ import annotations
 
 import asyncio

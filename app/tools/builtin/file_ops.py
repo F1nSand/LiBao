@@ -4,6 +4,7 @@ read_file/write_file/edit_file/glob/grep 走路径强限制（resolve_workspace_
 bash 走 LLM 语义审查（先审查再执行）。均读工作区根上下文（get_tool_workspace_root）；
 无工作区上下文 → 降级错误结果（不抛，executor 正常打包）。
 """
+
 from __future__ import annotations
 
 import asyncio

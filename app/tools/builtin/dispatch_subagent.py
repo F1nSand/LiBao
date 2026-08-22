@@ -9,6 +9,7 @@ handler 内跑嵌套 LLM 循环：
 dispatch ctx（app/tools/context.py get_dispatch_ctx）由 stream_graph_events 设置：
 {push, model_builder?, main_name}。测试用 model_builder 注入假模型。
 """
+
 from __future__ import annotations
 
 import logging

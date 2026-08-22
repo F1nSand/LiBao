@@ -2,14 +2,13 @@
 
 产生源：任务事件（set_done/set_failed）+ demo_notify 工具确认执行后。
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import uuid
 from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ERR_NOTIFICATION_NOT_FOUND, AppError
 from app.services.serializers import serialize_notification
@@ -46,7 +45,7 @@ async def unsubscribe_notifications(user_id: str, q: asyncio.Queue) -> None:
 
 class NotificationService:
     async def create(
-        self, db: AsyncSession, user_id: uuid.UUID, title: str, body: str | None = None, level: str = "info"
+        self, db: Any, user_id: uuid.UUID, title: str, body: str | None = None, level: str = "info"
     ) -> Notification:
         """落库 + commit 后 SSE 广播（先落库再推，防通知先于落库到达）。"""
         row = await NotificationRepository(db).create(user_id=user_id, title=title, body=body, level=level)
@@ -55,14 +54,14 @@ class NotificationService:
         await push_notification(str(user_id), serialize_notification(row))
         return row
 
-    async def list_paged(self, db: AsyncSession, user_id: uuid.UUID, page: int, page_size: int) -> dict[str, Any]:
+    async def list_paged(self, db: Any, user_id: uuid.UUID, page: int, page_size: int) -> dict[str, Any]:
         repo = NotificationRepository(db)
         items, total = await repo.list_paged(user_id, limit=page_size, offset=(page - 1) * page_size)
         from app.api.schemas.common import paged
 
         return paged([serialize_notification(n) for n in items], total, page, page_size)
 
-    async def mark_read(self, db: AsyncSession, user: Any, notification_id: uuid.UUID) -> Notification:
+    async def mark_read(self, db: Any, user: Any, notification_id: uuid.UUID) -> Notification:
         row = await NotificationRepository(db).get_owned(user.id, notification_id)
         if row is None:
             raise AppError(ERR_NOTIFICATION_NOT_FOUND, "通知不存在或无权访问")
@@ -71,7 +70,7 @@ class NotificationService:
         await db.refresh(row)
         return row
 
-async def maybe_notify_from_tool_results(db: AsyncSession, user_id: uuid.UUID, final_state: dict[str, Any]) -> None:
+async def maybe_notify_from_tool_results(db: Any, user_id: uuid.UUID, final_state: dict[str, Any]) -> None:
     """demo_notify 确认执行后落一条通知（确认后工具结果 status=done）。"""
     for r in final_state.get("tool_results") or []:
         if r.get("tool_name") == "tl_demo_notify" and r.get("status") == "done":

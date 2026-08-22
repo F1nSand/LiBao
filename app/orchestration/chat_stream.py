@@ -4,6 +4,7 @@
 消息持久化在此（节点保持无 DB）：开头落用户消息，流结束落 assistant 最终消息 + run_logs + last_message_at。
 M2：require_confirm 工具 → interrupt 事件（自动建 Task 承接）→ POST /tasks/{id}/resume → resume_stream_events 续流。
 """
+
 from __future__ import annotations
 
 import logging
@@ -12,7 +13,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from langgraph.types import Command
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import sse_emitter
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
@@ -33,7 +33,7 @@ from app.storage.repositories.task import TaskRepository
 
 
 async def _backfill_attachments(
-    db: AsyncSession, attachment_ids: list[str], conversation_id: uuid.UUID, message_id: uuid.UUID
+    db: Any, attachment_ids: list[str], conversation_id: uuid.UUID, message_id: uuid.UUID
 ) -> None:
     """附件回填 conversation_id/message_id（消息回放时附件可解析归属）。文件化：逐行回填。"""
     from app.storage.repositories.attachment import AttachmentRepository
@@ -71,7 +71,7 @@ def _done_payload(assistant_msg_id: uuid.UUID, totals: dict[str, Any], message: 
 
 async def chat_stream_events(
     *,
-    db: AsyncSession,
+    db: Any,
     graph: Any,
     conversation: Conversation,
     agent: AgentConfig,
@@ -204,7 +204,7 @@ async def chat_stream_events(
 
 async def resume_stream_events(
     *,
-    db: AsyncSession,
+    db: Any,
     graph: Any,
     task: Task,
     user: User,
@@ -348,7 +348,7 @@ async def resume_stream_events(
 
 async def agent_invoke_events(
     *,
-    db: AsyncSession,
+    db: Any,
     graph: Any,
     agent: AgentConfig,
     user: User,

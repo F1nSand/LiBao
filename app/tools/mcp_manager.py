@@ -8,6 +8,7 @@ HALF_OPEN 放行一次，成功复位 / 失败重新计时）。熔断期间执�
 用**独立 owner-task** 承载连接生命周期（connect 在 owner 内完成、cancel scope 常驻该任务），
 工具调用经 asyncio.Queue 投递给 owner 串行执行，规避跨请求复用报错。stdio 免每次起子进程（~1s）。
 """
+
 from __future__ import annotations
 
 import asyncio

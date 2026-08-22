@@ -4,6 +4,7 @@ agent_version 保存每次发布快照（append-only），prefix_hash 为静态�
 单通用 Agent 模型（docs 01 §3.5）：一条 is_default=True 的通用 Agent，不再配置多 Agent/自选；
 subagent 由主 Agent 经 tl_dispatch_subagent 自主派发（内置注册表，非 agent_configs 行）。
 """
+
 from __future__ import annotations
 
 import uuid

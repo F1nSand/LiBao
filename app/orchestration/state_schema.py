@@ -4,6 +4,7 @@ messages 是规范消息流（system/user/assistant/tool），add_messages reduc
 tool_results 单独存放，供 finalize 独立核对（不信任模型自述）。
 flags 承载跨节点运行标记（steps 计数、max_steps 到达、status 等）。
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Any, TypedDict

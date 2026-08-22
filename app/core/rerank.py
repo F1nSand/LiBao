@@ -4,6 +4,7 @@
 精排后取 top_k。选 httpx 而非 litellm：单端点自控重试/错误分类，测试可用 MockTransport 注入。
 失败抛 AppError → 调用方（hybrid_search）静默降级 RRF 顺序，不击穿检索。
 """
+
 from __future__ import annotations
 
 import asyncio

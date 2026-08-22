@@ -7,9 +7,8 @@ from types import SimpleNamespace
 from app.api.schemas.skill import CreateSkillRequest
 from app.orchestration.stream_core import build_initial_state, skills_route_section
 from app.services.skill import SkillService
-from app.storage.db import init_db, set_sessionmaker
 from app.storage.file.store import get_store
-from app.storage.models import Org, User
+from app.storage.models import User
 from app.tools.builtin import register_builtin_tools
 from app.tools.builtin.load_skill import load_skill_handler
 from app.tools.context import set_tool_org
@@ -64,16 +63,12 @@ def test_build_initial_state_with_workspace():
 
 async def test_load_skill_handler():
     register_builtin_tools()
-    engine, sessionmaker = init_db()
-    set_sessionmaker(sessionmaker)
     uid = uuid.uuid4().hex[:8]
     try:
-        async with get_store().session(sessionmaker) as session:
-            org = Org(name=f"测试组织-loadskill-{uid}")
-            session.add(org)
+        async with get_store().session() as session:
             await session.flush()
             user = User(
-                username=f"ls_{uid}", password_hash="hashed", name="L", role="admin", org_id=org.id
+                username=f"ls_{uid}", password_hash="hashed", name="L", role="admin", org_id=uuid.UUID(int=0)
             )
             session.add(user)
             await session.commit()
@@ -82,7 +77,7 @@ async def test_load_skill_handler():
             )
             await SkillService().set_enabled(session, user, str(row.id), True)
 
-        set_tool_org(str(org.id))
+        set_tool_org(str(user.id))
         out = await load_skill_handler("kb_strategy")
         assert out["body"] == "# 步骤"
         assert out["name"] == "kb_strategy"
@@ -90,5 +85,4 @@ async def test_load_skill_handler():
         assert "error" in await load_skill_handler("nope")
     finally:
         set_tool_org(None)
-        set_sessionmaker(None)
-        await engine.dispose()
+        

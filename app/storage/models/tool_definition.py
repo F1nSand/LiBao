@@ -3,6 +3,7 @@
 内置工具与 MCP 注册的工具同走 tool_definition 生命周期；enabled 默认关闭（约束优先）。
 sandbox: none / docker / microvm；tool_type: perception / execution / collaboration / user_comms / event。
 """
+
 from __future__ import annotations
 
 import uuid

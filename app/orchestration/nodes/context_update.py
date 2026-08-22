@@ -2,6 +2,7 @@
 
 状态栏只由受信代码生成（OA2 防投毒）；M1 简单概括 steps/工具调用数。
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional

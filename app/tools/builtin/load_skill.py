@@ -3,6 +3,7 @@
 优先查 org skills（DB，enabled）；未命中回退查工作区 skills（文件 `.agent/skills/<name>/SKILL.md`，
 兼容旧 `skills/<name>/SKILL.md`）。org/工作区上下文缺失 → 降级错误结果（不抛）。
 """
+
 from __future__ import annotations
 
 import uuid
@@ -11,7 +12,6 @@ from typing import Any
 
 from app.core.errors import AppError
 from app.services.skill import parse_skill_md
-from app.storage.db import get_sessionmaker
 from app.storage.repositories.skill import SkillRepository
 from app.tools.context import get_tool_org, get_tool_workspace_root
 
@@ -20,15 +20,12 @@ async def load_skill_handler(name: str) -> dict[str, Any]:
     # ① org skills（DB，enabled）
     org_id = get_tool_org()
     if org_id:
-        sessionmaker = get_sessionmaker()
-        if sessionmaker is not None:
-            try:
-                async with sessionmaker() as db:
-                    skill = await SkillRepository(db).get_by_org_name(uuid.UUID(org_id), name)
-                if skill is not None and skill.enabled:
-                    return {"name": skill.name, "description": skill.description, "body": skill.body}
-            except Exception:  # noqa: BLE001  加载故障不击穿工具调用
-                pass
+        try:
+            skill = await SkillRepository().get_by_org_name(uuid.UUID(org_id), name)
+            if skill is not None and skill.enabled:
+                return {"name": skill.name, "description": skill.description, "body": skill.body}
+        except Exception:  # noqa: BLE001  加载故障不击穿工具调用
+            pass
     # ② 工作区 skills（文件，优先 .agent/skills/<name>/SKILL.md，兼容旧 skills/<name>/SKILL.md）
     root = get_tool_workspace_root()
     if root:

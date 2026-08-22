@@ -3,6 +3,7 @@
 EMBED_DIM 是维度单一来源：LanceDB schema + EmbeddingService 运行期校验共用。
 分块为派生数据：文本+序号进集合 index.json，向量进 kb/vectors.lance；无软删列（reindex 硬删重建）。
 """
+
 from __future__ import annotations
 
 import uuid

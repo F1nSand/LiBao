@@ -3,6 +3,7 @@
 文件化：.agent/memory/default/trace/<session_id>.jsonl（任务流 → _tasks/<task_id>.jsonl）。
 系统日志分页/聚合 = 扫描全部 trace 文件归并（个人量级文件数少，可接受）。
 """
+
 from __future__ import annotations
 
 import uuid

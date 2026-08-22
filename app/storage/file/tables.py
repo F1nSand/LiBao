@@ -5,6 +5,7 @@
   且天然规避脏行追踪漏写——commit 时写出的总是最新内存状态）。
 - `JsonlTable`：append-only JSONL（消息/轨迹/版本），追加即落盘，读取半行跳过（崩溃安全）。
 """
+
 from __future__ import annotations
 
 import asyncio

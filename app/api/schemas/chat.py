@@ -1,4 +1,5 @@
 """对话流式 schema（docs 03 §5.2 ChatRequest）。content 超 32K → 40014（OC1）。"""
+
 from __future__ import annotations
 
 import uuid

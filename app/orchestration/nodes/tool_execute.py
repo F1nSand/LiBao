@@ -5,6 +5,7 @@ interrupt() 返回 {approved: bool}；拒绝分支不执行，写 cancelled Tool
 每节点每轮只确认第一个 require_confirm 工具（规避 LangGraph 多 interrupt 按 id 映射的复杂度，文档化限制）。
 结果 shape 对齐 docs 04 §3.2 message.tool_calls（含 status：done/error/cancelled，前端读此字段）。
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional

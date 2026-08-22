@@ -4,6 +4,7 @@
 transport 注入点（镜像 fetch_url/embeddings）供测试 mock，不碰真实外网。异常兜底 error。
 默认不启用（管理员显式开启，seed DB 行可管理）。
 """
+
 from __future__ import annotations
 
 from typing import Any

@@ -3,6 +3,7 @@
 三段式：① system_prompt 静态置顶 ② 工具 ACI 静态（bind_tools，函数定义不进消息正文）③ 动态内容追加尾部。
 前缀稳定性铁律：系统提示词与 ACI 一旦确定不改；动态内容（状态栏等）永远追加末尾。
 """
+
 from __future__ import annotations
 
 from langchain_core.messages import BaseMessage, SystemMessage

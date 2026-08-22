@@ -1,4 +1,5 @@
 """工具 schema（docs 03 §5.5）。创建默认 enabled=false（默认关闭原则，由服务层强制）。"""
+
 from __future__ import annotations
 
 from typing import Any

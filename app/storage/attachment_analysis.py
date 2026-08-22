@@ -2,6 +2,7 @@
 
 五层约束：工具层（analyze_image）→ 存储层合法，不依赖服务层。服务层后台链同样复用此函数。
 """
+
 from __future__ import annotations
 
 from pathlib import Path

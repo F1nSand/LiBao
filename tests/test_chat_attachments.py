@@ -14,9 +14,8 @@ from app.api.schemas.chat import ChatMessageInput
 from app.orchestration.chat_stream import chat_stream_events
 from app.orchestration.graph import build_graph
 from app.services.attachment import AttachmentService
-from app.storage.db import init_db
 from app.storage.file.store import get_store
-from app.storage.models import AgentConfig, Conversation, Org, User
+from app.storage.models import AgentConfig, Conversation, User
 from app.storage.repositories.attachment import AttachmentRepository
 from app.storage.repositories.message import MessageRepository
 from tests.conftest import requires_db
@@ -34,17 +33,14 @@ class FakeChatModel:
 
 @pytest.fixture
 async def chat_att_fixture():
-    engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with get_store().session(sessionmaker) as session:
-        org = Org(name=f"测试组织-ca-{uid}")
-        session.add(org)
+    async with get_store().session() as session:
         await session.flush()
-        user = User(username=f"ca_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
+        user = User(username=f"ca_{uid}", password_hash="hashed", name="T", role="admin", org_id=uuid.UUID(int=0))
         session.add(user)
         await session.flush()
         agent = AgentConfig(
-            org_id=org.id, name="附件测试助手", model="fake", system_prompt="你是测试助手。",
+            org_id=uuid.UUID(int=0), name="附件测试助手", model="fake", system_prompt="你是测试助手。",
             tools=[], max_steps=5, status="published",
         )
         session.add(agent)
@@ -52,15 +48,14 @@ async def chat_att_fixture():
         conv = Conversation(user_id=user.id, agent_id=agent.id, title="附件会话")
         session.add(conv)
         await session.commit()
-    yield sessionmaker, org, user, agent, conv
-    await engine.dispose()
+    yield user, agent, conv
 
 
 async def _run_chat(chat_fixture, content: str, attachments: list[str] | None = None) -> list[str]:
-    sessionmaker, org, user, agent, conv = chat_fixture
+    user, agent, conv = chat_fixture
     graph = build_graph()
     frames = []
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         async for frame in chat_stream_events(
             db=session,
             graph=graph,
@@ -77,13 +72,13 @@ async def _run_chat(chat_fixture, content: str, attachments: list[str] | None = 
 
 
 async def test_chat_with_attachment_links(chat_att_fixture):
-    sessionmaker, org, user, agent, conv = chat_att_fixture
+    user, agent, conv = chat_att_fixture
     # 先上传一个附件
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         att = await AttachmentService().save_upload(session, user, "a.txt", "text/plain", b"hello")
         att_id = att.id
     await _run_chat(chat_att_fixture, "看下这个附件", attachments=[str(att_id)])
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         # 用户消息带 attachments
         msgs = await MessageRepository(session).list_by_conversation(conv.id)
         user_msg = next(m for m in msgs if m.role == "user")
@@ -103,8 +98,8 @@ def test_chat_message_input_attachments_uuid_validation():
 
 
 async def test_plain_text_persists_message(chat_att_fixture):
-    sessionmaker, org, user, agent, conv = chat_att_fixture
+    user, agent, conv = chat_att_fixture
     await _run_chat(chat_att_fixture, "没有附件的消息")
-    async with get_store().session(sessionmaker) as session:
+    async with get_store().session() as session:
         msgs = await MessageRepository(session).list_by_conversation(conv.id)
         assert all(m.attachments is None or m.attachments == [] for m in msgs)

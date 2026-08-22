@@ -1,4 +1,5 @@
 """后台任务工具（Gate3 Simplify：spawn + 异常观测收敛，收敛 kb/attachment 两处重复）。"""
+
 from __future__ import annotations
 
 import asyncio

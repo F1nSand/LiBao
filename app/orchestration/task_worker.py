@@ -3,6 +3,7 @@
 Redis 与独立 worker 已删；任务提交/resume 直接 spawn_run（asyncio.create_task）注册进 _RUNNING，
 POST /tasks/{id}/cancel 经 route_cancel 真正中断运行中的图。
 """
+
 from __future__ import annotations
 
 import asyncio

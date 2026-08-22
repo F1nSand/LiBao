@@ -2,6 +2,7 @@
 
 支持 + - * / % ( ) 与一元正负；浮点；除以零 → 结构化错误。拒绝任何非法字符（防注入）。
 """
+
 from __future__ import annotations
 
 import re

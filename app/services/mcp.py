@@ -4,12 +4,11 @@
 （tool_definition 行 + registry spec，默认关闭、agent 勾选、confirm/幂等/超时全复用）。
 同名遮蔽拒绝（I7）：工具名与既有 registry / 同 org 工具行冲突 → 40903。
 """
+
 from __future__ import annotations
 
 import uuid
 from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.tools import McpRegisterRequest
 from app.core.errors import (
@@ -78,7 +77,7 @@ def build_mcp_spec(server: McpServer, row: ToolDefinition, cfg: McpConnConfig) -
 
 
 class McpService:
-    async def register(self, db: AsyncSession, user: User, req: McpRegisterRequest) -> dict[str, Any]:
+    async def register(self, db: Any, user: User, req: McpRegisterRequest) -> dict[str, Any]:
         kind, payload = parse_transport(req.url_or_command)
         cfg = McpConnConfig(transport=kind, **payload, headers=req.headers)
         try:
@@ -149,12 +148,12 @@ class McpService:
             "tools": [serialize_tool_definition(r) for r in tool_rows],
         }
 
-    async def list_servers(self, db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any]]:
+    async def list_servers(self, db: Any, org_id: uuid.UUID) -> list[dict[str, Any]]:
         repo = McpServerRepository(db)
         rows = await repo.list_for_org(org_id)
         return [serialize_mcp_server(s, await repo.count_tools(org_id, f"mcp:{s.id}")) for s in rows]
 
-    async def unregister(self, db: AsyncSession, user: User, server_id: str) -> None:
+    async def unregister(self, db: Any, user: User, server_id: str) -> None:
         try:
             server = await McpServerRepository(db).get_by_id_org(user.org_id, uuid.UUID(server_id))
         except ValueError:

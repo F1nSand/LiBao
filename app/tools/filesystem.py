@@ -2,6 +2,7 @@
 
 无容器沙箱下的硬边界：read/write/edit/glob/grep 的所有路径参数先经此校验，逃逸拒绝。
 """
+
 from __future__ import annotations
 
 from pathlib import Path

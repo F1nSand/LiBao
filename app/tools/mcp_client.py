@@ -4,6 +4,7 @@ mcp SDK 2.0：stdio 走 stdio_client(StdioServerParameters)，HTTP 走 streamabl
 （headers 经 httpx2.AsyncClient 注入）；Tool.input_schema / CallToolResult.is_error 为 snake_case。
 连接句柄 + ClientSession 驻留，可复连（close 后可再 connect）。
 """
+
 from __future__ import annotations
 
 import json

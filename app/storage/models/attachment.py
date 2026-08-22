@@ -2,6 +2,7 @@
 
 状态机：uploaded → analyzing → ready | failed（前端 2.5s 轮询 /attachments/{id}/analysis）。
 """
+
 from __future__ import annotations
 
 import uuid

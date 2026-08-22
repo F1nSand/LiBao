@@ -7,6 +7,7 @@
 进程内收件箱（keyed by thread_key）：事件在后台任务完成时 emit，直到下一次 route drain 才取出，
 因此跨用户消息的回填也能工作（下一轮 drain 时送达）。容量有上限防泄漏（单实例足够）。
 """
+
 from __future__ import annotations
 
 from typing import Any

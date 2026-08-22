@@ -4,6 +4,7 @@
 + 失败静默重试（指数退避+抖动，docs 01 §5.4）+ 幂等去重（仅 idempotent 工具，进程内缓存）。
 沙盒守卫：sandbox != none 返回"暂未实现"（Docker 沙盒为 M3 接缝）。
 """
+
 from __future__ import annotations
 
 import asyncio

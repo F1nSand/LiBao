@@ -15,9 +15,8 @@ from app.orchestration.nodes.route import route_node
 from app.orchestration.task_run import run_task_graph
 from app.services.events import drain_events, emit_event
 from app.services.task import TaskService
-from app.storage.db import init_db, set_sessionmaker
 from app.storage.file.store import get_store
-from app.storage.models import AgentConfig, Org, User
+from app.storage.models import AgentConfig, User
 from app.storage.repositories.task import TaskRepository
 from app.tools.builtin import register_builtin_tools
 from app.tools.context import set_dispatch_ctx
@@ -48,6 +47,7 @@ async def test_placeholder_ttl_timeout_backfills_error():
         assert "超时" in backfills[0]["summary"]
         assert out["placeholder_jobs"] == []  # 超时任务已移除
     finally:
+        pass
         set_dispatch_ctx(None)
 
 
@@ -68,6 +68,7 @@ async def test_fresh_placeholder_not_timed_out():
         assert pushed == []  # 新鲜占位不触发超时
         assert len(out["placeholder_jobs"]) == 1  # 保留
     finally:
+        pass
         set_dispatch_ctx(None)
 
 
@@ -84,26 +85,23 @@ async def test_urgent_event_top_priority():
         assert any("普通事件" in n for n in notes)
         assert "紧急" in notes[0]
     finally:
+        pass
         set_dispatch_ctx(None)
 
 
 async def test_task_writes_placeholder_events():
     """任务流结束：在途占位（initiate_demo）写入 task.placeholder_events（docs 04 §3.3 F5）。"""
     register_builtin_tools()
-    engine, sessionmaker = init_db()
-    set_sessionmaker(sessionmaker)
     uid = uuid.uuid4().hex[:8]
     try:
-        async with get_store().session(sessionmaker) as session:
-            org = Org(name=f"测试组织-pl-{uid}")
-            session.add(org)
+        async with get_store().session() as session:
             await session.flush()
-            user = User(username=f"pl_{uid}", password_hash="hashed", name="T", role="admin", org_id=org.id)
+            user = User(username=f"pl_{uid}", password_hash="hashed", name="T", role="admin", org_id=uuid.UUID(int=0))
             session.add(user)
             await session.flush()
             agent = AgentConfig(
-                org_id=org.id, name="占位助手", model="fake", system_prompt="你是助手。", tools=["tl_initiate_demo"],
-                max_steps=5, status="published",
+                org_id=uuid.UUID(int=0), name="占位助手", model="fake", system_prompt="你是助手。",
+                tools=["tl_initiate_demo"], max_steps=5, status="published",
             )
             session.add(agent)
             await session.commit()
@@ -137,17 +135,18 @@ async def test_task_writes_placeholder_events():
         set_dispatch_ctx({"thread_key": str(task_id)})
         try:
             await run_task_graph(
-                graph=graph, sessionmaker=sessionmaker, task_id=task_id,
+                graph=graph, sessionmaker=None, task_id=task_id,
                 trace_id="trace-pl", model_override=FakeModel(),
             )
         finally:
+            pass
             set_dispatch_ctx(None)
 
-        async with get_store().session(sessionmaker) as session:
+        async with get_store().session() as session:
             t = await TaskRepository(session).get_by_id(task_id)
             assert t.status == "done"
             assert t.placeholder_events, "占位任务应写入 task.placeholder_events"
             assert t.placeholder_events[0]["job_ref"].startswith("job_")
     finally:
-        set_sessionmaker(None)
-        await engine.dispose()
+        pass
+        

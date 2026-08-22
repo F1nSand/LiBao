@@ -1,4 +1,5 @@
 """工作区数据访问（M7-B，docs 04 §3.11）。软删过滤。文件化：.agent/workspaces.json。"""
+
 from __future__ import annotations
 
 import uuid

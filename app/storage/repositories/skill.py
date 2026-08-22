@@ -1,4 +1,5 @@
 """Skill 数据访问（M7-A，docs 04 §3.11）。软删过滤；enabled 开关。文件化：.agent/skills.json。"""
+
 from __future__ import annotations
 
 import uuid

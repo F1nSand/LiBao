@@ -4,6 +4,7 @@
 - 文档变更（索引完成/删除/集合删）后全量重建（个人量级千级 chunk 毫秒级，最简单正确）；
 - 打分差异仅影响排序，下游 RRF(k=60) + rerank 候选 20 有容忍。
 """
+
 from __future__ import annotations
 
 import logging

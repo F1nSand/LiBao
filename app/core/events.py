@@ -1,4 +1,5 @@
 """SSE 事件构造（docs 03 §3：信封 {id, seq, type, ts, payload}；ts 为 epoch 毫秒）。"""
+
 from __future__ import annotations
 
 import json

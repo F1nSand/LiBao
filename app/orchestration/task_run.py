@@ -4,6 +4,7 @@ M2 最小实现：asyncio.create_task 后台执行（完整任务队列为 M4）
 中断时任务自身转 waiting_confirm（pending_confirm 落自身行）；resume 走 Command(resume)。
 状态迁移前 re-read 行：运行中被取消不覆盖（兜底）。
 """
+
 from __future__ import annotations
 
 import asyncio

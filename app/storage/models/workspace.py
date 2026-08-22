@@ -3,6 +3,7 @@
 工作区 = 本地文件夹（root_path）+ 项目级 agent 增量（system_prompt_fragment）+ 独立记忆 + 项目 skills/工具。
 root_path 由后端托管（{workspaces_root}/{id}），用户不指定磁盘路径（防越权）。
 """
+
 from __future__ import annotations
 
 import uuid

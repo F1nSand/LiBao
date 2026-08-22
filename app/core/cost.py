@@ -3,6 +3,7 @@
 token×定价表估算（USD/百万 token），非 provider 账单；LiteLLM 响应含真实 cost 时
 优先使用（M4 接缝）。model 前缀命中 provider 单价，未知 provider 走兜底。
 """
+
 from __future__ import annotations
 
 from typing import Any

@@ -3,6 +3,7 @@
 出站黑名单（Settings.fetch_url_denylist，默认空 = 全放行）；transport 注入点供测试 mock；
 解析容错（HTML 结构变动时降级空结果）。异常兜底 error。默认不启用（管理员显式开启）。
 """
+
 from __future__ import annotations
 
 import html as _html
