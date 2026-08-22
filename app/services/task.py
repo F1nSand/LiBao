@@ -1,14 +1,12 @@
 """任务领域服务（docs 01 §5.3 / docs 03 §5.3）。
 
 状态机：pending / running / waiting_confirm / cancelled / done / failed。
-live-tail：Redis Pub/Sub 广播（M4，多实例）+ 进程内订阅表回退（Redis 不可用单实例）。
+live-tail：进程内订阅表直投（本地单机化，Redis 已删）。
 I8 规则：resume 前置校验——不存在/软删→40402；status≠waiting_confirm→40902；pending_confirm 超 TTL→40902。
 """
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -22,66 +20,37 @@ from app.services.notification import NotificationService
 from app.services.serializers import serialize_task
 from app.storage.models.task import Task
 from app.storage.models.user import User
-from app.storage.redis import TERMINAL_EVENTS, get_redis, pubsub_bridge, task_evt_channel
 from app.storage.repositories.task import TaskRepository
 
 logger = logging.getLogger(__name__)
 
-# ---- live-tail（M4：Redis Pub/Sub + 进程内回退）----
-_tails: dict[str, list[asyncio.Queue]] = {}  # 进程内订阅（仅 Redis 不可用时使用）
-_bridges: dict[int, tuple[Any, asyncio.Task]] = {}  # id(queue) → (pubsub, bridge_task)
+TERMINAL_EVENTS = {"done", "error", "cancelled"}
+
+# ---- live-tail（进程内订阅表；本地单机化唯一路径）----
+_tails: dict[str, list[asyncio.Queue]] = {}
 
 
 async def push_event(task_id: str, event_type: str, payload: dict[str, Any]) -> None:
-    """推事件：Redis 可用 → 广播 channel（终态补 __end__ 哨兵）；否则进程内直投。"""
-    r = get_redis()
-    if r is None:
-        queues = _tails.get(task_id)
-        if queues:
-            for q in queues:
-                q.put_nowait((event_type, payload))
-        if event_type in TERMINAL_EVENTS:
-            for q in queues or []:
-                q.put_nowait(None)
-            _tails.pop(task_id, None)
+    """推事件到进程内订阅队列；终态补 None 哨兵并清订阅。"""
+    queues = _tails.get(task_id)
+    if not queues:
         return
-    try:
-        channel = task_evt_channel(task_id)
-        await r.publish(channel, json.dumps({"type": event_type, "payload": payload}))
-        if event_type in TERMINAL_EVENTS:
-            await r.publish(channel, json.dumps({"type": "__end__", "payload": None}))
-    except Exception as exc:  # noqa: BLE001  广播失败不阻断执行
-        logger.warning("redis publish failed: %s", exc)
+    for q in queues:
+        q.put_nowait((event_type, payload))
+    if event_type in TERMINAL_EVENTS:
+        for q in queues:
+            q.put_nowait(None)
+        _tails.pop(task_id, None)
 
 
 async def subscribe(task_id: str) -> asyncio.Queue:
-    """订阅：Redis 可用 → Pub/Sub + 桥接监听；否则进程内注册。await 确认订阅（防发布早于订阅）。"""
+    """订阅任务事件（进程内注册）。"""
     q: asyncio.Queue = asyncio.Queue()
-    r = get_redis()
-    if r is None:
-        _tails.setdefault(task_id, []).append(q)
-        return q
-    try:
-        pubsub = r.pubsub()
-        channel = task_evt_channel(task_id)
-        await pubsub.subscribe(channel)
-        t = asyncio.create_task(pubsub_bridge(pubsub, channel, q, terminal=True))
-        _bridges[id(q)] = (pubsub, t)
-    except Exception as exc:  # noqa: BLE001  订阅失败回退进程内
-        logger.warning("redis subscribe failed, fallback: %s", exc)
-        _tails.setdefault(task_id, []).append(q)
+    _tails.setdefault(task_id, []).append(q)
     return q
 
 
 async def unsubscribe(task_id: str, q: asyncio.Queue) -> None:
-    b = _bridges.pop(id(q), None)
-    if b is not None:
-        pubsub, t = b
-        t.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await t
-        with contextlib.suppress(Exception):
-            await pubsub.unsubscribe(task_evt_channel(task_id))
     queues = _tails.get(task_id)
     if queues and q in queues:
         queues.remove(q)

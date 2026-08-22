@@ -9,6 +9,7 @@ import pytest
 from app.core.security import hash_password
 from app.services.conversation import ConversationService
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Conversation, Org, User
 from app.storage.repositories.message import MessageRepository
 from tests.conftest import requires_db
@@ -20,7 +21,7 @@ pytestmark = requires_db
 async def traj_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-traj-{uid}")
         session.add(org)
         await session.flush()
@@ -68,7 +69,7 @@ async def traj_fixture():
 
 async def test_trajectory_mapping_and_pagination(traj_fixture):
     sessionmaker, user, conv = traj_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         data = await ConversationService().trajectory(session, conv)
         assert data["conversation_id"] == str(conv.id)
         assert data["has_more"] is False

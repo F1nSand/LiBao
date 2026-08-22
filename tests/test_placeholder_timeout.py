@@ -17,6 +17,7 @@ from app.orchestration.task_run import run_task_graph
 from app.services.events import drain_events, emit_event
 from app.services.task import TaskService
 from app.storage.db import init_db, set_sessionmaker
+from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Org, User
 from app.storage.repositories.task import TaskRepository
 from app.tools.builtin import register_builtin_tools
@@ -89,15 +90,12 @@ async def test_urgent_event_top_priority():
 
 async def test_task_writes_placeholder_events():
     """任务流结束：在途占位（initiate_demo）写入 task.placeholder_events（docs 04 §3.3 F5）。"""
-    from app.storage.redis import close_redis, init_redis
-
     register_builtin_tools()
-    init_redis()
     engine, sessionmaker = init_db()
     set_sessionmaker(sessionmaker)
     uid = uuid.uuid4().hex[:8]
     try:
-        async with sessionmaker() as session:
+        async with get_store().session(sessionmaker) as session:
             org = Org(name=f"测试组织-pl-{uid}")
             session.add(org)
             await session.flush()
@@ -146,12 +144,11 @@ async def test_task_writes_placeholder_events():
         finally:
             set_dispatch_ctx(None)
 
-        async with sessionmaker() as session:
+        async with get_store().session(sessionmaker) as session:
             t = await TaskRepository(session).get_by_id(task_id)
             assert t.status == "done"
             assert t.placeholder_events, "占位任务应写入 task.placeholder_events"
             assert t.placeholder_events[0]["job_ref"].startswith("job_")
     finally:
         set_sessionmaker(None)
-        await close_redis()
         await engine.dispose()

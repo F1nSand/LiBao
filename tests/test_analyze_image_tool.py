@@ -8,6 +8,7 @@ import pytest
 from app.core.config import get_settings
 from app.core.security import hash_password
 from app.storage.db import get_sessionmaker, init_db, set_sessionmaker
+from app.storage.file.store import get_store
 from app.storage.models import Attachment, Org, User
 from app.tools import executor
 from app.tools.builtin import register_builtin_tools
@@ -24,7 +25,7 @@ async def analyze_fixture(clean_mcp_specs, tmp_path, monkeypatch):
     monkeypatch.setattr(s, "upload_dir", str(tmp_path))
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-ai-{uid}")
         session.add(org)
         await session.flush()

@@ -15,6 +15,7 @@ from app.core.security import hash_password
 from app.orchestration.chat_stream import chat_stream_events, resume_stream_events
 from app.orchestration.graph import build_graph
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Conversation, Org, User
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.task import TaskRepository
@@ -58,7 +59,7 @@ async def interrupt_fixture():
     )
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-int-{uid}")
         session.add(org)
         await session.flush()
@@ -97,7 +98,7 @@ def _frames_to_events(frames: list[str]) -> list[dict]:
 async def _run_interrupt(chat_fixture, graph, fake) -> tuple[list[dict], uuid.UUID]:
     """跑 chat_stream_events 到中断，返回 (events, task_id)。"""
     sessionmaker, org, user, agent, conv = chat_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         frames = []
         async for frame in chat_stream_events(
             db=session,
@@ -139,7 +140,7 @@ async def test_resume_approved_done(interrupt_fixture):
     fake = FakeChatModel()
     _, task_id = await _run_interrupt(interrupt_fixture, graph, fake)
 
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskRepository(session).get_by_id(task_id)
         frames = []
         async for frame in resume_stream_events(
@@ -175,7 +176,7 @@ async def test_resume_denied_cancelled(interrupt_fixture):
     fake = FakeChatModel()
     _, task_id = await _run_interrupt(interrupt_fixture, graph, fake)
 
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskRepository(session).get_by_id(task_id)
         frames = []
         async for frame in resume_stream_events(

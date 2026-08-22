@@ -4,6 +4,8 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from app.services.task_queue import TaskQueueService
+from app.storage.redis import close_redis, get_redis, get_task_owner, init_redis
 from langchain_core.messages import AIMessage
 from sqlalchemy import select
 
@@ -11,10 +13,9 @@ from app.core.security import hash_password
 from app.orchestration.graph import build_graph
 from app.orchestration.task_worker import process_one
 from app.services.task import TaskService
-from app.services.task_queue import TaskQueueService
 from app.storage.db import init_db, set_sessionmaker
+from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Org, RunLog, User
-from app.storage.redis import close_redis, get_redis, get_task_owner, init_redis
 from app.storage.repositories.task import TaskRepository
 from tests.conftest import requires_db, requires_redis
 
@@ -35,7 +36,7 @@ async def queue_fixture(monkeypatch):
     engine, sessionmaker = init_db()
     set_sessionmaker(sessionmaker)
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-q-{uid}")
         session.add(org)
         await session.flush()
@@ -60,14 +61,14 @@ async def queue_fixture(monkeypatch):
 
 async def test_enqueue_submit_worker_runs_to_done(queue_fixture):
     sessionmaker, user, agent = queue_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskService().submit(session, user, agent.id, {"message": "x"})
         task_id = task.id
     assert await TaskQueueService().enqueue_submit(task_id, "trace-q") is True
     graph = build_graph()
     processed = await process_one(graph, sessionmaker)
     assert processed is True
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         t = await TaskRepository(session).get_by_id(task_id)
         assert t.status == "done"
         logs = (await session.execute(select(RunLog).where(RunLog.task_id == task_id))).scalars().all()
@@ -77,7 +78,7 @@ async def test_enqueue_submit_worker_runs_to_done(queue_fixture):
 
 async def test_enqueue_resume_denied_cancels(queue_fixture):
     sessionmaker, user, agent = queue_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskService().submit(session, user, agent.id, {"message": "x"})
         task_id = task.id
         task.status = "waiting_confirm"
@@ -87,6 +88,6 @@ async def test_enqueue_resume_denied_cancels(queue_fixture):
     graph = build_graph()
     processed = await process_one(graph, sessionmaker)
     assert processed is True
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         t = await TaskRepository(session).get_by_id(task_id)
         assert t.status == "cancelled"

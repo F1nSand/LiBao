@@ -9,6 +9,7 @@ from app.core.security import hash_password
 from app.orchestration.stream_core import build_initial_state, skills_route_section
 from app.services.skill import SkillService
 from app.storage.db import init_db, set_sessionmaker
+from app.storage.file.store import get_store
 from app.storage.models import Org, User
 from app.tools.builtin import register_builtin_tools
 from app.tools.builtin.load_skill import load_skill_handler
@@ -68,7 +69,7 @@ async def test_load_skill_handler():
     set_sessionmaker(sessionmaker)
     uid = uuid.uuid4().hex[:8]
     try:
-        async with sessionmaker() as session:
+        async with get_store().session(sessionmaker) as session:
             org = Org(name=f"测试组织-loadskill-{uid}")
             session.add(org)
             await session.flush()

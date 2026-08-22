@@ -10,6 +10,7 @@ from app.core.security import hash_password
 from app.orchestration.graph import build_graph
 from app.services.evolution import EvolutionService
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Org, User
 from tests.conftest import requires_db
 
@@ -19,7 +20,7 @@ pytestmark = requires_db
 @pytest.fixture
 async def two_org_evo_fixture():
     engine, sessionmaker = init_db()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org_a = Org(name=f"evo隔离-A-{uuid.uuid4().hex[:8]}")
         org_b = Org(name=f"evo隔离-B-{uuid.uuid4().hex[:8]}")
         session.add_all([org_a, org_b])
@@ -48,10 +49,10 @@ async def two_org_evo_fixture():
 async def test_candidate_org_isolation(two_org_evo_fixture):
     sessionmaker, user_a, user_b = two_org_evo_fixture
     svc = EvolutionService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         c_b = await svc.create_candidate(session, user_b, title="B 组织候选", change_type="prompt")
         c_b_id = c_b.id
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         # A 列表不可见 B 候选
         data_a = await svc.list_candidates(session, user_a, page=1, page_size=100)
         assert str(c_b_id) not in {it["id"] for it in data_a["items"]}

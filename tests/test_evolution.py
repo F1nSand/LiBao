@@ -13,6 +13,7 @@ from app.orchestration.graph import build_graph
 from app.services.agent import AgentService
 from app.services.evolution import EvolutionService
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, AgentVersion, Org, User
 from tests.conftest import requires_db
 
@@ -42,7 +43,7 @@ class FakeEvalModel:
 async def evo_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-evo-{uid}")
         session.add(org)
         await session.flush()
@@ -89,7 +90,7 @@ async def _make_candidate(
 async def test_candidate_create_list_filter(evo_fixture):
     sessionmaker, user = evo_fixture
     svc = EvolutionService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await _make_candidate(svc, session, user, title="数学提示词", prompt="数学提示词内容")
         await _make_candidate(svc, session, user, title="安全护栏", status="published", prompt="安全护栏内容")
         data = await svc.list_candidates(session, user, page=1, page_size=20)
@@ -109,7 +110,7 @@ async def test_state_machine_transitions(evo_fixture):
     sessionmaker, user = evo_fixture
     svc = EvolutionService()
     graph = build_graph()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         c = await _make_candidate(svc, session, user, cases=[{"input": "1+1", "expected": "2"}])
         # validate → approved（Fake judge pass）
         approved = await svc.validate_candidate(session, user, c.id, graph, FakeEvalModel(judge_pass=True))
@@ -125,7 +126,7 @@ async def test_state_machine_transitions(evo_fixture):
 async def test_state_machine_invalid_edges(evo_fixture):
     sessionmaker, user = evo_fixture
     svc = EvolutionService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         cand = await _make_candidate(svc, session, user)
         # publish candidate（未 approved）→ 40020
         with pytest.raises(AppError) as exc:
@@ -143,7 +144,7 @@ async def test_validate_sync_approve_and_reject(evo_fixture):
     sessionmaker, user = evo_fixture
     svc = EvolutionService()
     graph = build_graph()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         cases = [{"input": "1+1", "expected": "2"}, {"input": "2+2", "expected": "4"}]
         c_ok = await _make_candidate(svc, session, user, cases=cases)
         ok = await svc.validate_candidate(session, user, c_ok.id, graph, FakeEvalModel(judge_pass=True))
@@ -158,7 +159,7 @@ async def test_validate_uses_candidate_prompt(evo_fixture):
     sessionmaker, user = evo_fixture
     svc = EvolutionService()
     graph = build_graph()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         prompt = "候选专属提示词XYZ"
         c = await _make_candidate(svc, session, user, prompt=prompt, cases=[{"input": "1+1", "expected": "2"}])
         model = FakeEvalModel(judge_pass=True)
@@ -170,7 +171,7 @@ async def test_validate_empty_cases(evo_fixture):
     sessionmaker, user = evo_fixture
     svc = EvolutionService()
     graph = build_graph()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         c = await _make_candidate(svc, session, user, cases=None)
         with pytest.raises(AppError) as exc:
             await svc.validate_candidate(session, user, c.id, graph, FakeEvalModel())
@@ -183,7 +184,7 @@ async def test_publish_prompt_only(evo_fixture):
     sessionmaker, user = evo_fixture
     svc = EvolutionService()
     graph = build_graph()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         # tool 载体 → 40021
         tool_c = await _make_candidate(svc, session, user, change_type="tool")
         tool_c.status = "approved"
@@ -208,7 +209,7 @@ async def test_rollback_rejects_non_current_candidate(evo_fixture):
     sessionmaker, user = evo_fixture
     svc = EvolutionService()
     graph = build_graph()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         # 发布 A（生效），再发布 B（覆盖 A）
         a = await _make_candidate(svc, session, user, title="A", prompt="提示词A",
                                   cases=[{"input": "1+1", "expected": "2"}])
@@ -231,7 +232,7 @@ async def test_rollback_restores_previous_prompt(evo_fixture):
     sessionmaker, user = evo_fixture
     svc = EvolutionService()
     graph = build_graph()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         prompt = "新提示词XYZ"
         c = await _make_candidate(svc, session, user, prompt=prompt, cases=[{"input": "1+1", "expected": "2"}])
         c = await svc.validate_candidate(session, user, c.id, graph, FakeEvalModel(judge_pass=True))

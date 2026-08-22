@@ -1,0 +1,180 @@
+"""文件存储核心（本地单机化）：FileStore 进程单例 + FileContext 请求上下文。
+
+- `FileStore`：目录骨架 + 实体表注册（惰性）+ JSONL 分文件追加/读取 + SQL sessionmaker 桥（双轨期）。
+- `FileContext`：替代 AsyncSession 的请求级上下文。未文件化 repository 的 SQL 调用（execute/flush/
+  refresh/add）转发给内部真实 AsyncSession；文件化实体的提交由 `commit()` 全量 flush 落盘。
+- 桥函数：`set_store/get_store`（替代原 storage/db.py 的 set_sessionmaker/get_sessionmaker）。
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+
+from app.core.config import get_settings
+from app.storage.file.rows import Row
+from app.storage.file.tables import FileTable, _append_line
+from app.storage.models.conversation import Conversation
+from app.storage.models.task import Task
+
+logger = logging.getLogger(__name__)
+
+# 实体表规格：name → (相对路径, 模型类)。repository 首次访问时惰性注册。
+TABLE_SPECS: dict[str, tuple[str, type]] = {
+    "conversations": ("conversations.json", Conversation),
+    "tasks": ("tasks.json", Task),
+}
+
+
+class FileStore:
+    """进程单例：目录骨架 + 表注册 + JSONL 分文件 + SQL 桥。"""
+
+    def __init__(self, settings: Any = None) -> None:
+        settings = settings or get_settings()
+        self.root = Path(settings.agent_data_dir)
+        self.kb_root = Path(settings.kb_root)
+        self.tables: dict[str, FileTable] = {}
+        self._jsonl_locks: dict[str, asyncio.Lock] = {}
+        self.sql_sessionmaker: Any = None  # 双轨期：真实 SQL sessionmaker（P4 全文件化后删除）
+
+    # ---- 初始化 ----
+
+    async def init(self) -> None:
+        """目录骨架 + 预加载全部已注册表（运行期 register 不再有未加载覆盖风险）。"""
+        for rel in ("sessions", "checkpoints", "memory/default/trace/_tasks", "data"):
+            (self.root / rel).mkdir(parents=True, exist_ok=True)
+        (self.kb_root).mkdir(parents=True, exist_ok=True)
+        for name in list(self.tables):
+            await self.tables[name]._ensure_loaded()  # noqa: SLF001  预加载（内部方法）
+
+    # ---- 表 ----
+
+    def table(self, name: str) -> FileTable:
+        if name not in self.tables:
+            rel, model = TABLE_SPECS[name]
+            self.tables[name] = FileTable(self.root, rel, model)
+        return self.tables[name]
+
+    # ---- JSONL 分文件（消息/轨迹/版本）----
+
+    async def jsonl_append(self, rel_path: str, record: dict[str, Any]) -> None:
+        path = self.root / rel_path
+        lock = self._jsonl_locks.setdefault(rel_path, asyncio.Lock())
+        async with lock:
+            line = json.dumps(record, ensure_ascii=False)
+            await asyncio.to_thread(_append_line, path, line)
+
+    async def jsonl_list(self, rel_path: str) -> list[dict[str, Any]]:
+        path = self.root / rel_path
+        if not path.exists():
+            return []
+        lock = self._jsonl_locks.setdefault(rel_path, asyncio.Lock())
+        async with lock:
+            return await asyncio.to_thread(_read_jsonl, path)
+
+    # ---- 上下文 ----
+
+    def context(self, sql_session: Any = None) -> FileContext:
+        """请求级上下文：文件脏行 + SQL session 双轨。"""
+        if sql_session is None and self.sql_sessionmaker is not None:
+            sql_session = self.sql_sessionmaker()
+        return FileContext(self, sql_session)
+
+    @asynccontextmanager
+    async def session(self, sessionmaker: Any = None) -> AsyncIterator[FileContext]:
+        """统一会话入口：SQL session（未文件化实体兜底）+ FileContext（文件 flush）双轨。
+
+        用法：`async with get_store().session() as db: ...`（P4 全文件化后简化为纯 FileContext）。
+        """
+        sm = sessionmaker or self.sql_sessionmaker
+        if sm is None:
+            yield self.context(None)
+            return
+        async with sm() as sql, self.context(sql) as ctx:
+            yield ctx
+
+
+class FileContext:
+    """替代 AsyncSession 的请求上下文（双轨：文件 flush + SQL 转发）。"""
+
+    def __init__(self, store: FileStore, sql_session: Any = None) -> None:
+        self.store = store
+        self._sql = sql_session
+
+    def __getattr__(self, name: str) -> Any:
+        """未显式实现的方法（get/scalar/scalars/delete 等）转发给内部 SQL session（双轨兜底）。"""
+        sql = self.__dict__.get("_sql")
+        if sql is not None:
+            return getattr(sql, name)
+        raise AttributeError(name)
+
+    # ---- SQL 转发（未文件化 repository 用；P4 全文件化后删除分支）----
+
+    def execute(self, stmt: Any) -> Any:
+        return self._sql.execute(stmt)
+
+    def flush(self) -> Any:
+        return self._sql.flush()
+
+    def add(self, row: Any) -> None:
+        """SQL 行转发；文件行（Row）已由 repository register 到表，无需动作。"""
+        if not isinstance(row, Row) and self._sql is not None:
+            self._sql.add(row)
+
+    async def refresh(self, row: Any) -> None:
+        if isinstance(row, Row):
+            return  # 文件行内存即最新（no-op）
+        await self._sql.refresh(row)
+
+    # ---- 提交 / 回滚 ----
+
+    async def commit(self) -> None:
+        """文件侧：全部表全量序列化落盘（tmp+replace 原子）；SQL 侧：转发 commit。"""
+        for table in self.store.tables.values():
+            await table.flush()
+        if self._sql is not None:
+            await self._sql.commit()
+
+    async def rollback(self) -> None:
+        """文件侧：全部表从磁盘重载（丢弃内存未提交修改）；SQL 侧：转发 rollback。"""
+        for table in self.store.tables.values():
+            await table.reload()
+        if self._sql is not None:
+            await self._sql.rollback()
+
+    async def __aenter__(self) -> FileContext:
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._sql is not None:
+            await self._sql.close()
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # 半行（崩溃残留）跳过
+    return out
+
+
+# ---- 全局桥（替代 storage/db.py 的 sessionmaker 桥）----
+
+_store: FileStore | None = None
+
+
+def set_store(store: FileStore) -> None:
+    global _store
+    _store = store
+
+
+def get_store() -> FileStore | None:
+    return _store

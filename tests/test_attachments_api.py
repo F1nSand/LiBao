@@ -13,6 +13,7 @@ from app.core.security import hash_password
 from app.services.attachment import AttachmentService, analyze_attachment
 from app.services.serializers import serialize_attachment
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import Attachment, Org, User
 from tests.conftest import requires_db
 
@@ -25,7 +26,7 @@ async def att_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(s, "upload_dir", str(tmp_path))
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-att-{uid}")
         session.add(org)
         await session.flush()
@@ -44,7 +45,7 @@ async def att_fixture(monkeypatch, tmp_path):
 async def test_upload_persists_and_returns(att_fixture):
     sessionmaker, user, other, tmp = att_fixture
     svc = AttachmentService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         att = await svc.save_upload(session, user, "a.txt", "text/plain", "你好世界".encode())
         assert att.status == "uploaded"
         assert att.size_bytes == len("你好世界".encode())
@@ -59,7 +60,7 @@ async def test_upload_persists_and_returns(att_fixture):
 async def test_upload_type_not_allowed_40012(att_fixture):
     sessionmaker, user, other, tmp = att_fixture
     svc = AttachmentService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         with pytest.raises(AppError) as exc:
             await svc.save_upload(session, user, "x.exe", "application/x-msdownload", b"MZ")
         assert exc.value.code == 40012
@@ -70,7 +71,7 @@ async def test_upload_too_large_40011(att_fixture, monkeypatch):
     s = get_settings()
     monkeypatch.setattr(s, "max_upload_mb", 1)  # 1MB
     svc = AttachmentService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         with pytest.raises(AppError) as exc:
             await svc.save_upload(session, user, "big.txt", "text/plain", b"x" * (1024 * 1024 + 1))
         assert exc.value.code == 40011
@@ -79,11 +80,11 @@ async def test_upload_too_large_40011(att_fixture, monkeypatch):
 async def test_analyze_image_degrades(att_fixture):
     sessionmaker, user, other, tmp = att_fixture
     svc = AttachmentService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         att = await svc.save_upload(session, user, "pic.png", "image/png", b"\x89PNG")
         att_id = att.id
     await analyze_attachment(sessionmaker, att_id)
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         att = await svc.get_attachment(session, user, att_id)
         assert att.status == "ready"  # 降级是完成态，不是 failed
         assert att.analysis["reason"] == "no_vision_model"
@@ -93,11 +94,11 @@ async def test_analyze_image_degrades(att_fixture):
 async def test_analyze_txt_extracts(att_fixture):
     sessionmaker, user, other, tmp = att_fixture
     svc = AttachmentService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         att = await svc.save_upload(session, user, "note.txt", "text/plain", "这是笔记内容".encode())
         att_id = att.id
     await analyze_attachment(sessionmaker, att_id)
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         att = await svc.get_attachment(session, user, att_id)
         assert att.status == "ready"
         assert att.analysis["text"] == "这是笔记内容"
@@ -106,11 +107,11 @@ async def test_analyze_txt_extracts(att_fixture):
 async def test_analyze_pdf_metadata_only(att_fixture):
     sessionmaker, user, other, tmp = att_fixture
     svc = AttachmentService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         att = await svc.save_upload(session, user, "doc.pdf", "application/pdf", b"%PDF-1.4")
         att_id = att.id
     await analyze_attachment(sessionmaker, att_id)
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         att = await svc.get_attachment(session, user, att_id)
         assert att.status == "ready"
         assert att.analysis["text"] is None
@@ -120,7 +121,7 @@ async def test_analyze_pdf_metadata_only(att_fixture):
 async def test_analyze_failed_gives_60004(att_fixture):
     sessionmaker, user, other, tmp = att_fixture
     svc = AttachmentService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         att = await svc.save_upload(session, user, "bad.bin", "application/msword", b"\x00\x01")
         att_id = att.id
         att.status = "failed"  # 模拟分析失败（doc 提取不可用 → failed 路径）
@@ -134,7 +135,7 @@ async def test_analyze_failed_gives_60004(att_fixture):
 async def test_delete_removes_file_and_row(att_fixture):
     sessionmaker, user, other, tmp = att_fixture
     svc = AttachmentService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         att = await svc.save_upload(session, user, "a.txt", "text/plain", b"x")
         att_id = att.id
         await svc.soft_delete(session, user, att_id)
@@ -163,7 +164,7 @@ async def test_serialize_attachment_has_attachment_id():
 async def test_other_user_attachment_40403(att_fixture):
     sessionmaker, user, other, tmp = att_fixture
     svc = AttachmentService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         att = await svc.save_upload(session, user, "a.txt", "text/plain", b"x")
         with pytest.raises(AppError) as exc:
             await svc.get_attachment(session, other, att.id)  # 他人附件

@@ -23,7 +23,7 @@ class Candidate(Base, BaseModel):
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     source_conversation_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True
+        UUID(as_uuid=True), nullable=True  # conversations FK 已随文件化移除（列保留）
     )
     source_type: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)  # trajectory/eval/manual
     change_type: Mapped[str] = mapped_column(String(16), nullable=False)  # prompt/skill/tool/memory/context

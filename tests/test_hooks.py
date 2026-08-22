@@ -10,6 +10,7 @@ from app.core.security import hash_password
 from app.services.events import drain_events
 from app.services.webhook import WebhookService
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import Org, User
 from app.tools.registry import ToolSpec, ToolType, register, unregister
 from tests.conftest import requires_db, requires_redis
@@ -24,7 +25,7 @@ async def hook_fixture():
     init_redis()
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-hook-{uid}")
         session.add(org)
         await session.flush()

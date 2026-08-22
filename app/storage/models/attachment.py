@@ -20,7 +20,7 @@ class Attachment(BaseModel, Base):
         UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False
     )
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True
+        UUID(as_uuid=True), nullable=True  # conversations FK 已随文件化移除（列保留）
     )
     message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)

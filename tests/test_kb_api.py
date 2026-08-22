@@ -17,6 +17,7 @@ from app.services.kb import KbService
 from app.services.kb_pipeline import process_document
 from app.services.serializers import kb_document_progress
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import KbChunk, Org, User
 from app.storage.repositories.kb import KbRepository
 from tests.conftest import requires_db
@@ -39,7 +40,7 @@ class FakeEmbedder:
 async def kb_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-kb-{uid}")
         session.add(org)
         await session.flush()
@@ -61,7 +62,7 @@ async def _upload_doc(sessionmaker, user, svc, name, content, collection_id=None
     if collection_id is None:
         coll = await svc.create_collection(sessionmaker(), user, name=f"coll-{uuid.uuid4().hex[:6]}")
         collection_id = coll.id
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         doc = await svc.upload_document(
             session, user, collection_id, filename=name, content=content, content_type="text/plain"
         )
@@ -71,7 +72,7 @@ async def _upload_doc(sessionmaker, user, svc, name, content, collection_id=None
 async def test_collection_crud_and_conflicts(kb_fixture):
     sessionmaker, user, user2 = kb_fixture
     svc = KbService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         coll = await svc.create_collection(session, user, name="产品手册", chunk_size=512, overlap=64)
         assert coll.name == "产品手册"
         with pytest.raises(AppError) as exc:
@@ -89,11 +90,11 @@ async def test_upload_and_pipeline_to_indexed(kb_fixture):
     svc = KbService()
     embedder = FakeEmbedder()
     doc_id, coll_id = await _upload_doc(sessionmaker, user, svc, "guide.md", "内容内容" * 300)  # ~900 字 → 2 块
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         doc = await svc.get_document(session, user, doc_id)
         assert doc.status == "uploaded"
     await process_document(sessionmaker, doc_id, embedder=embedder)
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         doc = await svc.get_document(session, user, doc_id)
         assert doc.status == "indexed"
         assert doc.chunk_count >= 2  # 512/64 滑窗
@@ -107,7 +108,7 @@ async def test_empty_text_fails(kb_fixture):
     svc = KbService()
     doc_id, _ = await _upload_doc(sessionmaker, user, svc, "empty.txt", "   \n  ")
     await process_document(sessionmaker, doc_id, embedder=FakeEmbedder())
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         doc = await svc.get_document(session, user, doc_id)
         assert doc.status == "failed"
         assert doc.error
@@ -118,13 +119,13 @@ async def test_reindex_idempotent(kb_fixture):
     svc = KbService()
     doc_id, _ = await _upload_doc(sessionmaker, user, svc, "doc.txt", "abcdef" * 200)
     await process_document(sessionmaker, doc_id, embedder=FakeEmbedder())
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         before = await svc.get_document(session, user, doc_id)
         assert before.status == "indexed"
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await svc.reindex_document(session, user, doc_id)
     await process_document(sessionmaker, doc_id, embedder=FakeEmbedder())
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         after = await svc.get_document(session, user, doc_id)
         assert after.status == "indexed"
         assert after.chunk_count == before.chunk_count  # 幂等，不翻倍
@@ -136,7 +137,7 @@ async def test_processing_conflict_40901(kb_fixture):
     sessionmaker, user, user2 = kb_fixture
     svc = KbService()
     doc_id, _ = await _upload_doc(sessionmaker, user, svc, "doc.txt", "x" * 100)
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         doc = await svc.get_document(session, user, doc_id)
         doc.status = "indexing"  # 模拟处理中
         await session.commit()
@@ -153,12 +154,12 @@ async def test_archive_and_delete_cascade(kb_fixture):
     svc = KbService()
     doc_id, _ = await _upload_doc(sessionmaker, user, svc, "doc.txt", "abc" * 200)
     await process_document(sessionmaker, doc_id, embedder=FakeEmbedder())
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await svc.archive_document(session, user, doc_id, "archived")
         doc = await svc.get_document(session, user, doc_id)
         assert doc.status == "archived"
     # 删除级联硬删 chunks
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await svc.delete_document(session, user, doc_id)
         with pytest.raises(AppError):
             await svc.get_document(session, user, doc_id)
@@ -171,7 +172,7 @@ async def test_delete_collection_cascades(kb_fixture):
     svc = KbService()
     doc_id, coll_id = await _upload_doc(sessionmaker, user, svc, "doc.txt", "abc" * 100)
     await process_document(sessionmaker, doc_id, embedder=FakeEmbedder())
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await svc.delete_collection(session, user, coll_id)
         with pytest.raises(AppError) as exc:
             await svc.get_collection(session, user, coll_id)
@@ -206,7 +207,7 @@ async def test_pipeline_insert_failure_marks_failed(kb_fixture, monkeypatch):
     monkeypatch.setattr(KbRepository, "insert_chunks", boom)
     doc_id, _ = await _upload_doc(sessionmaker, user, svc, "doc.txt", "abc" * 200)
     await process_document(sessionmaker, doc_id, embedder=embedder)
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         doc = await svc.get_document(session, user, doc_id)
         assert doc.status == "failed"
         assert "索引落库失败" in (doc.error or "")
@@ -219,7 +220,7 @@ async def test_document_counts(kb_fixture):
     coll = await svc.create_collection(sessionmaker(), user, name="count-coll")
     for name, content in [("a.txt", "aaa"), ("b.txt", "bbb")]:
         await _upload_doc(sessionmaker, user, svc, name, content, collection_id=coll.id)
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         counts = await svc.document_counts(session, user, [coll.id])
         assert counts[coll.id] == 2
 
@@ -229,7 +230,7 @@ async def test_empty_content_40001(kb_fixture):
     sessionmaker, user, user2 = kb_fixture
     svc = KbService()
     coll = await svc.create_collection(sessionmaker(), user, name="empty-coll")
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         with pytest.raises(AppError) as exc:
             await svc.upload_document(session, user, coll.id, filename="e.txt", content="", content_type="text/plain")
         assert exc.value.code == 40001
@@ -247,7 +248,7 @@ async def test_cross_org_document_404(kb_fixture):
     sessionmaker, user, user2 = kb_fixture
     svc = KbService()
     doc_id, _ = await _upload_doc(sessionmaker, user, svc, "doc.txt", "abc")
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         with pytest.raises(AppError) as exc:
             await svc.get_document(session, user2, doc_id)  # 他人文档
         assert exc.value.code == 40408

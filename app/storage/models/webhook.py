@@ -21,7 +21,7 @@ class WebhookConfig(BaseModel, Base):
     )
     tool_id: Mapped[str] = mapped_column(String(64), nullable=False)  # 事件型工具 registry id（tool_type=event）
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True  # 事件投递目标线程
+        UUID(as_uuid=True), nullable=True  # conversations FK 已随文件化移除（列保留）  # 事件投递目标线程
     )
     token_hash: Mapped[str] = mapped_column(String(128), nullable=False)  # x-hook-token 的 sha256，不落明文
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

@@ -1,19 +1,28 @@
-"""运行日志数据访问（docs 04 §3.10）。append-only，trace_id 关联全链路；只增不改。"""
+"""运行日志数据访问（docs 04 §3.10）。append-only，trace_id 关联全链路；只增不改。
+
+文件化：.agent/memory/default/trace/<session_id>.jsonl（任务流 → _tasks/<task_id>.jsonl）。
+系统日志分页/聚合 = 扫描全部 trace 文件归并（个人量级文件数少，可接受）。
+"""
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Float, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.storage.file.store import get_store
 from app.storage.models.run_log import RunLog
 
 
 class RunLogRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
+    def __init__(self, session=None) -> None:
+        self.session = session  # 兼容调用方传参（FileContext），文件化后不使用
+        self.store = get_store()
+
+    @staticmethod
+    def _rel_path(session_id: uuid.UUID | None, task_id: uuid.UUID | None) -> str:
+        if session_id is not None:
+            return f"memory/default/trace/{session_id}.jsonl"
+        return f"memory/default/trace/_tasks/{task_id}.jsonl"
 
     async def create(
         self,
@@ -41,12 +50,23 @@ class RunLogRepository:
             duration_ms=duration_ms,
             status=status,
         )
-        self.session.add(log)
+        await self.store.jsonl_append(self._rel_path(session_id, task_id), log.to_dict())
         return log
 
+    async def _scan_all(self) -> list[RunLog]:
+        """扫描全部 trace 文件归并（按 created_at 升序）。"""
+        traces = self.store.root / "memory" / "default" / "trace"
+        if not traces.is_dir():
+            return []
+        rows: list[RunLog] = []
+        for path in traces.rglob("*.jsonl"):
+            records = await self.store.jsonl_list(str(path.relative_to(self.store.root)))
+            rows.extend(RunLog.from_dict(r) for r in records)
+        rows.sort(key=lambda r: r.created_at)
+        return rows
+
     async def list_by_trace_id(self, trace_id: str) -> list[RunLog]:
-        stmt = select(RunLog).where(RunLog.trace_id == trace_id).order_by(RunLog.created_at.asc())
-        return list((await self.session.execute(stmt)).scalars())
+        return [r for r in await self._scan_all() if r.trace_id == trace_id]
 
     async def list_paged(
         self,
@@ -59,39 +79,39 @@ class RunLogRepository:
         end: datetime | None = None,
     ) -> tuple[list[RunLog], int]:
         """系统日志分页（2f）：trace_id/status/时间范围过滤，新→旧。"""
-        stmt = select(RunLog)
+        rows = await self._scan_all()
         if trace_id:
-            stmt = stmt.where(RunLog.trace_id == trace_id)
+            rows = [r for r in rows if r.trace_id == trace_id]
         if status:
-            stmt = stmt.where(RunLog.status == status)
+            rows = [r for r in rows if r.status == status]
         if start is not None:
-            stmt = stmt.where(RunLog.created_at >= start)
+            rows = [r for r in rows if r.created_at >= start]
         if end is not None:
-            stmt = stmt.where(RunLog.created_at <= end)
-        total = int(
-            (await self.session.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
-        )
-        items_stmt = stmt.order_by(RunLog.created_at.desc()).limit(limit).offset(offset)
-        return list((await self.session.execute(items_stmt)).scalars()), total
+            rows = [r for r in rows if r.created_at <= end]
+        rows.reverse()  # 新→旧
+        return rows[offset : offset + limit], len(rows)
 
     async def aggregate_llm(
         self, *, start: datetime | None = None, end: datetime | None = None
     ) -> list[tuple[Any, str, int, float]]:
-        """按 (日, model) SQL GROUP BY 聚合 LLM 调用（count + cost），替代 Python 全量循环（M5 观测）。"""
-        stmt = (
-            select(
-                func.date(RunLog.created_at).label("day"),
-                RunLog.input["model"].as_string().label("model"),
-                func.count().label("calls"),
-                # token_usage.cost 必须进聚合，否则违反 GROUP BY（实测 /system/cost 50001）
-                func.sum(func.coalesce(func.cast(RunLog.token_usage["cost"].astext, Float), 0.0)).label("cost"),
-            )
-            .where(RunLog.type == "llm")
-            .group_by("day", "model")
-            .order_by("day")
-        )
-        if start is not None:
-            stmt = stmt.where(RunLog.created_at >= start)
-        if end is not None:
-            stmt = stmt.where(RunLog.created_at <= end)
-        return list((await self.session.execute(stmt)).all())
+        """按 (日, model) 内存聚合 LLM 调用（count + cost），替代 SQL GROUP BY。"""
+        rows = await self._scan_all()
+        agg: dict[tuple[date, str], list[int, float]] = {}
+        for r in rows:
+            if r.type != "llm":
+                continue
+            if start is not None and r.created_at < start:
+                continue
+            if end is not None and r.created_at > end:
+                continue
+            model = (r.input or {}).get("model") or ""
+            key = (r.created_at.date(), model)
+            usage = r.token_usage or {}
+            cost = float(usage.get("cost") or 0.0)
+            cur = agg.setdefault(key, [0, 0.0])
+            cur[0] += 1
+            cur[1] += cost
+        return [
+            (day, model, count, round(cost, 4))
+            for (day, model), (count, cost) in sorted(agg.items())
+        ]

@@ -43,7 +43,7 @@ from app.core.bootstrap import cleanup_runtime, init_runtime
 from app.core.config import get_settings
 from app.core.errors import ERR_INTERNAL, AppError, http_status_for
 from app.core.logging import set_trace_id, setup_logging
-from app.orchestration.checkpointer import PostgresCheckpointer
+from app.orchestration.checkpointer import build_checkpointer
 from app.orchestration.graph import build_graph
 
 if sys.platform == "win32":
@@ -70,14 +70,13 @@ async def lifespan(app: FastAPI):
     runtime = await init_runtime(settings)
     app.state.engine = runtime.engine
     app.state.sessionmaker = runtime.sessionmaker
-    app.state.redis = runtime.redis
-    # checkpoint 表由 setup() 创建（须在 alembic upgrade head 之后，langgraph#2570 规避）
-    async with PostgresCheckpointer(settings.sync_checkpoint_dsn) as saver:
-        app.state.checkpointer = saver
-        app.state.graph = build_graph(saver)
-        # M6-3：task_worker 已拆到独立 worker 进程（python -m app.worker）；backend 只做 API/SSE。
-        logger.info("lifespan ready: graph compiled, checkpointer up")
-        yield
+    app.state.store = runtime.store
+    # 本地单机化：JsonFileSaver（.agent/checkpoints/），resume 语义与 PostgresSaver 等价
+    saver = build_checkpointer(settings)
+    app.state.checkpointer = saver
+    app.state.graph = build_graph(saver)
+    logger.info("lifespan ready: graph compiled, checkpointer up")
+    yield
     await cleanup_runtime(runtime)
 
 

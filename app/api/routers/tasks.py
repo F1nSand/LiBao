@@ -19,7 +19,6 @@ from app.orchestration.task_worker import route_cancel, spawn_run
 from app.services.agent import AgentService
 from app.services.serializers import serialize_task
 from app.services.task import TaskService, subscribe, unsubscribe
-from app.services.task_queue import TaskQueueService
 from app.storage.models.task import Task
 from app.storage.models.user import User
 
@@ -83,14 +82,13 @@ async def submit_task(
 ):
     agent = await AgentService().get_default(db, user.org_id)  # 单通用 Agent，不接收 agent_id
     task = await TaskService().submit(db, user, agent.id, req.input)
-    # M4：任务入队（worker 消费跑图）；Redis 不可用降级进程内 spawn_run（单实例/测试兜底，注册进 _RUNNING 可取消）
-    if not await TaskQueueService().enqueue_submit(task.id, get_trace_id()):
-        spawn_run(
-            graph=request.app.state.graph,
-            sessionmaker=request.app.state.sessionmaker,
-            task_id=task.id,
-            trace_id=get_trace_id(),
-        )
+    # 本地单机化：直接进程内跑图（spawn_run 注册进 _RUNNING，可取消）
+    spawn_run(
+        graph=request.app.state.graph,
+        sessionmaker=request.app.state.sessionmaker,
+        task_id=task.id,
+        trace_id=get_trace_id(),
+    )
     return ok({"task_id": str(task.id)})
 
 
@@ -170,13 +168,12 @@ async def resume_task(
             media_type="text/event-stream",
             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
         )
-    # JSON 轨：后台续跑（TaskDetail 非流式）；M4 入队（Redis 挂降级 spawn_run，注册进 _RUNNING 可取消）
-    if not await TaskQueueService().enqueue_resume(task.id, approved, trace_id):
-        spawn_run(
-            graph=graph,
-            sessionmaker=request.app.state.sessionmaker,
-            task_id=task.id,
-            approved=approved,
-            trace_id=trace_id,
-        )
+    # JSON 轨：后台续跑（TaskDetail 非流式）；进程内 spawn_run（注册进 _RUNNING 可取消）
+    spawn_run(
+        graph=graph,
+        sessionmaker=request.app.state.sessionmaker,
+        task_id=task.id,
+        approved=approved,
+        trace_id=trace_id,
+    )
     return ok()

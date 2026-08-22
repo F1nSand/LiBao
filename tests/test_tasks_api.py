@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from langchain_core.messages import AIMessage
-from sqlalchemy import func, select
 
 from app.api.routers.tasks import _task_event_stream
 from app.core.errors import AppError
@@ -18,7 +17,9 @@ from app.orchestration.graph import build_graph
 from app.orchestration.task_run import run_task_graph
 from app.services.task import TaskService
 from app.storage.db import init_db
-from app.storage.models import AgentConfig, Org, RunLog, User
+from app.storage.file.store import get_store
+from app.storage.models import AgentConfig, Org, User
+from app.storage.repositories.run_log import RunLogRepository
 from app.storage.repositories.task import TaskRepository
 from tests.conftest import requires_db
 
@@ -48,7 +49,7 @@ async def tasks_fixture():
     register_builtin_tools()
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-tasks-{uid}")
         session.add(org)
         await session.flush()
@@ -73,7 +74,7 @@ async def tasks_fixture():
 async def test_submit_and_run_to_done(tasks_fixture):
     sessionmaker, user, agent = tasks_fixture
     graph = build_graph()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskService().submit(session, user, agent.id, {"message": "现在几点？"})
         task_id = task.id
         assert task.status == "pending"
@@ -82,18 +83,17 @@ async def test_submit_and_run_to_done(tasks_fixture):
         graph=graph, sessionmaker=sessionmaker, task_id=task_id, trace_id="trace-t", model_override=FakeChatModel()
     )
 
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task2 = await TaskRepository(session).get_by_id(task_id)
         assert task2.status == "done"
         assert task2.output and task2.output.get("content") == "任务执行完成。"
-        stmt = select(func.count()).select_from(RunLog).where(RunLog.task_id == task_id)
-        n = (await session.execute(stmt)).scalar_one()
-        assert n > 0  # run_logs 带 task_id
+        n = len(await RunLogRepository().list_by_trace_id("trace-t"))
+        assert n > 0  # run_logs 带 trace_id（文件化后按 trace_id 扫描）
 
 
 async def test_cancel_done_returns_40902(tasks_fixture):
     sessionmaker, user, agent = tasks_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskService().submit(session, user, agent.id, {"message": "x"})
         await TaskService().set_done(session, task, {"content": "ok"})
         with pytest.raises(AppError) as exc:
@@ -103,7 +103,7 @@ async def test_cancel_done_returns_40902(tasks_fixture):
 
 async def test_resume_precheck_rejects_cancelled(tasks_fixture):
     sessionmaker, user, agent = tasks_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskService().create_waiting_confirm(
             session,
             user=user,
@@ -120,7 +120,7 @@ async def test_resume_precheck_rejects_cancelled(tasks_fixture):
 
 async def test_resume_precheck_rejects_expired_ttl(tasks_fixture):
     sessionmaker, user, agent = tasks_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskService().create_waiting_confirm(
             session,
             user=user,
@@ -140,7 +140,7 @@ async def test_resume_precheck_rejects_expired_ttl(tasks_fixture):
 
 async def test_events_replay_done(tasks_fixture):
     sessionmaker, user, agent = tasks_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskService().submit(session, user, agent.id, {"message": "x"})
         await TaskService().set_done(session, task, {"content": "完成", "token_usage": {"total_tokens": 10}})
         frames = []

@@ -1,5 +1,6 @@
 """记忆数据访问（docs 04 §3.8）。卡片软删过滤；版本 UNIQUE(memory_id, version)。
-maintenance 原料改读 messages（memory_trace 已删，见迁移 0016）。"""
+maintenance 原料改读 messages（memory_trace 已删，见迁移 0016）。
+文件化：卡片/版本 P2 转换；recent_messages_for_maintenance 已改文件扫描。"""
 from __future__ import annotations
 
 import uuid
@@ -8,7 +9,7 @@ from datetime import UTC, datetime
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.storage.models.conversation import Conversation
+from app.storage.file.store import get_store
 from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion
 from app.storage.models.message import Message
 
@@ -21,20 +22,29 @@ class MemoryRepository:
 
     async def recent_messages_for_maintenance(self, user_id: uuid.UUID, limit: int) -> list[Message]:
         """maintenance 原料：该用户最近 user+assistant 消息（join conversations 过滤 user_id +
-        排除软删会话/软删消息）。与旧 recent_traces 同语义：最近 limit 条按时间升序。"""
-        stmt = (
-            select(Message)
-            .join(Conversation, Message.conversation_id == Conversation.id)
-            .where(
-                Conversation.user_id == user_id,
-                Conversation.deleted_at.is_(None),
-                Message.role.in_(("user", "assistant")),
-                Message.deleted_at.is_(None),
-            )
-            .order_by(Message.created_at.desc())
-            .limit(limit)
+        排除软删会话/软删消息）。与旧 recent_traces 同语义：最近 limit 条按时间升序。
+
+        文件化：扫描全部会话 JSONL 归并（个人量级文件数少；conversations.json 过滤归属）。
+        """
+        store = get_store()
+        convs = await store.table("conversations").list(
+            filter_fn=lambda c: c.user_id == user_id and c.deleted_at is None
         )
-        return list(reversed((await self.session.execute(stmt)).scalars().all()))
+        conv_ids = {str(c.id) for c in convs}
+        all_msgs: list[Message] = []
+        sessions_dir = store.root / "sessions"
+        if sessions_dir.is_dir():
+            for path in sessions_dir.glob("*.jsonl"):
+                if path.stem not in conv_ids:
+                    continue
+                records = await store.jsonl_list(f"sessions/{path.name}")
+                all_msgs.extend(
+                    Message.from_dict(r)
+                    for r in records
+                    if r.get("role") in ("user", "assistant") and not r.get("deleted_at")
+                )
+        all_msgs.sort(key=lambda m: m.created_at, reverse=True)
+        return list(reversed(all_msgs[:limit]))
 
     # ---- 长期记忆卡片 ----
 

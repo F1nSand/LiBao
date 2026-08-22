@@ -12,6 +12,7 @@ import pytest
 from app.core.security import hash_password
 from app.services.kb import KbService
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import KbChunk, KbCollection, KbDocument, Org, User
 from tests.conftest import requires_db
 
@@ -47,7 +48,7 @@ class _DisableRerank:
 async def kb_search_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-kbs-{uid}")
         session.add(org)
         await session.flush()
@@ -113,7 +114,7 @@ async def kb_search_fixture():
 async def test_bm25_chinese_hit(kb_search_fixture):
     sessionmaker, user, coll_id, coll_b_id = kb_search_fixture
     svc = KbService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         hits = await svc.search(session, user, coll_ids=[coll_id], query="天气", top_k=5,
             hybrid={"semantic": 0, "bm25": 1},  # 纯 bm25
         )
@@ -127,7 +128,7 @@ async def test_pure_bm25_no_embedding_call(kb_search_fixture, monkeypatch):
     svc = KbService()
     counter = CountingEmbedder()
     monkeypatch.setattr("app.storage.repositories.kb.EmbeddingService", lambda: counter)
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await svc.search(session, user, coll_ids=[coll_id], query="天气", top_k=5,
             hybrid={"semantic": 0, "bm25": 1},
         )
@@ -139,7 +140,7 @@ async def test_semantic_ranking(kb_search_fixture, monkeypatch):
     svc = KbService()
     monkeypatch.setattr("app.storage.repositories.kb.EmbeddingService", lambda: NearEmbedder())
     monkeypatch.setattr("app.storage.repositories.kb.RerankService", _DisableRerank)  # 隔离真实 rerank API
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         hits = await svc.search(session, user, coll_ids=[coll_id], query="天气", top_k=5,
             hybrid={"semantic": 1, "bm25": 0},  # 纯语义
         )
@@ -149,7 +150,7 @@ async def test_semantic_ranking(kb_search_fixture, monkeypatch):
 async def test_rrf_fusion(kb_search_fixture):
     sessionmaker, user, coll_id, coll_b_id = kb_search_fixture
     svc = KbService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         hits = await svc.search(session, user, coll_ids=[coll_id], query="天气", top_k=5,
             hybrid={"semantic": 1, "bm25": 1},  # 双通道
         )
@@ -162,7 +163,7 @@ async def test_rrf_fusion(kb_search_fixture):
 async def test_top_k_and_empty_query(kb_search_fixture):
     sessionmaker, user, coll_id, coll_b_id = kb_search_fixture
     svc = KbService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         hits = await svc.search(session, user, coll_ids=[coll_id], query="天气", top_k=1,
             hybrid={"semantic": 1, "bm25": 1},
         )
@@ -176,7 +177,7 @@ async def test_top_k_and_empty_query(kb_search_fixture):
 async def test_collection_ids_filter(kb_search_fixture):
     sessionmaker, user, coll_id, coll_b_id = kb_search_fixture
     svc = KbService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         only_b = await svc.search(session, user, coll_ids=[coll_b_id], query="天气", top_k=5,
             hybrid={"semantic": 1, "bm25": 1},
         )
@@ -190,7 +191,7 @@ async def test_collection_ids_filter(kb_search_fixture):
 async def test_archived_and_indexing_invisible(kb_search_fixture):
     sessionmaker, user, coll_id, coll_b_id = kb_search_fixture
     svc = KbService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         hits = await svc.search(session, user, coll_ids=[coll_id], query="寒冷", top_k=5,
             hybrid={"semantic": 0, "bm25": 1},
         )
@@ -218,7 +219,7 @@ async def test_rerank_reorders_top(kb_search_fixture, monkeypatch):
     svc = KbService()
     monkeypatch.setattr("app.storage.repositories.kb.EmbeddingService", lambda: NearEmbedder())
     monkeypatch.setattr("app.storage.repositories.kb.RerankService", lambda: ReorderReranker())
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         hits = await svc.search(session, user, coll_ids=[coll_id], query="天气", top_k=1,
             hybrid={"semantic": 1, "bm25": 1},
         )
@@ -233,7 +234,7 @@ async def test_rerank_failure_degrades_to_rrf(kb_search_fixture, monkeypatch):
     svc = KbService()
     monkeypatch.setattr("app.storage.repositories.kb.EmbeddingService", lambda: NearEmbedder())
     monkeypatch.setattr("app.storage.repositories.kb.RerankService", lambda: FailingReranker())
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         hits = await svc.search(session, user, coll_ids=[coll_id], query="天气", top_k=1,
             hybrid={"semantic": 1, "bm25": 1},
         )

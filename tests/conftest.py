@@ -2,10 +2,12 @@
 
 requires_db 供各 DB-backed 测试文件做 pytestmark；clean_mcp_specs 供注册 MCP spec 的 fixture
 在 setup 幂等清理历史残留（registry 是进程级全局，async fixture teardown 延迟执行不可靠）。
+本地单机化：`_filestore` autouse 为每个测试初始化独立 FileStore（tmp 目录），测试无需自建。
 """
 from __future__ import annotations
 
 import socket
+from types import SimpleNamespace
 
 import pytest
 
@@ -31,6 +33,22 @@ def redis_reachable() -> bool:
 
 requires_db = pytest.mark.skipif(not db_reachable(), reason="Docker db 未运行")
 requires_redis = pytest.mark.skipif(not redis_reachable(), reason="Docker redis 未运行")
+
+
+@pytest.fixture(autouse=True)
+async def _filestore(tmp_path):
+    """文件存储隔离：每个测试独立临时目录（本地单机化）。
+
+    sql_sessionmaker 由各测试 fixture（init_db 后）自行注入；集成测试经 lifespan 注入。
+    """
+    from app.storage.file.store import FileStore, set_store
+
+    settings = SimpleNamespace(agent_data_dir=str(tmp_path / ".agent"), kb_root=str(tmp_path / "kb"))
+    store = FileStore(settings)
+    await store.init()
+    set_store(store)
+    yield store
+    set_store(None)
 
 
 @pytest.fixture

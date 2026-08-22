@@ -6,12 +6,6 @@ import json
 import uuid
 
 import pytest
-
-from app.core.security import hash_password
-from app.orchestration.task_worker import route_cancel
-from app.services.task import TaskService
-from app.storage.db import init_db, set_sessionmaker
-from app.storage.models import AgentConfig, Org, User
 from app.storage.redis import (
     claim_task,
     close_redis,
@@ -19,6 +13,13 @@ from app.storage.redis import (
     init_redis,
     worker_cancel_channel,
 )
+
+from app.core.security import hash_password
+from app.orchestration.task_worker import route_cancel
+from app.services.task import TaskService
+from app.storage.db import init_db, set_sessionmaker
+from app.storage.file.store import get_store
+from app.storage.models import AgentConfig, Org, User
 from tests.conftest import requires_db, requires_redis
 
 pytestmark = [requires_db, requires_redis]
@@ -30,7 +31,7 @@ async def cross_cancel_fixture():
     engine, sessionmaker = init_db()
     set_sessionmaker(sessionmaker)
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-cc-{uid}")
         session.add(org)
         await session.flush()
@@ -55,7 +56,7 @@ async def cross_cancel_fixture():
 async def test_route_cancel_broadcasts_to_claimed_owner(cross_cancel_fixture):
     """任务被 worker-B claim 且本地无 in-flight → route_cancel 向 worker:cancel:B 广播。"""
     sessionmaker, user, agent = cross_cancel_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskService().submit(session, user, agent.id, {"message": "x"})
         task_id = str(task.id)
 

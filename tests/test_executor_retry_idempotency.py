@@ -7,17 +7,10 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from app.core.config import get_settings
 from app.tools import executor
 from app.tools.registry import ToolSpec
 from app.tools.sandbox import SandboxLevel
-
-
-@pytest.fixture(autouse=True)
-def _no_redis(monkeypatch):
-    monkeypatch.setattr("app.tools.executor.get_redis", lambda: None)
 
 
 def _spec(**kw) -> ToolSpec:

@@ -16,6 +16,7 @@ from app.core.errors import (
     ERR_TOOL_NOT_FOUND,
 )
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import McpServer, Org
 from app.storage.models.mcp_server import McpServer as McpServerDirect
 from tests.conftest import requires_db
@@ -27,7 +28,7 @@ pytestmark = requires_db
 async def mcp_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-mcp-{uid}")
         session.add(org)
         await session.commit()
@@ -38,7 +39,7 @@ async def mcp_fixture():
 
 async def test_mcp_server_row_roundtrip(mcp_fixture):
     sessionmaker, org_id = mcp_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         row = McpServer(
             org_id=org_id,
             name="demo",
@@ -62,7 +63,7 @@ async def test_mcp_server_row_roundtrip(mcp_fixture):
 
 async def test_mcp_server_http_row_with_headers(mcp_fixture):
     sessionmaker, org_id = mcp_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         row = McpServer(
             org_id=org_id,
             name="httpd",

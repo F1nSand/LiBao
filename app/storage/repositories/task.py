@@ -1,19 +1,21 @@
-"""任务数据访问（docs 04 §3.3）。status 状态机：pending/running/waiting_confirm/cancelled/done/failed。"""
+"""任务数据访问（docs 04 §3.3）。status 状态机：pending/running/waiting_confirm/cancelled/done/failed。
+
+文件化：.agent/tasks.json（FileTable，内存过滤/排序/分页；字段赋值经 Row 标脏，commit 落盘）。
+"""
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.storage.file.store import get_store
 from app.storage.models.task import Task
 
 
 class TaskRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
+    def __init__(self, session=None) -> None:
+        self.session = session  # 兼容调用方传参（FileContext），文件化后不使用
+        self.table = get_store().table("tasks")
 
     async def create(
         self,
@@ -32,12 +34,14 @@ class TaskRepository:
             pending_confirm=pending_confirm,
             progress=0.0,
         )
-        self.session.add(task)
+        self.table.register(task)
         return task
 
     async def get_by_id(self, task_id: uuid.UUID) -> Task | None:
-        stmt = select(Task).where(Task.id == task_id, Task.deleted_at.is_(None))
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+        row = await self.table.get(task_id)
+        if row is None or row.deleted_at is not None:
+            return None
+        return row
 
     async def list_for_user(
         self,
@@ -47,29 +51,32 @@ class TaskRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> list[Task]:
-        stmt = select(Task).where(Task.user_id == user_id, Task.deleted_at.is_(None))
-        if status is not None:
-            stmt = stmt.where(Task.status == status)
-        stmt = stmt.order_by(Task.created_at.desc()).limit(limit).offset(offset)
-        return list((await self.session.execute(stmt)).scalars())
+        return await self.table.list(
+            filter_fn=lambda t: (
+                t.user_id == user_id and t.deleted_at is None and (status is None or t.status == status)
+            ),
+            sort_key=lambda t: t.created_at,
+            desc=True,
+            limit=limit,
+            offset=offset,
+        )
 
     async def count_for_user(self, user_id: uuid.UUID, *, status: str | None = None) -> int:
-        stmt = select(func.count()).select_from(Task).where(Task.user_id == user_id, Task.deleted_at.is_(None))
-        if status is not None:
-            stmt = stmt.where(Task.status == status)
-        return int((await self.session.execute(stmt)).scalar_one())
+        return await self.table.count(
+            filter_fn=lambda t: (
+                t.user_id == user_id and t.deleted_at is None and (status is None or t.status == status)
+            )
+        )
 
     async def update_status(self, task: Task, status: str, *, progress: float | None = None) -> None:
         task.status = status
         if progress is not None:
             task.progress = progress
-        self.session.add(task)
 
     async def set_pending_confirm(self, task: Task, value: dict[str, Any]) -> None:
         task.pending_confirm = value
         task.status = "waiting_confirm"
         task.progress = 0.5
-        self.session.add(task)
 
     async def update_finish(
         self, task: Task, *, status: str, output: dict[str, Any] | None = None, error: dict[str, Any] | None = None
@@ -81,4 +88,3 @@ class TaskRepository:
             task.output = output
         if error is not None:
             task.error = error
-        self.session.add(task)

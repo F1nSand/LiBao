@@ -19,6 +19,7 @@ from app.services.notification import maybe_notify_from_tool_results
 from app.services.skill import SkillService
 from app.services.task import TaskService, push_event
 from app.services.tool import ToolService
+from app.storage.file.store import get_store
 from app.storage.repositories.agent import AgentRepository
 from app.storage.repositories.task import TaskRepository
 
@@ -39,7 +40,7 @@ async def _run_graph_common(
     *, graph, sessionmaker, task_id: uuid.UUID, initial: Any, trace_id: str, model_override: Any = None
 ) -> None:
     """共享执行体：跑图 + 中断落自身行 + 终态迁移 + live-tail 事件。"""
-    async with sessionmaker() as db:
+    async with get_store().session(sessionmaker) as db:
         repo = TaskRepository(db)
         task = await repo.get_by_id(task_id)
         if task is None:
@@ -137,7 +138,7 @@ async def _run_graph_common(
 async def _mark_failed(sessionmaker: Any, task_id: uuid.UUID, exc: Exception, log_msg: str) -> None:
     """后台任务异常兜底：置 failed + 推 error（Simpl：收敛 run/resume 两处重复）。"""
     logger.exception(log_msg, task_id)
-    async with sessionmaker() as db:
+    async with get_store().session(sessionmaker) as db:
         task = await TaskRepository(db).get_by_id(task_id)
         if task is not None:
             await TaskService().set_failed(db, task, str(exc))
@@ -149,7 +150,7 @@ async def run_task_graph(
 ) -> None:
     """POST /tasks 提交后的后台执行。"""
     try:
-        async with sessionmaker() as db:
+        async with get_store().session(sessionmaker) as db:
             task = await TaskRepository(db).get_by_id(task_id)
             if task is None:
                 return
@@ -192,7 +193,7 @@ async def resume_task_graph(
 ) -> None:
     """任务 JSON 轨 resume：approved → 后台续跑图；denied → 直接置 cancelled。"""
     try:
-        async with sessionmaker() as db:
+        async with get_store().session(sessionmaker) as db:
             task = await TaskRepository(db).get_by_id(task_id)
             if task is None:
                 return

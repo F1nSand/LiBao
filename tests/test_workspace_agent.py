@@ -41,9 +41,9 @@ def test_discover_workspace_skills_dot_agent_priority(tmp_path):
 def test_discover_workspace_agent(tmp_path):
     _write_skill(tmp_path, "s1", "d1")
     (tmp_path / ".agent" / "agent.md").write_text("# 约定", encoding="utf-8")
-    (tmp_path / ".agent" / "memory").mkdir(parents=True)
+    (tmp_path / ".agent" / "memory").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".agent" / "memory" / "facts.md").write_text("事实 A", encoding="utf-8")
-    (tmp_path / ".agent" / "knowledge").mkdir(parents=True)
+    (tmp_path / ".agent" / "knowledge").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".agent" / "knowledge" / "domain.md").write_text("领域知识 B", encoding="utf-8")
     ov = discover_workspace_agent(str(tmp_path))
     assert [s["name"] for s in ov["skills"]] == ["s1"]

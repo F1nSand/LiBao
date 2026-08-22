@@ -11,6 +11,7 @@ from app.core.security import hash_password
 from app.orchestration.graph import build_graph
 from app.services.eval import EvalService, _parse_judge, run_eval
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Org, User
 from tests.conftest import requires_db
 
@@ -39,7 +40,7 @@ class FakeEvalModel:
 async def eval_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-eval-{uid}")
         session.add(org)
         await session.flush()
@@ -65,7 +66,7 @@ def test_parse_judge():
 async def test_eval_set_and_case_crud(eval_fixture):
     sessionmaker, user = eval_fixture
     svc = EvalService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         s = await svc.create_set(session, user, "回归集", "冒烟")
         await svc.add_case(session, user, s.id, "1+1", "2")
         c2 = await svc.add_case(session, user, s.id, "中国的首都", "北京")
@@ -79,7 +80,7 @@ async def test_eval_set_and_case_crud(eval_fixture):
 async def test_run_eval_completes_with_pass_rate(eval_fixture):
     sessionmaker, user = eval_fixture
     svc = EvalService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         s = await svc.create_set(session, user, "回归集")
         await svc.add_case(session, user, s.id, "1+1", "2")
         await svc.add_case(session, user, s.id, "苹果的颜色", "红色")
@@ -87,7 +88,7 @@ async def test_run_eval_completes_with_pass_rate(eval_fixture):
         run_id = run.id
     graph = build_graph()
     await run_eval(graph, sessionmaker, run_id, model_override=FakeEvalModel(judge_pass=True))
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         detail = await svc.get_run_detail(session, user, run_id)
         assert detail["run"]["status"] == "done"
         assert detail["run"]["pass_rate"] == 1.0
@@ -99,14 +100,14 @@ async def test_run_eval_completes_with_pass_rate(eval_fixture):
 async def test_run_eval_failed_judge_counts_fail(eval_fixture):
     sessionmaker, user = eval_fixture
     svc = EvalService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         s = await svc.create_set(session, user, "负例集")
         await svc.add_case(session, user, s.id, "问", "期望")
         run = await svc.create_run(session, user, s.id)
         run_id = run.id
     graph = build_graph()
     await run_eval(graph, sessionmaker, run_id, model_override=FakeEvalModel(judge_pass=False))
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         detail = await svc.get_run_detail(session, user, run_id)
         assert detail["run"]["status"] == "done"
         assert detail["run"]["pass_rate"] == 0.0

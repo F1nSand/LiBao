@@ -14,7 +14,8 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ERR_FORBIDDEN, ERR_UNAUTHORIZED, AppError
+from app.core.errors import ERR_FORBIDDEN, ERR_INTERNAL, ERR_UNAUTHORIZED, AppError
+from app.storage.file.store import FileContext, get_store
 from app.storage.models.user import User
 
 _bearer = HTTPBearer(auto_error=False)
@@ -26,11 +27,17 @@ async def get_settings_dep() -> object:
     return get_settings()
 
 
-async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
-    """从 app.state 取全局 async_sessionmaker，逐请求创建会话。"""
-    sessionmaker = request.app.state.sessionmaker
-    async with sessionmaker() as session:
-        yield session
+async def get_db(request: Request) -> AsyncIterator[FileContext]:
+    """请求级文件存储上下文（双轨：文件实体 flush + SQL session 转发，P4 全文件化后简化）。"""
+    store = get_store()
+    if store is None or store.sql_sessionmaker is None:
+        raise AppError(ERR_INTERNAL, "存储未初始化")
+    sql = store.sql_sessionmaker()
+    ctx = FileContext(store, sql)
+    try:
+        yield ctx
+    finally:
+        await sql.close()
 
 
 async def get_current_user(

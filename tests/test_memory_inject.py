@@ -15,6 +15,7 @@ from app.orchestration.graph import build_graph
 from app.orchestration.stream_core import build_initial_state
 from app.services.memory import MemoryService
 from app.storage.db import init_db, set_sessionmaker
+from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Org, User
 from tests.conftest import requires_db
 
@@ -37,7 +38,7 @@ class FakeModel:
 async def inject_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-inj-{uid}")
         session.add(org)
         await session.flush()
@@ -76,7 +77,7 @@ async def test_no_user_id_injects_nothing(inject_fixture):
 
 async def test_inject_cards_sorted_by_importance(inject_fixture):
     sessionmaker, user, agent = inject_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         svc = MemoryService()
         await svc.create_card(session, user.id, "note", "低", {"text": "low"}, importance=0.2)
         await svc.create_card(session, user.id, "note", "高", {"text": "high"}, importance=0.9)
@@ -91,7 +92,7 @@ async def test_inject_cards_sorted_by_importance(inject_fixture):
 
 async def test_render_position_after_human_before_status_bar(inject_fixture):
     sessionmaker, user, agent = inject_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await MemoryService().create_card(session, user.id, "note", "卡", {"text": "x"}, importance=0.8)
     graph = build_graph()
     model = FakeModel()
@@ -111,7 +112,7 @@ async def test_inject_limit_from_settings(inject_fixture, monkeypatch):
     sessionmaker, user, agent = inject_fixture
     s = get_settings()
     monkeypatch.setattr(s, "memory_inject_limit", 1)
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         svc = MemoryService()
         await svc.create_card(session, user.id, "note", "a", {"text": "1"}, importance=0.5)
         await svc.create_card(session, user.id, "note", "b", {"text": "2"}, importance=0.9)
@@ -124,7 +125,7 @@ async def test_inject_limit_from_settings(inject_fixture, monkeypatch):
 
 async def test_run_log_type_memory(inject_fixture):
     sessionmaker, user, agent = inject_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await MemoryService().create_card(session, user.id, "note", "卡", {"text": "x"})
     graph = build_graph()
     initial = build_initial_state(agent, "你好", user_id=str(user.id))
@@ -135,7 +136,7 @@ async def test_run_log_type_memory(inject_fixture):
 
 async def test_full_chat_flow_with_injection(inject_fixture):
     sessionmaker, user, agent = inject_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await MemoryService().create_card(session, user.id, "note", "偏好", {"text": "用户喜欢喝茶"}, importance=0.7)
     graph = build_graph()
     model = FakeModel()

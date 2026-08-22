@@ -16,6 +16,7 @@ from app.core.security import hash_password
 from app.services.serializers import serialize_skill
 from app.services.skill import SkillService, parse_skill_md
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import Org, User
 from app.tools.builtin import register_builtin_tools
 from tests.conftest import requires_db
@@ -55,7 +56,7 @@ async def skill_fixture():
     register_builtin_tools()
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-skills-{uid}")
         session.add(org)
         await session.flush()
@@ -70,7 +71,7 @@ async def skill_fixture():
 
 async def test_create_skill_default_disabled(skill_fixture):
     sessionmaker, user = skill_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         row = await SkillService().create(
             session, user, CreateSkillRequest(name="kb_strategy", description="检索", body="# 步骤")
         )
@@ -82,7 +83,7 @@ async def test_create_skill_default_disabled(skill_fixture):
 
 async def test_create_duplicate_name_conflict(skill_fixture):
     sessionmaker, user = skill_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await SkillService().create(session, user, CreateSkillRequest(name="dup"))
         with pytest.raises(AppError) as exc:
             await SkillService().create(session, user, CreateSkillRequest(name="dup"))
@@ -91,7 +92,7 @@ async def test_create_duplicate_name_conflict(skill_fixture):
 
 async def test_set_enabled_and_list_filter(skill_fixture):
     sessionmaker, user = skill_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await SkillService().create(session, user, CreateSkillRequest(name="s1"))
         row = await SkillService().create(session, user, CreateSkillRequest(name="s2"))
         await SkillService().set_enabled(session, user, str(row.id), True)
@@ -104,7 +105,7 @@ async def test_set_enabled_and_list_filter(skill_fixture):
 
 async def test_soft_delete(skill_fixture):
     sessionmaker, user = skill_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         row = await SkillService().create(session, user, CreateSkillRequest(name="gone"))
         await SkillService().soft_delete(session, user, str(row.id))
         with pytest.raises(AppError) as exc:
@@ -140,7 +141,7 @@ async def test_import_from_git_local(skill_fixture, tmp_path):
         pytest.skip("git 不可用，跳过导入测试")
 
     sessionmaker, user = skill_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         result = await SkillService().import_from_git(session, user, repo_path)
         assert result["imported"] == 1  # good 入库，bad 跳过
         items = await SkillService().list_for_org(session, user.org_id, 1, 50)

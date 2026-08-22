@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     checkpoint_dsn: str = "postgresql://agent:agent@localhost:5432/agent"
     redis_url: str = "redis://localhost:6379/0"
 
+    # ---- 本地单机化（文件存储）----
+    agent_data_dir: str = ".agent"  # 会话 JSONL / 记忆 md / 配置 json 根目录
+    kb_root: str = "kb"  # KB 集合目录（index.json + documents/ + vectors.lance）
+
     # ---- LLM（LiteLLM）----
     llm_provider: str = "deepseek"
     llm_model: str = "deepseek/deepseek-chat"

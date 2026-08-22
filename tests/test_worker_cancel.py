@@ -5,15 +5,7 @@ import asyncio
 import uuid
 
 import pytest
-from langchain_core.messages import AIMessage
-
 from app.core.instance import get_instance_id
-from app.core.security import hash_password
-from app.orchestration.graph import build_graph
-from app.orchestration.task_worker import cancel_listener, running_task, spawn_run
-from app.services.task import TaskService
-from app.storage.db import init_db, set_sessionmaker
-from app.storage.models import AgentConfig, Org, User
 from app.storage.redis import (
     close_redis,
     get_redis,
@@ -21,6 +13,15 @@ from app.storage.redis import (
     init_redis,
     publish_cancel,
 )
+from langchain_core.messages import AIMessage
+
+from app.core.security import hash_password
+from app.orchestration.graph import build_graph
+from app.orchestration.task_worker import cancel_listener, running_task, spawn_run
+from app.services.task import TaskService
+from app.storage.db import init_db, set_sessionmaker
+from app.storage.file.store import get_store
+from app.storage.models import AgentConfig, Org, User
 from tests.conftest import requires_db, requires_redis
 
 pytestmark = [requires_db, requires_redis]
@@ -43,7 +44,7 @@ async def worker_cancel_fixture(monkeypatch):
     engine, sessionmaker = init_db()
     set_sessionmaker(sessionmaker)
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-wc-{uid}")
         session.add(org)
         await session.flush()
@@ -68,7 +69,7 @@ async def worker_cancel_fixture(monkeypatch):
 
 async def test_spawn_run_claims_and_cancel_listener_interrupts(worker_cancel_fixture):
     sessionmaker, user, agent = worker_cancel_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskService().submit(session, user, agent.id, {"message": "x"})
         task_id = str(task.id)
 

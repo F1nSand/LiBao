@@ -13,8 +13,11 @@ from app.core.errors import AppError
 from app.core.security import hash_password
 from app.services.memory import MemoryService, _extract_json, run_maintenance
 from app.storage.db import init_db
-from app.storage.models import AgentConfig, Conversation, Message, Org, User
+from app.storage.file.store import get_store
+from app.storage.models import AgentConfig, Org, User
 from app.storage.models.memory import LongTermMemoryVersion
+from app.storage.repositories.conversation import ConversationRepository
+from app.storage.repositories.message import MessageRepository
 from tests.conftest import requires_db
 
 pytestmark = requires_db
@@ -38,7 +41,7 @@ class FakeMaintainModel:
 async def maint_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-maint-{uid}")
         session.add(org)
         await session.flush()
@@ -59,7 +62,7 @@ def test_extract_json_plain_and_fenced():
 
 async def test_maintenance_applies_plan(maint_fixture):
     sessionmaker, user = maint_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         svc = MemoryService()
         keep = await svc.create_card(session, user.id, "note", "保留", {"text": "keep"})
         upd = await svc.create_card(session, user.id, "note", "更新", {"text": "old"}, importance=0.3)
@@ -71,10 +74,10 @@ async def test_maintenance_applies_plan(maint_fixture):
         )
         session.add(agent)
         await session.flush()
-        conv = Conversation(user_id=user.id, agent_id=agent.id, title="maint-conv")
-        session.add(conv)
-        await session.flush()
-        session.add(Message(conversation_id=conv.id, role="user", content="用户说喜欢喝咖啡"))
+        conv = await ConversationRepository(session).create(
+            user_id=user.id, agent_id=agent.id, title="maint-conv"
+        )
+        await MessageRepository(session).create(conversation_id=conv.id, role="user", content="用户说喜欢喝咖啡")
 
         plan = {
             "keep": [str(keep.id)],
@@ -106,7 +109,7 @@ async def test_maintenance_applies_plan(maint_fixture):
 
 async def test_maintenance_fenced_json(maint_fixture):
     sessionmaker, user = maint_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         plan = {"keep": [], "update": [], "create": [], "delete": []}
         result = await run_maintenance(
             session, user.id, model=FakeMaintainModel(f"```json\n{json.dumps(plan)}\n```")
@@ -116,7 +119,7 @@ async def test_maintenance_fenced_json(maint_fixture):
 
 async def test_maintenance_invalid_json_60001(maint_fixture):
     sessionmaker, user = maint_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         with pytest.raises(AppError) as exc:
             await run_maintenance(session, user.id, model=FakeMaintainModel("这不是 JSON"))
         assert exc.value.code == 60001
@@ -125,7 +128,7 @@ async def test_maintenance_invalid_json_60001(maint_fixture):
 
 async def test_maintenance_llm_error_60001(maint_fixture):
     sessionmaker, user = maint_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         with pytest.raises(AppError) as exc:
             await run_maintenance(session, user.id, model=FakeMaintainModel("{}", raise_error=True))
         assert exc.value.code == 60001
@@ -134,7 +137,7 @@ async def test_maintenance_llm_error_60001(maint_fixture):
 async def test_maintenance_invalid_update_id_60001(maint_fixture):
     """C2/S4：LLM 输出合法 JSON 但 update id 非法 UUID → 60001 retryable（非裸 500）。"""
     sessionmaker, user = maint_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         plan = {"update": [{"id": "not-a-uuid", "content": {"text": "x"}}], "create": [], "delete": []}
         with pytest.raises(AppError) as exc:
             await run_maintenance(session, user.id, model=FakeMaintainModel(json.dumps(plan)))
@@ -145,7 +148,7 @@ async def test_maintenance_invalid_update_id_60001(maint_fixture):
 async def test_maintenance_version_conflict_60001(maint_fixture):
     """C4：并发写版本撞 UNIQUE(memory_id, version) → 60001 retryable（IntegrityError 在 commit 处）。"""
     sessionmaker, user = maint_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         svc = MemoryService()
         card = await svc.create_card(session, user.id, "note", "并发", {"text": "v1"})
         # 模拟另一 maintenance 已写入 version=2
@@ -153,7 +156,7 @@ async def test_maintenance_version_conflict_60001(maint_fixture):
             LongTermMemoryVersion(memory_id=card.id, version=2, content={"text": "外部 v2"}, importance=0.5)
         )
         await session.commit()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         plan = {"update": [{"id": str(card.id), "content": {"text": "本会话 v2"}, "importance": 0.8}]}
         with pytest.raises(AppError) as exc:
             await run_maintenance(session, user.id, model=FakeMaintainModel(json.dumps(plan)))
@@ -163,7 +166,7 @@ async def test_maintenance_version_conflict_60001(maint_fixture):
 
 async def test_maintenance_importance_clamped(maint_fixture):
     sessionmaker, user = maint_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         plan = {
             "keep": [],
             "update": [],
@@ -178,18 +181,18 @@ async def test_maintenance_importance_clamped(maint_fixture):
 async def test_maintenance_reads_recent_messages(maint_fixture):
     """run_maintenance 改读 messages（memory_trace 已删）：LLM 收到最近对话含 user+assistant 消息。"""
     sessionmaker, user = maint_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         agent = AgentConfig(
             org_id=user.org_id, name="maint-agent", model="fake", system_prompt="x", tools=[], max_steps=5,
             status="published",
         )
         session.add(agent)
         await session.flush()
-        conv = Conversation(user_id=user.id, agent_id=agent.id, title="maint-conv")
-        session.add(conv)
-        await session.flush()
-        session.add(Message(conversation_id=conv.id, role="user", content="用户说喜欢喝咖啡"))
-        session.add(Message(conversation_id=conv.id, role="assistant", content="已记录偏好"))
+        conv = await ConversationRepository(session).create(
+            user_id=user.id, agent_id=agent.id, title="maint-conv"
+        )
+        await MessageRepository(session).create(conversation_id=conv.id, role="user", content="用户说喜欢喝咖啡")
+        await MessageRepository(session).create(conversation_id=conv.id, role="assistant", content="已记录偏好")
         await session.commit()
     captured: dict[str, str] = {}
 
@@ -198,7 +201,7 @@ async def test_maintenance_reads_recent_messages(maint_fixture):
             captured["prompt"] = messages[0].content
             return AIMessage(content=json.dumps({"keep": [], "update": [], "create": [], "delete": []}))
 
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await run_maintenance(session, user.id, model=CaptureModel("{}"))  # content 占位，ainvoke 被覆写
     assert "用户说喜欢喝咖啡" in captured["prompt"]
     assert "已记录偏好" in captured["prompt"]

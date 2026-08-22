@@ -15,6 +15,7 @@ from app.services.notification import (
 )
 from app.services.task import TaskService
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Org, User
 from app.storage.repositories.task import TaskRepository
 from tests.conftest import requires_db
@@ -26,7 +27,7 @@ pytestmark = requires_db
 async def notif_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-notif-{uid}")
         session.add(org)
         await session.flush()
@@ -44,10 +45,10 @@ async def notif_fixture():
 
 async def test_create_and_list_paged(notif_fixture):
     sessionmaker, user, agent = notif_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         n = await NotificationService().create(session, user.id, "你好", body="body", level="info")
         assert n.id and n.read is False
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         data = await NotificationService().list_paged(session, user.id, 1, 20)
         assert data["total"] == 1
         assert data["items"][0]["title"] == "你好"
@@ -57,9 +58,9 @@ async def test_create_and_list_paged(notif_fixture):
 
 async def test_mark_read(notif_fixture):
     sessionmaker, user, agent = notif_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         n = await NotificationService().create(session, user.id, "已读测试")
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         updated = await NotificationService().mark_read(session, user, n.id)
         assert updated.read is True
 
@@ -69,7 +70,7 @@ async def test_sse_push_delivers_to_subscriber(notif_fixture):
     sessionmaker, user, agent = notif_fixture
     q = await subscribe_notifications(str(user.id))
     try:
-        async with sessionmaker() as session:
+        async with get_store().session(sessionmaker) as session:
             await NotificationService().create(session, user.id, "推送")
         event_type, payload = await asyncio.wait_for(q.get(), timeout=2)  # 桥接异步投递，不能 get_nowait
         assert event_type == "notification"
@@ -81,12 +82,12 @@ async def test_sse_push_delivers_to_subscriber(notif_fixture):
 async def test_task_done_creates_notification(notif_fixture):
     """产生源①：任务 done → 通知。"""
     sessionmaker, user, agent = notif_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskService().submit(session, user, agent.id, {"message": "x"})
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         task = await TaskRepository(session).get_by_id(task.id)
         await TaskService().set_done(session, task, {"content": "完成"})
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         data = await NotificationService().list_paged(session, user.id, 1, 20)
         assert data["total"] == 1
         assert data["items"][0]["title"] == "任务已完成"
@@ -101,9 +102,9 @@ async def test_demo_notify_tool_result_creates_notification(notif_fixture):
             {"tool_name": "tl_demo_notify", "status": "done", "input": {"message": "重要通知", "channel": "default"}}
         ]
     }
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await maybe_notify_from_tool_results(session, user.id, final_state)
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         data = await NotificationService().list_paged(session, user.id, 1, 20)
         assert data["total"] == 1
         assert data["items"][0]["body"] == "重要通知"

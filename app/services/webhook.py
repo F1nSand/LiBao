@@ -6,6 +6,7 @@ emit_event 入队（绑定 conversation_id 则投递该线程；否则 org 级�
 from __future__ import annotations
 
 import hashlib
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -16,11 +17,29 @@ from app.core.errors import ERR_HOOK_TOKEN, ERR_TOOL_NOT_FOUND, AppError
 from app.services.events import emit_event
 from app.storage.models.user import User
 from app.storage.models.webhook import WebhookConfig
-from app.storage.redis import idem_get, idem_set
 from app.storage.repositories.webhook import WebhookRepository
 from app.tools.registry import ToolType, get
 
 _IDEM_TTL_S = 3600
+
+# 幂等缓存（本地单机化：进程内，Redis 已删；P4 模块整体删除）
+_hook_idem: dict[str, float] = {}
+
+
+async def _idem_get(key: str) -> str | None:
+    expire_ts = _hook_idem.get(key)
+    if expire_ts is None:
+        return None
+    if expire_ts < time.monotonic():
+        _hook_idem.pop(key, None)
+        return None
+    return "1"
+
+
+async def _idem_set(key: str, value: str, ttl: int = _IDEM_TTL_S) -> None:
+    if len(_hook_idem) >= 1024:
+        _hook_idem.clear()
+    _hook_idem[key] = time.monotonic() + ttl
 
 
 def _token_hash(token: str) -> str:
@@ -88,9 +107,9 @@ class WebhookService:
 
         if idempotency_key:
             dedup = f"hook:{row.id}:{idempotency_key}"
-            if await idem_get(dedup) is not None:
+            if await _idem_get(dedup) is not None:
                 return False  # 幂等：重复事件已处理
-            await idem_set(dedup, "1", ttl=_IDEM_TTL_S)
+            await _idem_set(dedup, "1", ttl=_IDEM_TTL_S)
 
         thread_key = str(row.conversation_id) if row.conversation_id else f"org:{row.org_id}"
         emit_event(

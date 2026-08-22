@@ -17,7 +17,6 @@ from typing import Any
 from jsonschema import ValidationError, validate
 
 from app.core.config import get_settings
-from app.storage.redis import get_redis, idem_get, idem_set
 from app.tools.registry import ToolSpec
 from app.tools.sandbox import SandboxLevel
 
@@ -94,13 +93,6 @@ def _deserialize_result(raw: str) -> ToolResult | None:
 
 
 async def _cache_get(key: str) -> ToolResult | None:
-    r = get_redis()
-    if r is not None:
-        raw = await idem_get(key)
-        if raw is not None:
-            result = _deserialize_result(raw)
-            if result is not None:
-                return result
     entry = _idem_cache.get(key)
     if entry is None:
         return None
@@ -112,13 +104,7 @@ async def _cache_get(key: str) -> ToolResult | None:
 
 
 async def _cache_put(key: str, result: ToolResult) -> None:
-    r = get_redis()
-    if r is not None:
-        raw = _serialize_result(result)
-        if raw is not None:
-            await idem_set(key, raw)
-            return
-    # 进程内回退（Redis 不可用或结果不可 JSON 序列化）
+    # 进程内幂等缓存（本地单机化唯一路径；上限淘汰整体清空）
     if len(_idem_cache) >= _MAX_IDEMPOTENCY_ENTRIES:
         _idem_cache.clear()  # 上限淘汰：整体清空（最简单正确）
     _idem_cache[key] = (time.monotonic() + _IDEMPOTENCY_TTL_S, result)

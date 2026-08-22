@@ -8,7 +8,8 @@ import pytest
 from app.core.security import hash_password
 from app.services.conversation import ConversationService
 from app.storage.db import init_db
-from app.storage.models import AgentConfig, Conversation, Org, User
+from app.storage.file.store import get_store
+from app.storage.models import AgentConfig, Org, User
 from tests.conftest import requires_db
 
 pytestmark = requires_db
@@ -18,7 +19,7 @@ pytestmark = requires_db
 async def conv_ws_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-convws-{uid}")
         session.add(org)
         await session.flush()
@@ -33,9 +34,14 @@ async def conv_ws_fixture():
         session.add(agent)
         await session.flush()
         ws_id = uuid.uuid4()
-        normal = Conversation(user_id=user.id, agent_id=agent.id, title="普通会话")
-        ws_conv = Conversation(user_id=user.id, agent_id=agent.id, title="工作区会话", workspace_id=ws_id)
-        session.add_all([normal, ws_conv])
+        from app.storage.repositories.conversation import ConversationRepository
+
+        normal = await ConversationRepository(session).create(
+            user_id=user.id, agent_id=agent.id, title="普通会话"
+        )
+        ws_conv = await ConversationRepository(session).create(
+            user_id=user.id, agent_id=agent.id, title="工作区会话", workspace_id=ws_id
+        )
         await session.commit()
     yield sessionmaker, user, ws_id, normal, ws_conv
     await engine.dispose()
@@ -43,7 +49,7 @@ async def conv_ws_fixture():
 
 async def test_list_excludes_workspace_conversations_by_default(conv_ws_fixture):
     sessionmaker, user, ws_id, normal, ws_conv = conv_ws_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         data = await ConversationService().list(session, user.id, 1, 20, workspace_id=None)
         ids = [c["id"] for c in data["items"]]
         assert str(normal.id) in ids
@@ -53,7 +59,7 @@ async def test_list_excludes_workspace_conversations_by_default(conv_ws_fixture)
 
 async def test_list_filters_to_workspace(conv_ws_fixture):
     sessionmaker, user, ws_id, normal, ws_conv = conv_ws_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         data = await ConversationService().list(session, user.id, 1, 20, workspace_id=ws_id)
         ids = [c["id"] for c in data["items"]]
         assert str(ws_conv.id) in ids

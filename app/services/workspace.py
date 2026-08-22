@@ -21,14 +21,12 @@ from app.core.errors import (
     AppError,
 )
 from app.services.serializers import serialize_workspace
+from app.storage.file.store import get_store
 from app.storage.models import (
     Attachment,
     Candidate,
-    Conversation,
     LongTermMemory,
     LongTermMemoryVersion,
-    Message,
-    RunLog,
     WebhookConfig,
 )
 from app.storage.models.user import User
@@ -115,25 +113,47 @@ async def _scalars(db: AsyncSession, stmt) -> list[Any]:
 
 
 async def _cascade_delete_workspace(db: AsyncSession, workspace_id: uuid.UUID) -> list[str]:
-    """级联删除工作区全部关联行（叶子→根逆依赖序；conversations.workspace_id /
-    longterm_memory.workspace_id 无 FK，DB 无级联须手动）。返回待删附件 storage_path（删行前物化）。"""
-    # 1. 删除前物化各层 id / 附件路径（避免删除过程中子查询被清空）
-    conv_ids = await _scalars(db, select(Conversation.id).where(Conversation.workspace_id == workspace_id))
+    """级联删除工作区全部关联数据（叶子→根逆依赖序；conversations.workspace_id /
+    longterm_memory.workspace_id 无 FK，DB 无级联须手动）。返回待删附件 storage_path（删行前物化）。
+
+    本地单机化双轨：Conversation/Message/RunLog 已文件化（文件删除），其余走 SQL。
+    """
+    store = get_store()
+    # 1. 删除前物化各层 id / 附件路径（避免删除过程中数据被清空）
+    convs = await store.table("conversations").list(
+        filter_fn=lambda c: c.workspace_id == workspace_id
+    )
+    conv_ids = [c.id for c in convs]
     mem_ids = await _scalars(db, select(LongTermMemory.id).where(LongTermMemory.workspace_id == workspace_id))
     attach_paths = await _scalars(
         db, select(Attachment.storage_path).where(Attachment.conversation_id.in_(conv_ids))
     )
 
-    # 2. 叶子→根逆依赖序（in_([]) 编译恒假，空列表安全）
+    # 2. 文件化实体：删会话 JSONL / 轨迹文件 / 会话行 + checkpoint 断点
+    for cid in conv_ids:
+        sid = str(cid)
+        (store.root / "sessions" / f"{sid}.jsonl").unlink(missing_ok=True)
+        (store.root / "memory" / "default" / "trace" / f"{sid}.jsonl").unlink(missing_ok=True)
+        row = await store.table("conversations").get(cid)
+        if row is not None:
+            store.table("conversations").delete_row(row)
+    from app.orchestration.checkpointer import JsonFileSaver
+
+    try:
+        saver = JsonFileSaver(store.root / "checkpoints")
+        for cid in conv_ids:
+            saver.delete_thread(str(cid))
+    except Exception:  # noqa: BLE001  断点清理失败不阻断（best-effort）
+        pass
+    await store.table("conversations").flush()
+
+    # 3. SQL 实体：叶子→根逆依赖序（in_([]) 编译恒假，空列表安全）
     deletes: list[Any] = [
         delete(LongTermMemoryVersion).where(LongTermMemoryVersion.memory_id.in_(mem_ids)),
         delete(LongTermMemory).where(LongTermMemory.id.in_(mem_ids)),
-        delete(Message).where(Message.conversation_id.in_(conv_ids)),
-        delete(RunLog).where(RunLog.session_id.in_(conv_ids)),
         delete(Attachment).where(Attachment.conversation_id.in_(conv_ids)),
         delete(WebhookConfig).where(WebhookConfig.conversation_id.in_(conv_ids)),
         delete(Candidate).where(Candidate.source_conversation_id.in_(conv_ids)),
-        delete(Conversation).where(Conversation.id.in_(conv_ids)),
         delete(Workspace).where(Workspace.id == workspace_id),
     ]
     for stmt in deletes:

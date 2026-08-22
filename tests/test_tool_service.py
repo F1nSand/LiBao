@@ -15,6 +15,7 @@ from app.orchestration.context_builder import acis_for_tools
 from app.services.serializers import serialize_tool_definition
 from app.services.tool import ToolService
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import Org, User
 from app.tools.builtin import register_builtin_tools
 from app.tools.registry import get, set_enabled
@@ -28,7 +29,7 @@ async def tool_fixture():
     register_builtin_tools()
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-tools-{uid}")
         session.add(org)
         await session.flush()
@@ -43,7 +44,7 @@ async def tool_fixture():
 
 async def test_create_tool_default_disabled(tool_fixture):
     sessionmaker, user = tool_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         row = await ToolService().create(session, user, CreateToolRequest(name="stock_query", tool_type="perception"))
         data = serialize_tool_definition(row)
         assert data["id"] == "tl_stock_query"  # tl_ 前缀派生
@@ -52,7 +53,7 @@ async def test_create_tool_default_disabled(tool_fixture):
 
 async def test_create_duplicate_name_conflict(tool_fixture):
     sessionmaker, user = tool_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await ToolService().create(session, user, CreateToolRequest(name="stock_query"))
         with pytest.raises(AppError) as exc:
             await ToolService().create(session, user, CreateToolRequest(name="stock_query"))
@@ -61,14 +62,14 @@ async def test_create_duplicate_name_conflict(tool_fixture):
 
 async def test_builtin_time_now_serializes_with_registry_id(tool_fixture):
     sessionmaker, user = tool_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         row = await ToolService().create(session, user, CreateToolRequest(name="time_now"))
         assert serialize_tool_definition(row)["id"] == "tl_time_now"  # 与 registry spec.id 一致
 
 
 async def test_set_enabled_syncs_registry(tool_fixture):
     sessionmaker, user = tool_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await ToolService().create(session, user, CreateToolRequest(name="time_now"))
         await ToolService().set_enabled(session, user, "tl_time_now", enabled=True)
         assert get("tl_time_now").enabled is True
@@ -82,7 +83,7 @@ async def test_set_enabled_syncs_registry(tool_fixture):
 
 async def test_search_case_insensitive(tool_fixture):
     sessionmaker, user = tool_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await ToolService().create(session, user, CreateToolRequest(name="StockQuery", description="股票查询工具"))
         hits = await ToolService().search(session, user.org_id, "stock")
         assert any(h["name"] == "StockQuery" for h in hits)
@@ -92,7 +93,7 @@ async def test_search_case_insensitive(tool_fixture):
 
 async def test_soft_delete(tool_fixture):
     sessionmaker, user = tool_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await ToolService().create(session, user, CreateToolRequest(name="time_now"))
         await ToolService().soft_delete(session, user, "tl_time_now")
         with pytest.raises(AppError) as exc:
@@ -105,7 +106,7 @@ async def test_soft_delete(tool_fixture):
 async def test_serialize_meta_flag(tool_fixture):
     """M7 前：serialize_tool_definition 带 meta（元工具标记，前端工具页区分）。"""
     sessionmaker, user = tool_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         row = await ToolService().create(session, user, CreateToolRequest(name="time_now"))
         assert serialize_tool_definition(row)["meta"] is False  # 常规工具
         row2 = await ToolService().create(session, user, CreateToolRequest(name="kb_search"))
@@ -115,7 +116,7 @@ async def test_serialize_meta_flag(tool_fixture):
 async def test_search_excludes_meta_tools(tool_fixture):
     """M7 前：/tools/search 排除 meta 工具（tool_search/kb_search 平台发现层不自发现）。"""
     sessionmaker, user = tool_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await ToolService().create(session, user, CreateToolRequest(name="kb_search"))
         await ToolService().create(session, user, CreateToolRequest(name="kb_query_regular", description="检索"))
         hits = await ToolService().search(session, user.org_id, "kb")

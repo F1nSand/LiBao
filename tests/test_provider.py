@@ -8,6 +8,7 @@ import pytest
 from app.core.security import hash_password
 from app.services.provider import ProviderService, serialize_provider
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import Org, User
 from tests.conftest import requires_db
 
@@ -18,7 +19,7 @@ pytestmark = requires_db
 async def provider_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-pv-{uid}")
         session.add(org)
         await session.flush()
@@ -32,7 +33,7 @@ async def provider_fixture():
 async def test_provider_crud_and_api_key_write_only(provider_fixture):
     sessionmaker, user = provider_fixture
     svc = ProviderService()
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         p = await svc.create(
             session, user, name="deepseek", base_url="https://api.deepseek.com", model="deepseek-chat",
             api_key="sk-secret-123", enabled=True,
@@ -62,7 +63,7 @@ async def test_provider_sync_active_to_settings(provider_fixture, monkeypatch):
     monkeypatch.setattr(settings, "llm_model", "default/model")
     monkeypatch.setattr(settings, "llm_base_url", "")
 
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         await svc.create(
             session, user, name="custom", base_url="https://custom.example", model="custom/model",
             api_key="sk-custom", enabled=True,
@@ -78,6 +79,6 @@ async def test_provider_patch_nonexistent_raises(provider_fixture):
     sessionmaker, user = provider_fixture
     from app.core.errors import AppError
 
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         with pytest.raises(AppError):
             await ProviderService().patch(session, user, uuid.uuid4(), enabled=True)

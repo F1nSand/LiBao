@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import inspect, select, text
 
 from app.storage.db import init_db
+from app.storage.file.store import get_store
 from app.storage.models import (
     KbChunk,
     KbCollection,
@@ -36,7 +37,7 @@ TABLES = [
 async def m3_fixture():
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-m3-{uid}")
         session.add(org)
         await session.flush()
@@ -49,7 +50,7 @@ async def m3_fixture():
 
 async def test_all_seven_tables_exist(m3_fixture):
     sessionmaker, user = m3_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         existing = set(await session.run_sync(lambda s: inspect(s.get_bind()).get_table_names()))
         for t in TABLES:
             assert t in existing, f"缺少表 {t}"
@@ -57,14 +58,14 @@ async def test_all_seven_tables_exist(m3_fixture):
 
 async def test_pgvector_extension_enabled(m3_fixture):
     sessionmaker, user = m3_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         ext = (await session.execute(text("SELECT extname FROM pg_extension WHERE extname='vector'"))).scalar_one()
         assert ext == "vector"
 
 
 async def test_vector_column_insert_and_cosine_search(m3_fixture):
     sessionmaker, user = m3_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = user.org_id
         coll = KbCollection(org_id=org, name=f"vec-{uuid.uuid4().hex[:6]}")
         session.add(coll)
@@ -103,7 +104,7 @@ async def test_vector_column_insert_and_cosine_search(m3_fixture):
 
 async def test_generated_tsv_contains_cjk_unigrams(m3_fixture):
     sessionmaker, user = m3_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = user.org_id
         coll = KbCollection(org_id=org, name=f"tsv-{uuid.uuid4().hex[:6]}")
         session.add(coll)
@@ -132,7 +133,7 @@ async def test_generated_tsv_contains_cjk_unigrams(m3_fixture):
 
 async def test_memory_version_unique_constraint(m3_fixture):
     sessionmaker, user = m3_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         card = LongTermMemory(user_id=user.id, card_type="note", content={"text": "a"}, importance=0.5)
         session.add(card)
         await session.flush()
@@ -149,7 +150,7 @@ async def test_memory_version_unique_constraint(m3_fixture):
 
 async def test_kb_chunks_hnsw_and_gin_indexes(m3_fixture):
     sessionmaker, user = m3_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         rows = await session.execute(text("SELECT indexname FROM pg_indexes WHERE tablename='kb_chunks'"))
         indexes = rows.scalars().all()
         assert any("hnsw" in i for i in indexes), f"缺少 HNSW 索引: {indexes}"
@@ -160,7 +161,7 @@ async def test_kb_chunks_hnsw_and_gin_indexes(m3_fixture):
 
 async def test_soft_delete_semantics(m3_fixture):
     sessionmaker, user = m3_fixture
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         card = LongTermMemory(user_id=user.id, card_type="note", content={"text": "a"}, importance=0.5)
         session.add(card)
         await session.commit()

@@ -9,6 +9,7 @@ import pytest
 
 from app.core.security import hash_password
 from app.storage.db import init_db, set_sessionmaker
+from app.storage.file.store import get_store
 from app.storage.models import KbChunk, KbCollection, KbDocument, Org, User
 from app.tools import executor
 from app.tools.builtin import register_builtin_tools
@@ -24,7 +25,7 @@ async def kb_tool_fixture(clean_mcp_specs):
     register_builtin_tools()
     engine, sessionmaker = init_db()
     uid = uuid.uuid4().hex[:8]
-    async with sessionmaker() as session:
+    async with get_store().session(sessionmaker) as session:
         org = Org(name=f"测试组织-kbt-{uid}")
         session.add(org)
         await session.flush()

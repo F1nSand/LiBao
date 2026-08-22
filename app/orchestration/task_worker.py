@@ -1,34 +1,20 @@
-"""任务 worker（M4）：BRPOP 消费任务队列 → 分派到 run_task_graph / resume_task_graph。
+"""任务运行器（本地单机化）：进程内跑图（spawn_run）+ 可取消（route_cancel）。
 
-单实例 MVP：worker 为 lifespan 常驻协程（SelectorEventLoop 下 async BRPOP 不阻塞）。
-BRPOP timeout=1 让 worker 周期性观察 stop_event，优雅退出（先 stop 再 cancel 再 close redis）。
+Redis 与独立 worker 已删；任务提交/resume 直接 spawn_run（asyncio.create_task）注册进 _RUNNING，
+POST /tasks/{id}/cancel 经 route_cancel 真正中断运行中的图。
 """
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
 import logging
 import uuid
 from typing import Any
 
-from app.core.instance import get_instance_id
-from app.core.logging import set_trace_id
 from app.orchestration.task_run import resume_task_graph, run_task_graph
-from app.storage.redis import (
-    brpop_task,
-    claim_task,
-    get_redis,
-    get_task_owner,
-    publish_cancel,
-    release_task_claim,
-    worker_cancel_channel,
-)
 
 logger = logging.getLogger(__name__)
 
-# M4 完整版：in-flight 任务注册表（task_id → asyncio.Task）。
-# worker 消费与 Redis 降级路径（tasks.py create_task）共用，供 POST /tasks/{id}/cancel 真正中断运行中的图。
+# in-flight 任务注册表（task_id → asyncio.Task），供 cancel 真正中断运行中的图。
 _RUNNING: dict[str, asyncio.Task] = {}
 
 
@@ -54,7 +40,6 @@ def spawn_run(
     key = str(task_id)
 
     async def _runner() -> None:
-        await claim_task(key, get_instance_id())  # M6-3：进入即 claim 归属（Redis 挂则 no-op）
         try:
             if approved is not None:
                 await resume_task_graph(
@@ -68,80 +53,14 @@ def spawn_run(
                 )
         finally:
             _RUNNING.pop(key, None)
-            await release_task_claim(key)  # M6-3：结束/取消必清 claim
 
     fut = asyncio.create_task(_runner())
     _RUNNING[key] = fut
     return fut
 
 
-async def process_one(graph: Any, sessionmaker: Any) -> bool:
-    """brpop 一个任务并分派；无任务返回 False。trace_id 经 Redis 传输后必须恢复（run_log 断裂）。"""
-    payload = await brpop_task()
-    if payload is None:
-        return False
-    trace_id = payload.get("trace_id") or ""
-    set_trace_id(trace_id)
-    task_id = uuid.UUID(payload["task_id"])
-    fut = spawn_run(
-        graph=graph,
-        sessionmaker=sessionmaker,
-        task_id=task_id,
-        trace_id=trace_id,
-        approved=bool(payload.get("approved")) if payload.get("kind") == "resume" else None,
-    )
-    try:
-        await fut
-    except asyncio.CancelledError:
-        logger.info("task %s cancelled in-flight", task_id)
-    except Exception as exc:  # noqa: BLE001  单任务分派失败不退出 worker
-        logger.warning("task worker dispatch failed: %s", exc)
-    return True
-
-
-async def task_worker(graph: Any, sessionmaker: Any, stop: asyncio.Event) -> None:
-    """常驻消费循环；每轮 BRPOP 超时后检查 stop_event 优雅退出。"""
-    while not stop.is_set():
-        try:
-            await process_one(graph, sessionmaker)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001  redis 抖动不退出
-            logger.warning("task worker loop error: %s", exc)
-            await asyncio.sleep(0.5)
-
-
-async def cancel_listener(instance_id: str) -> None:
-    """监听 worker:cancel:{instance_id}：收到跨实例 cancel 信号 → running_task(task_id).cancel()。
-
-    由调用方 cancel 退出（无终止哨兵——cancel 信号是持续订阅，非一次性）。
-    """
-    r = get_redis()
-    if r is None:
-        return
-    pubsub = r.pubsub()
-    await pubsub.subscribe(worker_cancel_channel(instance_id))
-    try:
-        async for msg in pubsub.listen():
-            if msg.get("type") != "message":
-                continue
-            data = json.loads(msg["data"])
-            fut = running_task(data.get("task_id"))
-            if fut is not None and not fut.done():
-                fut.cancel()
-    finally:
-        with contextlib.suppress(Exception):
-            await pubsub.aclose()
-
-
 async def route_cancel(task_id: str) -> None:
-    """跨实例 cancel 路由（M6-3）：本地 fut.cancel（降级路径）+ 查 claim 向持有实例广播（正常路径）。
-
-    两条路径互斥（任务只在一个进程跑）：本地 fut 存在即降级，claim 存在即 worker 实例。都执行不误伤。
-    """
+    """取消路由（进程内唯一路径）：本地 fut.cancel() 中断运行中的图。"""
     fut = running_task(task_id)
     if fut is not None and not fut.done():
         fut.cancel()
-    owner = await get_task_owner(task_id)
-    if owner is not None:
-        await publish_cancel(owner, task_id)
