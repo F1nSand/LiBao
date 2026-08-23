@@ -1,3 +1,22 @@
+# 进度账本 — 主动记忆功能（2026-08-23，L3，plan: agent-c-users-admin1-desktop-agent-md-cozy-walrus.md）
+
+## ⚡ 当前状态快照（2026-08-23 16:40，验收完成）
+
+**主动记忆已 100% 完成**（P1-P6 全落地，400 passed + 2 skipped + ruff 全过，端到端实测通过）。
+
+- 后端 HEAD：`5fe9dc5`（commit 链 53f8c0a→c290c1d→a837560→e390f03→6dc9b26→5fe9dc5）
+- 前端 HEAD：`c095c52`（MemoryView 项目记忆 tab）
+- 形态：全局长期记忆走 **RAG**（流结束 spawn 后台 LLM 提取判定 → 卡片 + `.agent/memory_vectors.lance` → memory_inject 语义检索注入，embedding 故障回退 importance）；项目记忆走 **md 文件**（`.agent/memory/{topic_key}.md` frontmatter + 同主题合并，不走 RAG）；记忆工具全套 `remember_memory`/`recall_memory`/`forget_memory`（scope auto/global/project）
+- **铁律**：记忆内容一律不进 system_prompt 字符串（只走消息通道 SystemMessage 或工具）；build_initial_state 已移除记忆/知识拼接
+- 关键修复（勿回退）：模型文件禁止 future-import（uuid 字段磁盘反序列化变 str → org 比较/workspace 过滤静默失效）、message_text 移 `core/messages.py`（防导入环）、提取任务持引用（GC 静默中断）、forget 空 query 全删防护、embedding 超时 10s 保护
+- 实测：全局偏好提取写卡（importance 0.9）、项目决策落 md（frontmatter 完整）、agent 主动调 remember_memory、升级合并（老数据环境补 3 工具 + agent.tools）
+
+**未做/待用户**：Docker 旧数据卷清理（用户拍板）；前端 e2e 补跑（单测 168 绿，e2e 未跑）；docs 01 §8.4 已更新。
+
+**恢复指引**：全量 `uv run pytest tests/`（400 绿）；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`（首启自动种子 + ensure_seed_tools 升级合并）；前端 build 产物复制 `../FrontEnd/dist` → `frontend_dist/`。
+
+---
+
 # 进度账本 — 本地单机化改造（2026-08-22/23，L3，plan: agent-c-users-admin1-desktop-agent-md-cozy-walrus.md）
 
 ## ⚡ 当前状态快照（2026-08-23 03:10，上下文压缩恢复点）
