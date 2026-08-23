@@ -82,10 +82,14 @@ function onRowClick(row: SystemLog) {
 .log-filter {
   display: flex;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .log-table {
   cursor: pointer;
+  border: 1px solid var(--app-border-light);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-card);
+  overflow: hidden;
 }
 .mono {
   font-family: var(--app-font-mono);

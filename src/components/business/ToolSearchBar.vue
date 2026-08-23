@@ -67,6 +67,7 @@ async function search() {
   border-radius: var(--app-radius);
   padding: 8px;
   background: var(--app-content-bg);
+  box-shadow: var(--app-shadow-card);
 }
 .search-empty {
   color: var(--app-text-muted);
@@ -88,7 +89,7 @@ async function search() {
 .search-desc {
   flex: 1;
   min-width: 0;
-  color: var(--app-text-secondary);
+  color: var(--app-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

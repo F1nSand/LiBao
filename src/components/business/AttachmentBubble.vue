@@ -129,7 +129,7 @@ onBeforeUnmount(() => {
   gap: 2px;
   font-size: 11px;
   padding: 1px 6px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   color: #fff;
 }
 .attach-badge.uploaded,
@@ -145,6 +145,6 @@ onBeforeUnmount(() => {
 .attach-summary {
   margin-top: 4px;
   font-size: 12px;
-  color: var(--app-text-secondary);
+  color: var(--app-text-muted);
 }
 </style>

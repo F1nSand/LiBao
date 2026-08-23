@@ -86,7 +86,8 @@ function enter() {
 
 <style scoped>
 .ws-card {
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-card);
 }
 .ws-card-head {
   display: flex;
@@ -107,9 +108,16 @@ function enter() {
 }
 .ws-card-desc {
   font-size: 13px;
-  color: var(--app-text-secondary);
+  color: var(--app-text-muted);
   min-height: 44px;
   cursor: pointer;
+  border-radius: var(--app-radius);
+  padding: 4px 8px;
+  margin: -4px -8px;
+  transition: background 0.15s;
+}
+.ws-card-desc:hover {
+  background: var(--app-bg);
 }
 .ws-card-edit-ops {
   display: flex;

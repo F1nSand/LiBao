@@ -74,7 +74,7 @@ const emit = defineEmits<{ confirm: [approved: boolean] }>()
   max-height: 180px;
   overflow: auto;
   background: var(--app-bg);
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   padding: 6px;
 }
 </style>

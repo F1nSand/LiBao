@@ -120,6 +120,11 @@ function meta(ev: TraceEvent) {
   gap: 8px;
   cursor: pointer;
   font-size: 13px;
+  border-radius: var(--app-radius);
+  transition: background 0.15s;
+}
+.tl-head:hover {
+  background: var(--app-bg);
 }
 .tl-node {
   font-weight: 600;
@@ -151,7 +156,7 @@ function meta(ev: TraceEvent) {
 .tl-detail {
   margin-top: 6px;
   border: 1px solid var(--app-border-light);
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   padding: 6px;
   background: var(--app-bg);
   max-height: 200px;

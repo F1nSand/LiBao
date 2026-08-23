@@ -75,7 +75,7 @@ function onDrop(e: DragEvent) {
   align-items: center;
   gap: 4px;
   padding: 6px;
-  border-radius: 6px;
+  border-radius: var(--app-radius);
   cursor: pointer;
   color: var(--app-text-secondary);
 }

@@ -19,7 +19,7 @@ defineProps<{ active?: boolean }>()
 }
 .bar {
   height: 12px;
-  border-radius: 6px;
+  border-radius: var(--app-radius);
   background: linear-gradient(90deg, #ececfd 25%, #f4f4fe 50%, #ececfd 75%);
   background-size: 200% 100%;
   animation: breathe 1.4s ease-in-out infinite;

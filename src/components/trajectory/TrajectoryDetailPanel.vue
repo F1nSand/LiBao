@@ -107,6 +107,7 @@ const diffSegments = computed(() =>
   background: var(--app-content-bg);
   overflow: hidden;
   min-width: 0;
+  box-shadow: var(--app-shadow-card);
 }
 .tj-detail-head {
   position: sticky;
@@ -166,7 +167,7 @@ const diffSegments = computed(() =>
   font-size: 12px;
   line-height: 1.6;
   border: 1px solid var(--app-border-light);
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   overflow: auto;
 }
 .tj-diff-line {

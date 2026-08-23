@@ -104,7 +104,7 @@ async function run() {
   max-height: 180px;
   overflow: auto;
   background: #fff;
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   padding: 6px;
 }
 .test-error {

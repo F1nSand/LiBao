@@ -87,7 +87,7 @@ const emit = defineEmits<{
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 7px 10px;
+  padding: 8px 12px;
   border-radius: var(--app-radius);
   cursor: pointer;
   margin-bottom: 2px;

@@ -201,13 +201,17 @@ async function onDelete(t: ToolDefinition) {
   gap: 8px;
 }
 .tool-search-wrap {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 .tool-table {
   flex: 1;
+  border: 1px solid var(--app-border-light);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-card);
+  overflow: hidden;
 }
 .mono {
   font-family: var(--app-font-mono);

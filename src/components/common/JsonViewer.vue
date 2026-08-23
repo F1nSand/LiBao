@@ -63,6 +63,10 @@ function typeOf(v: unknown): string {
   padding: 0;
   font-family: inherit;
   font-size: inherit;
+  transition: color 0.15s;
+}
+.json-toggle:hover {
+  color: var(--app-primary);
 }
 .json-close-toggle {
   display: block;
@@ -75,7 +79,7 @@ function typeOf(v: unknown): string {
   color: #6b7280;
 }
 .json-children {
-  padding-left: 14px;
+  padding-left: 16px;
 }
 .json-row {
   display: flex;

@@ -149,6 +149,10 @@ async function onDelete(s: Skill) {
 }
 .skill-table {
   flex: 1;
+  border: 1px solid var(--app-border-light);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-card);
+  overflow: hidden;
 }
 .mono {
   font-family: var(--app-font-mono);

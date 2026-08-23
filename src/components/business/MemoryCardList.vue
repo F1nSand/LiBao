@@ -155,14 +155,17 @@ async function onDelete(m: LongTermMemory) {
 
 <style scoped>
 .memory-toolbar {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .memory-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 14px;
+  gap: 16px;
   overflow-y: auto;
   padding-bottom: 20px;
+}
+.memory-card {
+  box-shadow: var(--app-shadow-card);
 }
 .memory-head {
   display: flex;

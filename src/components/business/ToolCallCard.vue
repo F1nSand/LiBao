@@ -167,7 +167,7 @@ function primitiveText(v: unknown): string {
   word-break: break-word;
   background: var(--app-bg);
   border: 1px solid var(--app-border-light);
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   padding: 4px 6px;
   max-height: 180px;
   overflow: auto;

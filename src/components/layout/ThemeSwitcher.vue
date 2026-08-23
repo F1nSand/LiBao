@@ -98,7 +98,7 @@ function select(id: string) {
   display: flex;
   width: 100%;
   height: 20px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   overflow: hidden;
 }
 .theme-swatch-primary {

@@ -68,7 +68,7 @@
   font-size: 0.9em;
   background: #f2f3f7;
   padding: 0.15em 0.4em;
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   color: #e05561;
 }
 
@@ -147,7 +147,7 @@
   color: var(--app-text-muted);
   background: rgba(255, 255, 255, 0.8);
   border: 1px solid var(--app-border);
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   padding: 2px 8px;
   cursor: pointer;
 }

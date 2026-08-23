@@ -175,6 +175,7 @@ function toggleGroup(t: TrajectoryTurn, step: number) {
   background: var(--app-content-bg);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow-card);
 }
 .tj-turn-head {
   position: sticky;
@@ -231,7 +232,7 @@ function toggleGroup(t: TrajectoryTurn, step: number) {
   gap: 8px;
   padding: 5px 8px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   font-size: 12px;
   /* 浏览器原生跳过屏外渲染（长台账），未渲染时按 ~36px 估算 */
   content-visibility: auto;

@@ -79,6 +79,7 @@ async function onDelete(id: string) {
   height: 100%;
   width: 100%;
   background: var(--app-sidebar-conv-bg);
+  border: 1px solid var(--app-sidebar-border);
   border-radius: var(--app-radius-lg);
   margin: 0 8px 8px;
   overflow: hidden;
@@ -111,7 +112,8 @@ async function onDelete(id: string) {
 .conv-items {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 8px;
+  scrollbar-width: thin;
+  padding: 4px 0;
 }
 .conv-item {
   position: relative;
@@ -133,6 +135,7 @@ async function onDelete(id: string) {
 .conv-item.active {
   background: var(--app-sidebar-item-active-bg);
   color: var(--app-sidebar-text-active);
+  border: 1px solid var(--app-primary);
 }
 .conv-item.active::before {
   content: '';

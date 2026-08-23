@@ -280,6 +280,7 @@ function onKeydown(e: KeyboardEvent) {
   overflow: auto;
   flex-shrink: 0;
   outline: none;
+  box-shadow: var(--app-shadow-card);
 }
 .tj-hint {
   display: flex;
@@ -293,7 +294,7 @@ function onKeydown(e: KeyboardEvent) {
   border: 1px solid var(--app-border);
   background: var(--app-bg);
   color: var(--app-primary);
-  border-radius: 4px;
+  border-radius: var(--app-radius-sm);
   padding: 1px 8px;
   font-size: 11px;
   cursor: pointer;

@@ -132,6 +132,13 @@ async function onDeleteProvider(id: string) {
 
 <style scoped>
 .users-toolbar {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+}
+.settings-tabs {
+  background: var(--app-content-bg);
+  border: 1px solid var(--app-border-light);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-card);
+  padding: 8px 16px;
 }
 </style>

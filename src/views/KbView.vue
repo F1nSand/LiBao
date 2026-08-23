@@ -169,7 +169,7 @@ function onStatusChange(p: { id: string } & Partial<KbDocumentStatusDetail>) {
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: 12px;
+  gap: 16px;
 }
 .kb-collections {
   width: 220px;
@@ -217,10 +217,10 @@ function onStatusChange(p: { id: string } & Partial<KbDocumentStatusDetail>) {
 .kb-docs {
   flex: 1;
   min-width: 0;
-  padding: 12px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .kb-table {
   flex: 1;
