@@ -89,6 +89,11 @@ async function sendWith(content: string, attachments: string[] = []) {
   // 若当前会话不存在则新建
   if (!chat.currentId) {
     await chat.createConversation(truncate(content, 20))
+  } else {
+    // 标题兜底：新建按钮创建的「新会话」——后端首条消息落库时已改名，本地列表同步
+    // （与后端 truncate 同语义，避免一直显示「新会话」）
+    const cur = chat.conversations.find((c) => c.id === chat.currentId)
+    if (cur && cur.title === '新会话') cur.title = truncate(content, 20)
   }
   chat.appendUserMessage(content, [...attachments])
   const req = {
