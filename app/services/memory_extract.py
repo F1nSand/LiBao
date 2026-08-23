@@ -226,7 +226,7 @@ async def _log_extract(
                 "duration_ms": result.get("duration_ms", 0),
             },
             duration_ms=int(result.get("duration_ms", 0)),
-            status="ok" if result.get("status") == "ok" else "error",
+            status="ok" if result.get("status") == "ok" else result.get("status", "error"),
         )
     except Exception:  # noqa: BLE001
         logger.debug("memory extract run_log failed", exc_info=True)

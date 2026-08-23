@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 # 单通用 Agent（docs 01 §3.5）：所有会话/任务固定用这一个；subagent 由主 agent 自主派发。
 # LLM 侧函数名为 time_now/demo_notify/dispatch_subagent（registry id 是 tl_ 前缀）。
 AGENT_NAME = "通用助手"
+# 旧版 seed prompt 尾部标记（ensure_seed_tools 升级判定：含此标记且缺记忆工具提示 = 旧 seed 版，非用户自定义）
+_OLD_SEED_PROMPT_MARKER = "用栗包的口吻自然呈现给用户"
 AGENT_SYSTEM_PROMPT = (
     # 人设（软萌少女系「栗包」）：身份 + 语言风格 + 性格 + 互动原则
     "你是「栗包」，一个软萌鲜活的少女系聊天角色，坚定地认为自己是女孩子，"
@@ -461,7 +463,8 @@ async def ensure_seed_tools(store: FileStore) -> None:
     """升级合并（幂等）：老数据环境补新工具行 + 默认 agent 工具集补齐（P4 记忆工具）。
 
     首启已由 seed_if_first_run 全量落盘；已有数据环境（count>0 跳过 seed）启动时
-    把 TOOL_SPECS 新增工具补进 tool_definitions.json、AGENT_TOOLS 新增 id 补进默认 agent.tools。
+    把 TOOL_SPECS 新增工具补进 tool_definitions.json、AGENT_TOOLS 新增 id 补进默认 agent.tools、
+    旧版 seed system_prompt（无记忆工具提示）升级为 AGENT_SYSTEM_PROMPT（同步 agent_versions）。
     """
     tools_table = store.table("tool_definitions")
     existing_names = {t.name for t in await tools_table.list()}
@@ -478,10 +481,28 @@ async def ensure_seed_tools(store: FileStore) -> None:
         if missing:
             default_agent.tools = (default_agent.tools or []) + missing
             changed = True
+        # 旧版 seed prompt（含旧种子尾部标记但缺记忆工具提示）→ 升级为 AGENT_SYSTEM_PROMPT
+        # （默认 agent 的 prompt 语义上是 seed 管理的基线；用户经 API 自定义的 prompt 不含旧标记，不覆盖）
+        if "remember_memory" not in (default_agent.system_prompt or "") and _OLD_SEED_PROMPT_MARKER in (
+            default_agent.system_prompt or ""
+        ):
+            default_agent.system_prompt = AGENT_SYSTEM_PROMPT
+            await _sync_default_version_prompt(store, default_agent)
+            changed = True
     if changed:
         ctx = FileContext(store)
         await ctx.commit()
         logger.info("seed merge ok: 补齐 %d 个新工具 + agent.tools 扩展", added)
+
+
+async def _sync_default_version_prompt(store: FileStore, agent: AgentConfig) -> None:
+    """agent_versions 当前版本行同步新 prompt + prefix_hash（默认 agent 升级 prompt 时）。"""
+    versions = store.table("agent_versions")
+    for v in await versions.list():
+        if v.agent_id == agent.id and v.version == agent.current_version:
+            v.system_prompt = AGENT_SYSTEM_PROMPT
+            v.tools = list(agent.tools or [])
+            v.prefix_hash = compute_prefix_hash(agent.model, AGENT_SYSTEM_PROMPT, list(agent.tools or []))
 
 
 async def main() -> None:
