@@ -28,6 +28,57 @@ logger = logging.getLogger(__name__)
 
 KEEPALIVE_INTERVAL = 15
 
+# 断流收尾任务强引用集（asyncio.create_task 弱引用 GC 风险，同 memory_extract.spawn_extract）
+_DRAIN_TASKS: set[asyncio.Task] = set()
+
+
+def spawn_drain(
+    queue: asyncio.Queue,
+    producer_task: asyncio.Task,
+    on_error: Callable[[Exception], Any] | None,
+    on_final: Callable[[dict[str, Any]], dict[str, Any] | None] | None,
+) -> None:
+    """客户端断开后后台收尾：排空队列直到 graph 跑完，执行 on_final 正常落库（帧丢弃）。"""
+    task = asyncio.create_task(_drain_until_done(queue, producer_task, on_error, on_final))
+    _DRAIN_TASKS.add(task)
+    task.add_done_callback(_DRAIN_TASKS.discard)
+
+
+async def _drain_until_done(
+    queue: asyncio.Queue,
+    producer_task: asyncio.Task,
+    on_error: Callable[[Exception], Any] | None,
+    on_final: Callable[[dict[str, Any]], dict[str, Any] | None] | None,
+) -> None:
+    """断流收尾：graph 继续跑完（producer 已无消费者，本函数排空队列防积压），
+    values 模式收集 final_state，eof 后执行 on_final（消息/任务状态正常落库）。"""
+    final_state: dict[str, Any] | None = None
+    try:
+        while True:
+            kind, payload = await queue.get()
+            if kind == "eof":
+                break
+            if kind == "graph_error":
+                if on_error is not None:
+                    with contextlib.suppress(Exception):
+                        await on_error(payload)
+                return
+            if kind in ("keepalive", "frame"):
+                continue
+            mode, item = payload
+            if mode == "values":
+                final_state = item
+    except asyncio.CancelledError:
+        return  # 服务关停：放弃收尾
+    except Exception:  # noqa: BLE001  收尾故障不影响已完成的 graph
+        logger.exception("drain after disconnect failed")
+        return
+    if final_state is not None and on_final is not None:
+        try:
+            await on_final(final_state)
+        except Exception:  # noqa: BLE001  落库故障已由 on_final 内部/此处兜底
+            logger.exception("drain on_final failed")
+
 
 def _chunk_text(chunk: Any) -> str:
     """从 AIMessageChunk 提取 text（流式增量块；兼容 str 或 content blocks）。"""
@@ -206,6 +257,7 @@ async def stream_graph_events(
             await on_round_message(round_msg)
         return emit("message", {"message_id": msg_id, "message": round_msg, "cost": round_msg.get("cost", 0.0)})
 
+    drained = False
     try:
         while True:
             kind, payload = await queue.get()
@@ -317,13 +369,33 @@ async def stream_graph_events(
                         return  # 中断：流结束（等待 resume）
             elif mode == "values":
                 final_state = item
-    finally:
-        set_dispatch_ctx(None)  # 清事件汇（task-local，防串）
-        producer_task.cancel()
+    except asyncio.CancelledError:
+        # 断流（客户端刷新/关闭页面）：不杀 graph——后台排空队列让当前轮跑完、on_final 正常落库。
+        # 否则最终 assistant 消息不落库 + checkpoint 停中间 → 刷新后会话残缺、重发重放旧轮（断线重连缺陷）
+        drained = True
+        set_dispatch_ctx(None)
         keepalive_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await producer_task
             await keepalive_task
+        spawn_drain(queue, producer_task, on_error, on_final)
+        raise
+    except GeneratorExit:
+        # uvicorn 断开 SSE 用 aclose() → GeneratorExit（非 CancelledError）：同样走收尾（不能 raise）
+        drained = True
+        set_dispatch_ctx(None)
+        keepalive_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await keepalive_task
+        spawn_drain(queue, producer_task, on_error, on_final)
+        return
+    finally:
+        set_dispatch_ctx(None)  # 清事件汇（task-local，防串）
+        if not drained:
+            producer_task.cancel()
+            keepalive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await producer_task
+                await keepalive_task
 
     if final_state is not None and on_final is not None:
         # C3：on_final（落库）失败不得穿出——否则 assistant 消息 + done 帧丢失、resume 任务卡 running。

@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 
@@ -239,3 +240,55 @@ def test_title_from_truncate_semantics():
     assert _title_from("短标题") == "短标题"
     assert _title_from("这" * 25) == "这" * 20 + "…"
     assert _title_from("  空白  ") == "空白"
+
+
+class SlowFakeModel:
+    """带延迟的假模型：确保 aclose（模拟刷新断开）时 graph 仍在执行。"""
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    async def ainvoke(self, messages):
+        await asyncio.sleep(0.5)
+        return AIMessage(content="慢速回复完成")
+
+
+async def test_disconnect_drains_and_finalizes(chat_fixture):
+    """断线重连修复：客户端断开（生成器 aclose）→ graph 跑完 + on_final 正常落库。
+
+    修复前：finally 直接 cancel producer → 最终 assistant 消息不落库 + checkpoint 停中间
+    （刷新后会话残缺、重发重放旧轮）。修复后：排空队列让当前轮跑完再落库。
+    """
+    import asyncio
+
+    from app.tools.builtin import register_builtin_tools
+
+    register_builtin_tools()
+    user, agent, conv = chat_fixture
+    graph = build_graph()
+
+    async with get_store().session() as session:
+        conv.title = "新会话"  # 默认标题：验证断流路径标题兜底同样生效
+        agen = chat_stream_events(
+            db=session,
+            graph=graph,
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="慢速任务",
+            trace_id="trace-drain",
+            model_override=SlowFakeModel(),
+        )
+        await anext(agen)  # message_start（chat_stream_events 自身帧）
+        await anext(agen)  # 进入 stream_graph_events 主循环（graph 已启动）后再断开
+        await agen.aclose()  # 客户端断开（模拟刷新页面）
+        # 等待后台收尾（drain 跑完 graph + on_final 落库）
+        await asyncio.sleep(3)
+        from app.storage.repositories.message import MessageRepository
+
+        msgs = await MessageRepository(session).list_by_conversation(conv.id)
+        roles = [m.role for m in msgs]
+        assert "assistant" in roles  # 最终消息已落库（修复前缺失）
+        assert any("慢速回复完成" in (m.content or "") for m in msgs)
+        # 会话标题也被首句更新（首条消息落库路径）
+        assert conv.title == "慢速任务"
