@@ -15,7 +15,7 @@ const emit = defineEmits<{
   <div class="ws-conv-list">
     <div v-show="!collapsed" class="ws-conv-head">
       <div class="ws-conv-head-left">
-        <el-button text class="ws-conv-toggle" title="折叠侧边栏" :icon="'Fold'" @click="emit('toggle')" />
+        <el-button text class="ws-conv-toggle" title="折叠侧边栏" :icon="'PanelLeftClose'" @click="emit('toggle')" />
         <span class="ws-conv-title">会话</span>
       </div>
       <el-button size="small" :icon="'Plus'" circle class="ws-conv-add" title="新建工作区会话" @click="emit('create')" />

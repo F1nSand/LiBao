@@ -141,7 +141,13 @@ async function send() {
   const content = input.value.trim()
   if (!content || composerDisabled.value) return
   input.value = ''
-  if (!currentId.value) await createConv(truncate(content, 20))
+  if (!currentId.value) {
+    await createConv(truncate(content, 20))
+  } else {
+    // 标题兜底：新建按钮创建的「新会话」——后端首条消息落库时已改名，本地列表同步
+    const cur = conversations.value.find((c) => c.id === currentId.value)
+    if (cur && cur.title === '新会话') cur.title = truncate(content, 20)
+  }
   const attachments = [...pendingAttachments]
   const refs = [...fileRefs.value]
   pendingAttachments.splice(0)
@@ -203,7 +209,7 @@ async function onInterruptConfirm(approved: boolean) {
         @delete="deleteConv"
       />
       <button v-show="leftCollapsed" class="ws-left-strip" type="button" title="展开侧边栏" @click="toggleLeft">
-        <el-icon :size="18"><Expand /></el-icon>
+        <el-icon :size="18"><PanelLeftOpen /></el-icon>
       </button>
     </aside>
 

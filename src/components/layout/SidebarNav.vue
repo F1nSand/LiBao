@@ -53,7 +53,7 @@ const settingsChildren = computed(() => {
         :title="collapsed ? '展开' : '折叠'"
         @click="userCollapsed = !userCollapsed"
       >
-        <el-icon><component :is="collapsed ? 'Expand' : 'Fold'" /></el-icon>
+        <el-icon><component :is="collapsed ? 'PanelLeftOpen' : 'PanelLeftClose'" /></el-icon>
       </button>
     </div>
 

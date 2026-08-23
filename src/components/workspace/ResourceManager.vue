@@ -263,7 +263,7 @@ async function onDelete(data: WorkspaceFile) {
   <div class="rm-root">
     <div v-show="!collapsed" class="rm-head">
       <div class="rm-head-left">
-        <el-button text class="rm-toggle" title="折叠侧边栏" :icon="'Fold'" @click="emit('toggle')" />
+        <el-button text class="rm-toggle" title="折叠侧边栏" :icon="'PanelLeftClose'" @click="emit('toggle')" />
         <span class="rm-title">文件</span>
       </div>
       <div class="rm-head-right">
