@@ -166,10 +166,11 @@ const settingsChildren = computed(() => {
   border-top: 1px solid var(--app-sidebar-border);
 }
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 9px 12px;
+  padding: 8px 12px;
   border-radius: var(--app-radius);
   color: var(--app-sidebar-text);
   text-decoration: none;
@@ -184,6 +185,16 @@ const settingsChildren = computed(() => {
   background: var(--app-sidebar-item-active-bg);
   color: var(--app-sidebar-text-active);
   font-weight: 500;
+}
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--app-primary);
 }
 .nav-item-btn {
   width: 100%;

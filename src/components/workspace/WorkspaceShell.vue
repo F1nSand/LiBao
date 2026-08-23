@@ -336,6 +336,15 @@ async function onInterruptConfirm(approved: boolean) {
   border-bottom: 1px solid var(--app-border);
   flex-shrink: 0;
 }
+/* 会话|轨迹 tab（radio-button）：统一圆角 + hover 反馈（不碰配色） */
+.ws-toolbar :deep(.el-radio-button__inner) {
+  border-radius: var(--app-radius);
+  transition: background 0.15s, color 0.15s;
+}
+.ws-toolbar :deep(.el-radio-button__inner:hover) {
+  background: var(--app-border-light);
+  color: var(--app-text-main);
+}
 .trajectory-panel {
   flex: 1;
   min-height: 0;
@@ -350,6 +359,12 @@ async function onInterruptConfirm(approved: boolean) {
   align-items: flex-end;
   gap: 8px;
 }
+.composer :deep(.el-input__wrapper) {
+  border-radius: var(--app-radius);
+}
+.composer :deep(.el-button) {
+  border-radius: var(--app-radius);
+}
 .composer-refs {
   display: flex;
   flex-wrap: wrap;
@@ -363,7 +378,7 @@ async function onInterruptConfirm(approved: boolean) {
   padding: 1px 6px;
   background: rgba(99, 102, 241, 0.1);
   border: 1px solid rgba(99, 102, 241, 0.28);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   font-size: 12px;
   color: var(--app-primary);
   max-width: 260px;
@@ -383,11 +398,12 @@ async function onInterruptConfirm(approved: boolean) {
 .composer-foot {
   display: flex;
   justify-content: flex-end;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 .char-count {
   font-size: 11px;
   color: var(--app-text-muted);
+  opacity: 0.7;
 }
 .char-count.over {
   color: #ef4444;

@@ -79,8 +79,8 @@ async function onDelete(id: string) {
   height: 100%;
   width: 100%;
   background: var(--app-sidebar-conv-bg);
-  border-radius: 8px;
-  margin: 0 6px 6px;
+  border-radius: var(--app-radius-lg);
+  margin: 0 8px 8px;
   overflow: hidden;
 }
 .conv-head {
@@ -95,11 +95,12 @@ async function onDelete(id: string) {
   font-size: 12px;
 }
 .conv-search {
-  padding: 0 10px 6px;
+  padding: 0 8px 6px;
 }
 .conv-search :deep(.el-input__wrapper) {
   background: rgba(255, 255, 255, 0.06);
   box-shadow: none;
+  border-radius: var(--app-radius);
 }
 .conv-search :deep(.el-input__inner) {
   color: var(--app-sidebar-text-active);
@@ -113,11 +114,12 @@ async function onDelete(id: string) {
   padding: 4px 8px;
 }
 .conv-item {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 7px 10px;
+  padding: 8px 12px;
   border-radius: var(--app-radius);
   cursor: pointer;
   margin-bottom: 2px;
@@ -132,6 +134,16 @@ async function onDelete(id: string) {
   background: var(--app-sidebar-item-active-bg);
   color: var(--app-sidebar-text-active);
 }
+.conv-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--app-primary);
+}
 .conv-item-title {
   flex: 1;
   min-width: 0;
@@ -142,10 +154,13 @@ async function onDelete(id: string) {
 .conv-item-more {
   color: var(--app-sidebar-text);
   display: flex;
+  padding: 2px;
+  border-radius: var(--app-radius-sm);
   opacity: 0.6;
 }
 .conv-item:hover .conv-item-more {
   opacity: 1;
+  background: var(--app-sidebar-item-hover);
 }
 .conv-empty {
   text-align: center;

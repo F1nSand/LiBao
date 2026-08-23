@@ -210,6 +210,15 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--app-content-bg);
   border-bottom: 1px solid var(--app-border);
 }
+/* 会话|轨迹 tab（radio-button）：统一圆角 + hover 反馈（不碰配色） */
+.chat-toolbar :deep(.el-radio-button__inner) {
+  border-radius: var(--app-radius);
+  transition: background 0.15s, color 0.15s;
+}
+.chat-toolbar :deep(.el-radio-button__inner:hover) {
+  background: var(--app-border-light);
+  color: var(--app-text-main);
+}
 .composer {
   border-top: 1px solid var(--app-border);
   background: var(--app-content-bg);
@@ -220,14 +229,21 @@ function onKeydown(e: KeyboardEvent) {
   align-items: flex-end;
   gap: 8px;
 }
+.composer :deep(.el-input__wrapper) {
+  border-radius: var(--app-radius);
+}
+.composer :deep(.el-button) {
+  border-radius: var(--app-radius);
+}
 .composer-foot {
   display: flex;
   justify-content: flex-end;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 .char-count {
   font-size: 11px;
   color: var(--app-text-muted);
+  opacity: 0.7;
 }
 .char-count.over {
   color: #ef4444;

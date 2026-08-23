@@ -150,7 +150,7 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     expect(w.find('.msg-usage').exists()).toBe(false)
   })
 
-  it('thinking 长文本：折叠行 + 展开/收起按钮，点击切换展开态', async () => {
+  it('thinking：默认收起显示简短提示 + 展开/收起按钮，点击切换', async () => {
     const msg: Message = {
       id: 'm6',
       conversation_id: 'c1',
@@ -160,23 +160,27 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
       created_at: '2026-01-01T00:00:00Z',
     }
     const w = mount(MessageBubble, { props: { message: msg } })
-    const row = w.find('.thinking-row')
-    expect(row.exists()).toBe(true)
-    const text = w.find('.thinking-text')
-    expect(text.classes()).toContain('collapsed')
+    expect(w.find('.thinking-row').exists()).toBe(true)
     const toggle = w.find('.thinking-toggle')
     expect(toggle.exists()).toBe(true)
     expect(toggle.text()).toBe('展开')
-    // 点击展开 → 文本不再折叠、按钮变收起
+    // 默认收起：只显示简短提示，不显示全文
+    expect(w.find('.thinking-hint').exists()).toBe(true)
+    expect(w.find('.thinking-hint').text()).toBe('思考过程')
+    expect(w.find('.thinking-text').exists()).toBe(false)
+    // 点击展开 → 全文显示、按钮变收起
     await toggle.trigger('click')
-    expect(text.classes()).not.toContain('collapsed')
+    expect(w.find('.thinking-hint').exists()).toBe(false)
+    expect(w.find('.thinking-text').exists()).toBe(true)
+    expect(w.find('.thinking-text').text()).toContain('测试文本')
     expect(w.find('.thinking-toggle').text()).toBe('收起')
-    // 再点收起 → 恢复折叠
+    // 再点收起 → 恢复提示
     await w.find('.thinking-toggle').trigger('click')
-    expect(text.classes()).toContain('collapsed')
+    expect(w.find('.thinking-hint').exists()).toBe(true)
+    expect(w.find('.thinking-text').exists()).toBe(false)
   })
 
-  it('thinking 短文本：无展开按钮、不折叠', () => {
+  it('thinking 短文本：同样默认收起（提示 + 展开按钮），点击展开全文', async () => {
     const msg: Message = {
       id: 'm7',
       conversation_id: 'c1',
@@ -186,7 +190,10 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
       created_at: '2026-01-01T00:00:00Z',
     }
     const w = mount(MessageBubble, { props: { message: msg } })
-    expect(w.find('.thinking-toggle').exists()).toBe(false)
-    expect(w.find('.thinking-text').classes()).not.toContain('collapsed')
+    expect(w.find('.thinking-toggle').exists()).toBe(true)
+    expect(w.find('.thinking-hint').exists()).toBe(true)
+    expect(w.find('.thinking-text').exists()).toBe(false)
+    await w.find('.thinking-toggle').trigger('click')
+    expect(w.find('.thinking-text').text()).toBe('简短推理')
   })
 })

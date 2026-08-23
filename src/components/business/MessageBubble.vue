@@ -92,11 +92,8 @@ const parts = computed<RenderParts>(() => {
   return { activity: [], text: null }
 })
 
-/** thinking 折叠展开态（按活动项索引）；长文本收起 line-clamp 3，点展开看全文 */
+/** thinking 折叠展开态（按活动项索引）：默认收起只显示简短提示，点「展开」看全文 */
 const expandedThinking = ref<Set<number>>(new Set())
-function isThinkingLong(_i: number, text: string): boolean {
-  return text.length > 90 || text.split('\n').length > 3
-}
 function isThinkingExpanded(i: number): boolean {
   return expandedThinking.value.has(i)
 }
@@ -157,13 +154,11 @@ const usageText = computed(() => {
               <span class="agent-switch-label"><b>{{ item.from }}</b> → <b>{{ item.to }}</b></span>
               <span v-if="item.reason" class="agent-switch-reason">{{ item.reason }}</span>
             </div>
-            <div v-else class="thinking-row">
+            <div v-else class="thinking-row" :class="{ collapsed: !isThinkingExpanded(i) }">
               <el-icon :size="13"><Aim /></el-icon>
-              <span
-                class="thinking-text"
-                :class="{ collapsed: isThinkingLong(i, item.text) && !isThinkingExpanded(i) }"
-              >{{ item.text }}</span>
-              <button v-if="isThinkingLong(i, item.text)" class="thinking-toggle" type="button" @click="toggleThinking(i)">
+              <span v-if="isThinkingExpanded(i)" class="thinking-text">{{ item.text }}</span>
+              <span v-else class="thinking-hint">思考过程</span>
+              <button class="thinking-toggle" type="button" @click="toggleThinking(i)">
                 {{ isThinkingExpanded(i) ? '收起' : '展开' }}
               </button>
             </div>
@@ -224,7 +219,7 @@ const usageText = computed(() => {
   padding: 1px 8px;
   background: rgba(99, 102, 241, 0.12);
   border: 1px solid rgba(99, 102, 241, 0.3);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   font-size: 12px;
   color: var(--app-primary);
   max-width: 260px;
@@ -240,17 +235,20 @@ const usageText = computed(() => {
 .user-text {
   background: var(--app-primary);
   color: #fff;
-  padding: 8px 14px;
-  border-radius: 12px 12px 2px 12px;
+  padding: 8px 16px;
+  border-radius: var(--app-radius-lg);
   white-space: pre-wrap;
   word-break: break-word;
+  line-height: 1.6;
   max-width: 100%;
 }
 .msg-text {
   background: var(--app-content-bg);
   border: 1px solid var(--app-border-light);
-  border-radius: 2px 12px 12px 12px;
-  padding: 8px 14px;
+  border-radius: var(--app-radius-lg);
+  padding: 8px 16px;
+  line-height: 1.7;
+  box-shadow: var(--app-shadow-card);
 }
 
 /* 活动区：紧凑行（工具/agent切换/思考），非气泡，往下递进 */
@@ -282,19 +280,22 @@ const usageText = computed(() => {
 .thinking-row {
   width: 100%;
   align-items: flex-start;
+  border: 1px solid var(--app-border-light);
+  background: var(--app-content-bg);
+  border-radius: var(--app-radius);
+  padding: 6px 10px;
 }
-.thinking-text {
+.thinking-text,
+.thinking-hint {
   flex: 1;
   min-width: 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.thinking-text {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
-}
-.thinking-text.collapsed {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
 }
 .thinking-toggle {
   border: none;
@@ -316,7 +317,8 @@ const usageText = computed(() => {
 .msg-usage {
   font-size: 11px;
   color: var(--app-text-muted);
-  margin-top: 4px;
+  opacity: 0.7;
+  margin-top: 8px;
   padding-left: 2px;
 }
 </style>
