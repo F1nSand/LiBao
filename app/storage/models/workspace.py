@@ -4,8 +4,6 @@
 root_path 由后端托管（{workspaces_root}/{id}），用户不指定磁盘路径（防越权）。
 """
 
-from __future__ import annotations
-
 import uuid
 from dataclasses import dataclass
 

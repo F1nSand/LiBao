@@ -23,7 +23,7 @@ from langchain_core.messages import HumanMessage
 
 from app.core.config import get_settings
 from app.core.llm import LLMService
-from app.orchestration.stream_core import message_text
+from app.core.messages import message_text  # 独立模块（防 stream_core 导入环）
 from app.services.memory import _extract_json
 from app.storage.repositories.memory import MemoryRepository
 from app.storage.repositories.run_log import RunLogRepository

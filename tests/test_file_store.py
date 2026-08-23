@@ -61,3 +61,23 @@ async def test_concurrent_appends_serialized():
     await asyncio.gather(*[_append(i) for i in range(20)])
     records = await store.jsonl_list("sessions/conc.jsonl")
     assert len(records) == 20  # 无丢失/无半行
+
+
+async def test_from_dict_restores_uuid_and_datetime_fields():
+    """回归（P6 review 修复）：模型无 future import → 磁盘 round-trip 后 uuid/datetime 字段
+    还原为类型对象（否则 org_id/workspace_id 变 str，工作区隔离/记忆作用域过滤失效）。"""
+    import uuid as _uuid
+
+    from app.storage.models.workspace import Workspace
+
+    ws = Workspace(
+        org_id=_uuid.UUID(int=0),
+        name="roundtrip",
+        root_path="data/workspaces/x",
+        created_by=_uuid.UUID(int=1),
+    )
+    restored = Workspace.from_dict(ws.to_dict())
+    assert isinstance(restored.id, _uuid.UUID)
+    assert isinstance(restored.org_id, _uuid.UUID)
+    assert isinstance(restored.created_by, _uuid.UUID)
+    assert isinstance(restored.created_at, type(ws.created_at))

@@ -16,7 +16,7 @@ from langchain_core.messages import HumanMessage
 from app.core.config import get_settings
 from app.core.errors import ERR_LLM_FAILURE, ERR_MEMORY_NOT_FOUND, AppError
 from app.core.llm import LLMService
-from app.orchestration.stream_core import message_text
+from app.core.messages import message_text  # 独立模块（防 stream_core 导入环）
 from app.services.serializers import serialize_longterm_version
 from app.storage.models.memory import LongTermMemory
 from app.storage.repositories.memory import MemoryRepository

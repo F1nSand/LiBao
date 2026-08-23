@@ -4,8 +4,6 @@
 append-only：前端仅读/已读（read 标记）。
 """
 
-from __future__ import annotations
-
 import uuid
 from dataclasses import dataclass
 

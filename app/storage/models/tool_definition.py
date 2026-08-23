@@ -4,8 +4,6 @@
 sandbox: none / docker / microvm；tool_type: perception / execution / collaboration / user_comms / event。
 """
 
-from __future__ import annotations
-
 import uuid
 from dataclasses import dataclass, field
 

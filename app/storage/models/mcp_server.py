@@ -4,8 +4,6 @@ tool_definition.mcp_source 存 "mcp:{server_id}" 关联；连接配置（命令/
 是启动重建 spec 的唯一依据。
 """
 
-from __future__ import annotations
-
 import uuid
 from dataclasses import dataclass
 

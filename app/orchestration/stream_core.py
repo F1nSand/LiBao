@@ -19,6 +19,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from app.core.errors import ERR_LLM_FAILURE
+from app.core.messages import message_text  # 独立模块（memory_extract/memory 共用，防导入环）
 from app.tools.builtin.file_ops import FILE_TOOL_IDS
 from app.tools.context import set_dispatch_ctx
 from app.tools.registry import get, get_by_name
@@ -26,22 +27,6 @@ from app.tools.registry import get, get_by_name
 logger = logging.getLogger(__name__)
 
 KEEPALIVE_INTERVAL = 15
-
-
-def message_text(content: Any) -> str:
-    """消息文本提取（兼容 str 或 content blocks 列表；跳过 thinking 块，
-    保留裸字符串块——DeepSeek v4-flash 会把最终输出放在末位裸 str 块）。"""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for b in content:
-            if isinstance(b, str):
-                parts.append(b)
-            elif isinstance(b, dict) and b.get("type") != "thinking":
-                parts.append(b.get("text", ""))
-        return "".join(parts)
-    return str(content)
 
 
 def _chunk_text(chunk: Any) -> str:

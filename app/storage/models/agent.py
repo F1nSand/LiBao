@@ -5,8 +5,6 @@ agent_version 保存每次发布快照（append-only），prefix_hash 为静态�
 subagent 由主 Agent 经 tl_dispatch_subagent 自主派发（内置注册表，非 agent_configs 行）。
 """
 
-from __future__ import annotations
-
 import uuid
 from dataclasses import dataclass, field
 

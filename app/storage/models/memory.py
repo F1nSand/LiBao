@@ -4,8 +4,6 @@ maintenance 原料改读 messages（memory_trace 已于 2026-08-22 删除，见�
 只增原则（ADR-06）：改写 = 新增 version 行 + 更新卡片 current_version；删除 = 软删；历史永远保留。
 """
 
-from __future__ import annotations
-
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime

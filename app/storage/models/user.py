@@ -3,8 +3,6 @@
 角色：admin / developer / viewer（保留字段语义，折叠后恒 admin）。
 """
 
-from __future__ import annotations
-
 import uuid
 from dataclasses import dataclass
 
