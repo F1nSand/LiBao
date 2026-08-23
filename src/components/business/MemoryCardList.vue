@@ -19,11 +19,12 @@ const form = reactive<CreateLongTermMemoryRequest>({
   title: '',
   body: '',
   tags: [],
+  importance: 0.5,
 })
 const tagInput = ref('')
 
 function openAdd() {
-  Object.assign(form, { card_type: 'note', title: '', body: '', tags: [] })
+  Object.assign(form, { card_type: 'note', title: '', body: '', tags: [], importance: 0.5 })
   tagInput.value = ''
   addVisible.value = true
 }
@@ -34,7 +35,7 @@ async function save() {
     return
   }
   const body = form.card_type === 'json_card' ? safeParse(form.body as string) : { content: form.body }
-  await store.create({ ...form, body })
+  await store.create({ ...form, body, importance: (form.importance ?? 0.5) / 5 })
   addVisible.value = false
   ElMessage.success('已写入（只增版本化）')
 }
@@ -90,7 +91,7 @@ async function onDelete(m: LongTermMemory) {
           <div class="memory-head">
             <span class="memory-title">{{ m.title }}</span>
             <div class="memory-stars">
-              <el-icon v-for="i in 5" :key="i" :class="{ lit: i <= (m.importance ?? 0) }"><StarFilled /></el-icon>
+              <el-icon v-for="i in 5" :key="i" :class="{ lit: i <= Math.round((m.importance ?? 0) * 5) }"><StarFilled /></el-icon>
             </div>
           </div>
         </template>
@@ -132,6 +133,10 @@ async function onDelete(m: LongTermMemory) {
             <el-button size="small" @click="addTag">添加</el-button>
           </div>
           <el-tag v-for="t in form.tags ?? []" :key="t" size="small" closable @close="removeTag(t)">{{ t }}</el-tag>
+        </el-form-item>
+        <el-form-item label="重要性">
+          <el-slider v-model="form.importance" :min="0" :max="5" :step="0.5" show-stops style="width: 220px" />
+          <span class="imp-label">{{ form.importance }} 星</span>
         </el-form-item>
       </el-form>
       <template #footer>
