@@ -1,3 +1,26 @@
+# 进度账本 — 今日收尾存档（2026-08-23 晚，上下文压缩）
+
+## ⚡ 当前状态快照（2026-08-23，压缩前）
+
+**双仓库均 clean（后端 HEAD `094c95e`，前端 HEAD `45b6ca7`）+ 405 passed + ruff clean + frontend_dist 已重建。**
+
+### 今日完成链（按时间）
+
+1. **会话行丢失根因定位并修复**（`bc4d55b` + 存档 `59a4f4a`）：FileTable 惰性注册——服务重启后表未加载（`_loaded=False`）时 `register()` 直接写内存，并发请求触发 `_ensure_loaded()` 整体覆盖 `_items` → 新行消失 → flush 落盘无此行 → 重启 40401。**三条件齐发**：磁盘有历史数据 + 表未加载 + 并发加载（与断流无关，断流请求恰好是最早请求）。修复：`register`/`delete_row` 先同步预加载（`_load_now()` 拆同步核心，`_ensure_loaded` 复用）。回归测试 `test_register_before_load_survives_ensure_loaded` 还原验证失败→修复 405 passed。
+2. **前端记忆重要性滑块**（`45b6ca7`）：新增表单 slider 0-5 星 → `/5` 转 0-1 提交；**顺带修显示侧残留 bug**——MemoryCardList.vue:94 `i <= (m.importance ?? 0)` 把 0-1 值按 1-5 星比（importance 0.9 只亮 1 星），补 `Math.round(*5)` 换算。
+3. **frontend_dist 重建**（`094c95e`，58 files）：记忆页项目记忆 tab + 滑块 + Lucide 图标入静态托管。产物 `index-BXoLldUG.js`，与 FrontEnd/dist 一致。
+
+### ⚠️ 遗留（下次继续）
+
+- **前端 typecheck 1 错（阻塞 `npm run build`）**：用户工作区 `src/utils/workspace-tree.spec.ts` 半成品——只 import `preloadVisibleFolders` 没写用例（TS6133 unused）。本次 dist 用 `vite build` 跳过类型检查生成（spec 是测试文件不进产物，无碍）。**用户写完该功能删掉 import → 跑 `vue-tsc` 全绿 → 重跑 `npm run build` + 复制 dist 再刷一次 frontend_dist**。
+- **前端未提交改动 4 文件**（用户工作区，未触碰）：`ResourceManager.vue`/`icons.ts`/`workspace-tree.ts`+spec——正在做的「预加载可见文件夹」功能。
+- 前端 e2e 未补跑（单测 168 绿）。
+- Docker 旧数据卷清理（待用户拍板）。
+
+**恢复指引**：全量 `uv run pytest tests/`（405 绿）；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`（首启自动种子）；前端 build 后复制 `../FrontEnd/dist` → `frontend_dist/`。已停服务。
+
+---
+
 # 进度账本 — 断线重连修复 + 会话标题（2026-08-23，L2）
 
 ## ⚡ 当前状态快照（2026-08-23 15:10，上下文压缩恢复点）
@@ -21,10 +44,10 @@
 **验证**：回归测试 `test_register_before_load_survives_ensure_loaded`（还原修复后确认失败）→ 修复后 405 passed + ruff clean。
 - 排查线索（记录）：FileContext.commit 全表 flush；_loaded 只在 rollback 置 False；无读取失败警告；a5c709f8 消失时点 = 59652 完整流请求期间
 
-### 前端遗留（用户工作区）
+### 前端遗留（已更新——最新状态见顶部「今日收尾存档」）
 
-- 前端仓库有**未提交的轨迹组件半成品**（TrajectoryTimeline.vue/trajectory.ts/tokens.css，typecheck 报 2 错）——未触碰，等用户完成
-- **frontend_dist 未重建**（含 MemoryView 项目记忆 tab + importance 滑块的新产物未 build）——等前端稳定后 build
+- **frontend_dist 已重建**（`094c95e`，记忆 tab + 滑块 + Lucide 已入静态托管）——旧段过时，勿再按此操作
+- 当前阻塞：用户工作区 `workspace-tree.spec.ts` 半成品（TS6133，未提交）阻断 `vue-tsc` → 用户写完后再 build
 - 前端 e2e 未跑
 
 **恢复指引**：全量 `uv run pytest tests/`；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`；前端 build 后复制 `dist/` → `frontend_dist/`。已停服务（验收用的 uvicorn 已杀）。
