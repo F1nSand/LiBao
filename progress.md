@@ -1,3 +1,34 @@
+# 进度账本 — 断线重连修复 + 会话标题（2026-08-23，L2）
+
+## ⚡ 当前状态快照（2026-08-23 15:10，上下文压缩恢复点）
+
+**断线重连修复已落地**（commit `49b6dae`，后端）+ 会话标题同步（`ae8ecd8`，前端）。全量 400+ passed + ruff clean。
+
+### 已完成
+
+1. **断流收尾（核心修复，stream_core.py）**：客户端断开（刷新/关页）→ uvicorn 对生成器抛 GeneratorExit/CancelledError → **不再 cancel producer 杀 graph**，改为 `spawn_drain` 后台排空队列让当前轮跑完，eof 后执行 on_final 正常落库。
+   - 修复前：最终 assistant 消息不落库（刷新后"agent 信息没了"）+ checkpoint 停中间（重发重放旧轮）
+   - 修复后：真实环境验证——断流 3s 的会话 35s 后完整回复落库 ✓；重发正常新轮 ✓
+   - 测试：`test_disconnect_drains_and_finalizes`（aclose → 消息落库断言）+ 全部 chat_stream 7 项过
+   - 注意：drain 的 on_final 里 `_spawn_memory_extract` 也触发提取（断流轮同样沉淀记忆）
+
+2. **会话标题**：后端 `chat_stream` 首条消息落库时默认标题「新会话」→ 首句前 20 字（`_title_from`，与前端 truncate 同语义；commit `564cbd2`）；前端 ChatView/WorkspaceShell 发送时本地同步标题（不再一直显示「新会话」）。
+
+### ⚠️ 未闭环（重要，下次继续）
+
+**会话行丢失边缘时序**：真实服务中**启动后首个断流请求**（如 a5c709f8/4f051b07）的 conversations.json 行**未落盘**（消息 JSONL 正常、内存短暂有、磁盘无 → 重启后 40401）。后续请求（bed5286f）正常落盘。已排除：模型 future-import、最小复现（不丢）、完整 init_runtime 模拟（不丢）、FileTable 锁、_atomic_write。疑似：**首请求 create 的 commit 与并发请求/drain 的 flush 竞态**（59652 完整流请求期间 a5c709f8 从内存消失）——未定位到确切机制，恢复后从「服务 C 首请求断流 → 完整流 → 行消失」复现路径继续。
+- 排查线索：FileContext.commit 全表 flush；_loaded 只在 rollback 置 False；无读取失败警告；a5c709f8 消失时点 = 59652 完整流请求期间
+
+### 前端遗留（用户工作区）
+
+- 前端仓库有**未提交的轨迹组件半成品**（TrajectoryTimeline.vue/trajectory.ts/tokens.css，typecheck 报 2 错）——未触碰，等用户完成
+- **frontend_dist 未重建**（含 MemoryView 项目记忆 tab + importance 滑块的新产物未 build）——等前端稳定后 build
+- 前端 e2e 未跑
+
+**恢复指引**：全量 `uv run pytest tests/`；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`；前端 build 后复制 `dist/` → `frontend_dist/`。已停服务（验收用的 uvicorn 已杀）。
+
+---
+
 # 进度账本 — 主动记忆功能（2026-08-23，L3，plan: agent-c-users-admin1-desktop-agent-md-cozy-walrus.md）
 
 ## ⚡ 当前状态快照（2026-08-23 16:40，验收完成）
