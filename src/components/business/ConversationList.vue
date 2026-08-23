@@ -111,8 +111,11 @@ async function onDelete(id: string) {
 .conv-items {
   flex: 1;
   overflow-y: auto;
-  scrollbar-width: thin;
+  scrollbar-width: none; /* 主侧边栏滚轮条隐藏（现代应用惯例），不显示明显灰条 */
   padding: 4px 6px;
+}
+.conv-items::-webkit-scrollbar {
+  display: none;
 }
 .conv-item {
   position: relative;
