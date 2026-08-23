@@ -101,9 +101,17 @@ watch(
   },
 )
 
-/** 点击（甘特方块/台账行）→ 只「选中」该单元格，聚焦区域不变 */
+/** 点击（甘特方块/台账行）→ 「选中」该单元格；点未聚焦部分则取消聚焦 */
 function onCellSelect(index: number) {
   selectedIndex.value = index
+  if (focusSet.value.size > 0 && !focusSet.value.has(index)) {
+    focusSet.value = new Set()
+  }
+}
+/** 点击甘特空白 → 选中最近记录 + 取消聚焦 */
+function onTimelineEmpty(index: number) {
+  selectedIndex.value = index
+  focusSet.value = new Set()
 }
 /** 甘特拖选 → 设置「聚焦区域」（框内内容不变、外部变灰透明），首个为主选中 */
 function onTimelineFocus(indices: number[]) {
@@ -191,6 +199,7 @@ function onSplitStart(e: MouseEvent) {
           :query="query"
           :has-more="store.hasMore"
           @select="onCellSelect"
+          @empty="onTimelineEmpty"
           @focus="onTimelineFocus"
           @reset="onResetSelection"
           @load-earlier="onLoadEarlier"

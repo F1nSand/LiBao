@@ -18,7 +18,13 @@ const props = defineProps<{
   query: string
   hasMore: boolean
 }>()
-const emit = defineEmits<{ select: [index: number]; focus: [indices: number[]]; reset: []; loadEarlier: [] }>()
+const emit = defineEmits<{
+  select: [index: number]
+  empty: [index: number] // 点击空白：选中最近记录 + 取消聚焦（空白属未聚焦部分）
+  focus: [indices: number[]]
+  reset: []
+  loadEarlier: []
+}>()
 
 const UNIT = 36
 const GAP = 4
@@ -177,7 +183,9 @@ function onDocUp() {
             nearest = s
           }
         }
-        if (nearest) emit('select', nearest.index)
+        // 点击空白：选中最近记录，并取消聚焦（空白属于「未聚焦部分」）
+        if (nearest) emit('empty', nearest.index)
+        else emit('reset')
       }
     } else {
       // 拖选：框内全部单元格 → 聚焦区域（框内不变、外部变灰透明），首个为主选中

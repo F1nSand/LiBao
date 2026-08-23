@@ -103,6 +103,13 @@ test.describe('对话轨迹页', () => {
     const dim = await page.locator('.tj-cell.focus-dim').count()
     expect(dim).toBeGreaterThan(0)
     await expect(page.locator('.tj-span.focus-dim')).toHaveCount(dim)
+
+    // 点击聚焦区域外的方块 → 取消聚焦（外部不再变灰），该方块转为选中
+    await page.locator('.tj-span').last().click()
+    await page.waitForTimeout(120)
+    await expect(page.locator('.tj-cell.focus-dim')).toHaveCount(0)
+    await expect(page.locator('.tj-span.focus-dim')).toHaveCount(0)
+    await expect(page.locator('.tj-cell.selected')).toHaveCount(1)
   })
 
   test('c_001：含 CONTEXT（Diff）与 COMPACTED 节点', async ({ page }) => {
