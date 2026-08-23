@@ -17,7 +17,12 @@ from langgraph.types import interrupt
 from app.orchestration.state_schema import AgentState
 from app.tools import executor
 from app.tools.builtin.tool_search import selected_names
-from app.tools.context import set_tool_org, set_tool_workspace_root
+from app.tools.context import (
+    set_tool_org,
+    set_tool_user_id,
+    set_tool_workspace_id,
+    set_tool_workspace_root,
+)
 from app.tools.registry import agent_can_use, get, get_by_name
 
 
@@ -106,15 +111,19 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                 )
                 continue
 
-        # M3/M7-B：请求级 org + 工作区根上下文（kb_search/文件工具在五层约束下直连存储层）
+        # M3/M7-B/P4：请求级 org + 工作区根/ID + user 上下文（kb_search/文件/记忆工具直连存储层）
         agent_cfg = state.get("agent_config", {})
         set_tool_org(agent_cfg.get("org_id"))
         set_tool_workspace_root(agent_cfg.get("workspace_root"))
+        set_tool_workspace_id(agent_cfg.get("workspace_id"))
+        set_tool_user_id(state.get("user_id"))
         try:
             result = await executor.execute(spec, tc.get("args") or {})
         finally:
             set_tool_org(None)
             set_tool_workspace_root(None)
+            set_tool_workspace_id(None)
+            set_tool_user_id(None)
 
         # M2.5：LLM 调用元工具（tool_search）后 → 选中写入 selected_tool_names（两段式 ACI 注入）。
         # M1：空结果 → [] 清空旧选中；一轮内多次调用合并（去重保序）。契约见 tool_search.selected_names。

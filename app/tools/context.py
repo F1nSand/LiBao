@@ -14,6 +14,9 @@ from typing import Any
 
 TOOL_ORG_ID: ContextVar[str | None] = ContextVar("tool_org_id", default=None)
 TOOL_WORKSPACE_ROOT: ContextVar[str | None] = ContextVar("tool_workspace_root", default=None)
+# P4：记忆工具上下文（tool_execute_node 从 state.user_id / agent_config.workspace_id 注入）
+TOOL_USER_ID: ContextVar[str | None] = ContextVar("tool_user_id", default=None)
+TOOL_WORKSPACE_ID: ContextVar[str | None] = ContextVar("tool_workspace_id", default=None)
 
 
 def set_tool_org(org_id: str | None) -> None:
@@ -30,6 +33,22 @@ def set_tool_workspace_root(root: str | None) -> None:
 
 def get_tool_workspace_root() -> str | None:
     return TOOL_WORKSPACE_ROOT.get()
+
+
+def set_tool_user_id(user_id: str | None) -> None:
+    TOOL_USER_ID.set(user_id)
+
+
+def get_tool_user_id() -> str | None:
+    return TOOL_USER_ID.get()
+
+
+def set_tool_workspace_id(workspace_id: str | None) -> None:
+    TOOL_WORKSPACE_ID.set(workspace_id)
+
+
+def get_tool_workspace_id() -> str | None:
+    return TOOL_WORKSPACE_ID.get()
 
 
 # subagent 派发上下文：{emit, model_builder?, main_name}。emit 发 agent_switch；

@@ -55,6 +55,9 @@ AGENT_SYSTEM_PROMPT = (
     "抓取具体网页 → fetch_url（若已启用）。\n"
     "- GitHub 热点/榜单 → github_trending（日/周/月榜）；搜索开源项目 → github_search；查某项目概况 → github_repo。\n"
     "- 用户要求发送通知/提醒时用 demo_notify（会先请求确认，确认后才真正发送）。\n"
+    "- 用户明确说「记一下/记住 XX」时用 remember_memory 存进记忆；"
+    "对话中需要想起用户的偏好/项目决策时用 recall_memory 查记忆；"
+    "用户要求忘记某条记忆时用 forget_memory。\n"
     "工具结果回来后，用栗包的口吻自然呈现给用户，不要生硬复述结果。"
 )
 
@@ -321,9 +324,73 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "idempotent": False,
         "enabled": True,
     },
+    {
+        "name": "remember_memory",
+        "description": (
+            "把一条信息写入长期记忆（用户明确说「记一下/记住」时，或值得长期保留的"
+            "用户偏好/个人背景/固定约束/项目决策）。scope 默认 auto：工作区会话→"
+            "项目记忆 md 文件，普通会话→全局记忆卡片。"
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "要记住的内容"},
+                "scope": {"type": "string", "enum": ["auto", "global", "project"], "description": "作用域，默认 auto"},
+                "title": {"type": "string", "description": "标题（可选）"},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "标签（可选）"},
+                "importance": {"type": "number", "description": "重要性 0-1（可选，默认 0.5）"},
+            },
+            "required": ["content"],
+        },
+        "tool_type": "execution",
+        "require_confirm": False,
+        "idempotent": False,
+        "enabled": True,
+    },
+    {
+        "name": "recall_memory",
+        "description": (
+            "检索长期记忆：全局记忆（RAG 语义检索卡片）或项目记忆"
+            "（工作区 md 关键词扫描）。对话需要记忆中的事实/偏好/项目决策时使用。scope 默认 auto。"
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "检索关键词/语义描述"},
+                "scope": {"type": "string", "enum": ["auto", "global", "project"], "description": "作用域，默认 auto"},
+                "limit": {"type": "integer", "description": "返回条数，默认 5，上限 20"},
+            },
+            "required": ["query"],
+        },
+        "tool_type": "perception",
+        "require_confirm": False,
+        "idempotent": True,
+        "enabled": True,
+    },
+    {
+        "name": "forget_memory",
+        "description": (
+            "删除/归档一条长期记忆（用户明确要求「忘掉/删掉某条记忆」时）。"
+            "global 按标题/内容匹配软删卡片；project 按文件名/标题匹配归档到 .trash"
+            "（可恢复）。scope 默认 auto。"
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "要删除记忆的标题/关键词"},
+                "scope": {"type": "string", "enum": ["auto", "global", "project"], "description": "作用域，默认 auto"},
+            },
+            "required": ["query"],
+        },
+        "tool_type": "execution",
+        "require_confirm": False,
+        "idempotent": True,
+        "enabled": True,
+    },
 ]
 
 # 单通用 Agent 挂齐感知/派发/占位演示/实用工具（fetch_url/analyze_image/weather 默认关，启用后开放）
+# P4：+ 主动记忆全套（remember/recall/forget）
 AGENT_TOOLS = [
     "tl_time_now",
     "tl_demo_notify",
@@ -342,6 +409,9 @@ AGENT_TOOLS = [
     "tl_github_trending",
     "tl_github_search",
     "tl_github_repo",
+    "tl_remember_memory",
+    "tl_recall_memory",
+    "tl_forget_memory",
 ]
 
 
@@ -385,6 +455,33 @@ async def seed_if_first_run(store: FileStore) -> bool:
     await ctx.commit()
     logger.info("seed ok: 首次启动已初始化（tools=%d, agent=%s v1）", len(TOOL_SPECS), AGENT_NAME)
     return True
+
+
+async def ensure_seed_tools(store: FileStore) -> None:
+    """升级合并（幂等）：老数据环境补新工具行 + 默认 agent 工具集补齐（P4 记忆工具）。
+
+    首启已由 seed_if_first_run 全量落盘；已有数据环境（count>0 跳过 seed）启动时
+    把 TOOL_SPECS 新增工具补进 tool_definitions.json、AGENT_TOOLS 新增 id 补进默认 agent.tools。
+    """
+    tools_table = store.table("tool_definitions")
+    existing_names = {t.name for t in await tools_table.list()}
+    added = 0
+    changed = False
+    for spec in TOOL_SPECS:
+        if spec["name"] not in existing_names:
+            tools_table.register(ToolDefinition(org_id=DEFAULT_ORG_ID, **spec))
+            added += 1
+            changed = True
+    default_agent = next((a for a in await store.table("agents").list() if a.is_default), None)
+    if default_agent is not None:
+        missing = [tid for tid in AGENT_TOOLS if tid not in (default_agent.tools or [])]
+        if missing:
+            default_agent.tools = (default_agent.tools or []) + missing
+            changed = True
+    if changed:
+        ctx = FileContext(store)
+        await ctx.commit()
+        logger.info("seed merge ok: 补齐 %d 个新工具 + agent.tools 扩展", added)
 
 
 async def main() -> None:

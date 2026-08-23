@@ -33,11 +33,12 @@ async def init_runtime(settings: Settings | None = None) -> Runtime:
     store.bm25.rebuild(await KbRepository()._bm25_corpus())  # noqa: SLF001  全量语料（个人量级毫秒级）
 
     # 本地单机化：tool_definitions.json enabled 为事实源 → registry 同步 + MCP 行重建
-    from app.seed import seed_if_first_run
+    from app.seed import ensure_seed_tools, seed_if_first_run
     from app.services.provider import ProviderService
     from app.services.tool import ToolService
 
     await seed_if_first_run(store)  # 首启落种子（幂等）
+    await ensure_seed_tools(store)  # 升级合并：老数据环境补新工具（P4 记忆工具）+ agent.tools 扩展
     await ToolService().sync_registry_from_file()
     await ProviderService().sync_active_to_settings()
 

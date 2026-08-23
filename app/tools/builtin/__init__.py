@@ -1,5 +1,6 @@
 """内置工具注册。M1 tl_time_now / M2 tl_demo_notify / M2.5 tl_tool_search / M3 tl_kb_search /
-M3.5 tl_fetch_url + tl_analyze_image（docs 07 RM-8 / docs 04 F4）/ M4.5 tl_dispatch_subagent（单主 Agent 派发）。"""
+M3.5 tl_fetch_url + tl_analyze_image（docs 07 RM-8 / docs 04 F4）/ M4.5 tl_dispatch_subagent（单主 Agent 派发）/
+P4 tl_remember_memory + tl_recall_memory + tl_forget_memory（主动记忆全套）。"""
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from app.tools.builtin import (
     initiate_demo,
     kb_search,
     load_skill,
+    memory_tool,
     time_now,
     tool_search,
     unit_converter,
@@ -645,6 +647,100 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=20000,
             handler=github_hotspot.tl_github_repo_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_remember_memory",
+            name="remember_memory",
+            description=(
+                "把一条信息写入长期记忆。用户明确说「记一下/记住」时，或对话中出现值得长期保留的"
+                "用户偏好/个人背景/固定约束/项目决策。scope 默认 auto（工作区会话→项目记忆 md 文件，"
+                "普通会话→全局记忆卡片）。反例：不要用它回答时间或无关问题。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "要记住的内容（用户表达的事实/决策）"},
+                    "scope": {
+                        "type": "string", "enum": ["auto", "global", "project"],
+                        "description": "作用域，默认 auto",
+                    },
+                    "title": {"type": "string", "description": "标题（可选，默认取内容开头）"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "标签（可选）"},
+                    "importance": {"type": "number", "description": "重要性 0-1（可选，默认 0.5）"},
+                },
+                "required": ["content"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=True,
+            require_confirm=False,  # 可恢复（软删/版本化），不需确认
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=15000,
+            handler=memory_tool.remember_memory_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_recall_memory",
+            name="recall_memory",
+            description=(
+                "检索长期记忆：全局记忆（RAG 语义检索卡片，query 越贴近记忆内容越准）或项目记忆"
+                "（工作区 md 关键词扫描）。对话需要记忆中的事实/偏好/项目决策时使用——自动注入"
+                "未命中但你认为相关时主动查。scope 默认 auto。反例：不要用它搜索 KB 知识库或网页。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "检索关键词/语义描述"},
+                    "scope": {
+                        "type": "string", "enum": ["auto", "global", "project"],
+                        "description": "作用域，默认 auto",
+                    },
+                    "limit": {"type": "integer", "description": "返回条数，默认 5，上限 20"},
+                },
+                "required": ["query"],
+            },
+            tool_type=ToolType.PERCEPTION,
+            enabled=True,
+            require_confirm=False,
+            idempotent=True,  # 检索可去重
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=15000,
+            handler=memory_tool.recall_memory_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_forget_memory",
+            name="forget_memory",
+            description=(
+                "删除/归档一条长期记忆。用户明确要求「忘掉/删掉某条记忆」时使用：global 按标题/内容"
+                "匹配软删卡片（可恢复）；project 按文件名/标题匹配归档到 .trash（不硬删）。"
+                "scope 默认 auto。反例：不要用它清理会话消息或 KB 文档。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "要删除记忆的标题/关键词"},
+                    "scope": {
+                        "type": "string", "enum": ["auto", "global", "project"],
+                        "description": "作用域，默认 auto",
+                    },
+                },
+                "required": ["query"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=True,
+            require_confirm=False,  # 软删/归档可恢复
+            idempotent=True,  # 重复删除无害（匹配不到则 0 条）
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=10000,
+            handler=memory_tool.forget_memory_handler,
             builtin=True,
         )
     )
