@@ -157,17 +157,20 @@ function onSplitStart(e: MouseEvent) {
 <template>
   <div class="tj-panel">
     <div class="tj-panel-toolbar">
-      <!-- 按钮从左向右排，搜索框在最右侧 -->
-      <el-button size="small" @click="collapsedAll = !collapsedAll">
+      <!-- 按钮从左紧挨排（无间隔），左右各留一小段；切换高亮 = 前方图标（✓），不用改色 -->
+      <el-button text class="tj-tool-btn" @click="collapsedAll = !collapsedAll">
         {{ collapsedAll ? '全部展开' : '全部折叠' }}
       </el-button>
-      <el-button size="small" :type="durationOn ? 'primary' : ''" @click="durationOn = !durationOn">
+      <el-button text class="tj-tool-btn" @click="durationOn = !durationOn">
+        <span class="tj-btn-ind"><el-icon v-if="durationOn" :size="12"><Check /></el-icon></span>
         <el-icon><Timer /></el-icon>Duration
       </el-button>
-      <el-button size="small" :type="turnsOn ? 'primary' : ''" @click="turnsOn = !turnsOn">
+      <el-button text class="tj-tool-btn" @click="turnsOn = !turnsOn">
+        <span class="tj-btn-ind"><el-icon v-if="turnsOn" :size="12"><Check /></el-icon></span>
         <el-icon><List /></el-icon>Turns
       </el-button>
-      <el-button size="small" :type="callsOn ? 'primary' : ''" @click="callsOn = !callsOn">
+      <el-button text class="tj-tool-btn" @click="callsOn = !callsOn">
+        <span class="tj-btn-ind"><el-icon v-if="callsOn" :size="12"><Check /></el-icon></span>
         <el-icon><Tools /></el-icon>Calls
       </el-button>
       <div class="tj-toolbar-spacer" />
@@ -235,8 +238,27 @@ function onSplitStart(e: MouseEvent) {
 .tj-panel-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  min-height: 44px;
+  gap: 0; /* 按钮紧挨着排，无间隔 */
+  padding: 0 12px; /* 左右各留一小段（不顶格） */
+  background: var(--app-content-bg);
+  border-bottom: 1px solid var(--app-border-light);
   flex-shrink: 0;
+}
+.tj-tool-btn {
+  margin: 0 !important; /* 去掉 el-button 相邻 margin，紧挨排 */
+  height: 28px;
+  border-radius: var(--app-radius);
+}
+.tj-tool-btn:hover {
+  background: var(--app-bg);
+}
+.tj-btn-ind {
+  width: 12px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  color: var(--app-primary);
 }
 .tj-toolbar-spacer {
   flex: 1;

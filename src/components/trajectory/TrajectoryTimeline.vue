@@ -93,22 +93,6 @@ const totalWidth = computed(() => {
   return max
 })
 
-/** Turn 起始竖分隔线 x：低缩放时相邻线过近（<4px）则跳过，防乱画 */
-const turnSeparators = computed(() => {
-  const xs: number[] = []
-  let last = -Infinity
-  for (const t of props.turns) {
-    const firstCell = t.userCell ?? t.groups[0]?.cells[0]
-    if (!firstCell) continue
-    const s = spans.value.find((sp) => sp.index === firstCell.index)
-    if (s && s.x - last >= 4) {
-      xs.push(s.x)
-      last = s.x
-    }
-  }
-  return xs
-})
-
 /** 缩放/平移后钳制 panX：内容不脱离起始/终点（首 span 不左出、末 span 不右超视口） */
 function clampPan(): void {
   if (!cells.value.length) {
@@ -127,6 +111,18 @@ function clampPan(): void {
     // 内容超视口：首 span 不左出，右侧交给容器横向滚动
     panX.value = Math.max(panX.value, -minR * scale.value)
   }
+}
+
+/** 最小缩放 = 内容恰好铺满泳道内容区（起点在最左、终点在最右即极限，不继续缩小） */
+function minFitScale(): number {
+  if (!cells.value.length) return 1
+  const r = baseLayout()
+  const minR = Math.min(...r.map((i) => i.x))
+  const maxR = Math.max(...r.map((i) => i.x + i.width))
+  const contentW = Math.max(1, maxR - minR)
+  const bodyEl = scrollRef.value?.querySelector('.tj-lane-body')
+  const viewW = bodyEl?.clientWidth || scrollRef.value?.clientWidth || 800
+  return Math.min(1, Math.max(0.1, viewW / contentW))
 }
 
 const boxRect = computed(() => {
@@ -153,7 +149,7 @@ function onWheel(e: WheelEvent) {
   const rect = el.getBoundingClientRect()
   const mouseX = e.clientX - rect.left + el.scrollLeft
   const factor = e.deltaY < 0 ? 1.15 : 0.87
-  const newScale = Math.min(8, Math.max(0.2, scale.value * factor))
+  const newScale = Math.min(8, Math.max(minFitScale(), scale.value * factor))
   panX.value = mouseX - (mouseX - panX.value) * (newScale / scale.value)
   scale.value = newScale
   clampPan()
@@ -277,7 +273,6 @@ function onKeydown(e: KeyboardEvent) {
           </div>
         </div>
       </div>
-      <div v-for="x in turnSeparators" :key="`sep-${x}`" class="tj-sep" :style="{ left: `${x}px` }" />
       <div v-if="boxRect" class="tj-box" :style="{ left: `${boxRect.left}px`, width: `${boxRect.width}px` }" />
     </div>
   </div>
@@ -364,15 +359,6 @@ function onKeydown(e: KeyboardEvent) {
 .tj-span-fill {
   width: 100%;
   height: 100%;
-}
-.tj-sep {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  border-left: 1px dashed var(--app-border);
-  z-index: 0;
-  pointer-events: none;
 }
 .tj-box {
   position: absolute;
