@@ -83,6 +83,37 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
     await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '172px')
   })
 
+  test('详情页：侧边栏窗口变窄自动收起、变宽自动展开（手动折叠不自动展开）', async ({ page }) => {
+    await gotoChat(page)
+    await page.goto('/workspace')
+    await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
+    await expect(page).toHaveURL(/\/workspace\/ws_001/)
+
+    // 宽视口（>960）默认展开
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await expect(page.locator('.rm-root')).toHaveCSS('width', '260px')
+    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '172px')
+
+    // 变窄（≤960）→ 两侧栏自动收起成 28px 窄条
+    await page.setViewportSize({ width: 800, height: 720 })
+    await expect(page.locator('.rm-root')).toHaveCSS('width', '28px')
+    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '28px')
+
+    // 变宽 → 自动展开
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await expect(page.locator('.rm-root')).toHaveCSS('width', '260px')
+    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '172px')
+
+    // 手动折叠（汉堡）后 → 再变窄/变宽都不自动展开
+    await page.locator('.rm-toggle').click()
+    await page.locator('.ws-conv-toggle').click()
+    await page.setViewportSize({ width: 800, height: 720 })
+    await expect(page.locator('.rm-root')).toHaveCSS('width', '28px')
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await expect(page.locator('.rm-root')).toHaveCSS('width', '28px')
+    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '28px')
+  })
+
   test('详情页：文件树轮询捕获外部更新（动态显示）', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/workspace')

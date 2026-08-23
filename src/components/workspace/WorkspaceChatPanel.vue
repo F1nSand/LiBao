@@ -11,6 +11,8 @@ import {
 import { TOKEN_LIMIT } from '@/types'
 import type { Conversation, FileRef, Message } from '@/types'
 import { truncate } from '@/utils/format'
+import { useMediaQuery } from '@/composables/useMediaQuery'
+import { NARROW_LAYOUT_MQ } from '@/constants/layout'
 import MessageList from '@/components/business/MessageList.vue'
 import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
 import AttachmentUploader from '@/components/business/AttachmentUploader.vue'
@@ -50,8 +52,13 @@ const conversations = ref<Conversation[]>([])
 const currentId = ref<string | null>(null)
 const messages = ref<Message[]>([])
 const convLoading = ref(false)
-/** 会话侧边栏折叠（窄条保留） */
-const convCollapsed = ref(false)
+/** 会话侧边栏折叠（窄条保留）：窗口变窄（≤960px）自动收起；变宽自动展开——用户手动点汉堡收起过的不自动展开 */
+const convUserCollapsed = ref(false)
+const isNarrow = useMediaQuery(NARROW_LAYOUT_MQ)
+const convCollapsed = computed(() => isNarrow.value || convUserCollapsed.value)
+function toggleConv(): void {
+  convUserCollapsed.value = !convUserCollapsed.value
+}
 
 const input = ref('')
 const pendingAttachments = reactive<string[]>([])
@@ -193,7 +200,7 @@ async function onInterruptConfirm(approved: boolean) {
         :active-id="currentId"
         :loading="convLoading"
         :collapsed="convCollapsed"
-        @toggle="convCollapsed = !convCollapsed"
+        @toggle="toggleConv"
         @select="selectConversation"
         @create="createConv"
         @delete="deleteConv"

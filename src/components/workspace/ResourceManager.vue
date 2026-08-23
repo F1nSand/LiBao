@@ -13,6 +13,8 @@ import {
 } from '@/api/workspace'
 import { isNotImplementedError } from '@/utils/http-envelope'
 import { useTaskPoll } from '@/composables/useTaskPoll'
+import { useMediaQuery } from '@/composables/useMediaQuery'
+import { NARROW_LAYOUT_MQ } from '@/constants/layout'
 import { collectLoadedPaths, refreshExpandedTree, signatureOf } from '@/utils/workspace-tree'
 import type { WorkspaceFile } from '@/types'
 
@@ -30,8 +32,11 @@ const previewContent = ref('')
 const previewDirty = ref(false)
 const previewFocused = ref(false)
 
-/** 折叠（窄条保留，VS Code 风格）：折叠成 28px 竖条，暂停文件树轮询 */
-const collapsed = ref(false)
+/** 折叠（窄条保留，VS Code 风格）：折叠成 28px 竖条，暂停文件树轮询。
+ * 窗口变窄（≤960px）自动收起；变宽自动展开——用户手动点汉堡收起过的不自动展开。 */
+const userCollapsed = ref(false)
+const isNarrow = useMediaQuery(NARROW_LAYOUT_MQ)
+const collapsed = computed(() => isNarrow.value || userCollapsed.value)
 /** 本地根路径（打开文件夹按钮 title + 降级复制用） */
 const rootPath = ref<string | undefined>()
 
@@ -264,7 +269,7 @@ async function onDelete(data: WorkspaceFile) {
   <div class="rm-root" :class="{ collapsed }">
     <div v-show="!collapsed" class="rm-head">
       <div class="rm-head-left">
-        <el-button text class="rm-toggle" title="折叠文件面板" :icon="'Fold'" @click="collapsed = true" />
+        <el-button text class="rm-toggle" title="折叠文件面板" :icon="'Fold'" @click="userCollapsed = true" />
         <span class="rm-title">文件</span>
       </div>
       <div class="rm-head-right">
@@ -316,7 +321,7 @@ async function onDelete(data: WorkspaceFile) {
       </el-tree>
     </div>
 
-    <button v-show="collapsed" class="rm-strip" type="button" title="展开文件面板" @click="collapsed = false">
+    <button v-show="collapsed" class="rm-strip" type="button" title="展开文件面板" @click="userCollapsed = false">
       <el-icon :size="18"><Expand /></el-icon>
     </button>
 
