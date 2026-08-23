@@ -10,9 +10,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 import time
 import uuid
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -48,8 +52,10 @@ _EXTRACT_PROMPT = """你是记忆提取器。基于本轮对话消息，判断�
 
 只输出 JSON，无其他文字，结构：
 {"items": [{"scope": "global"|"project", "title": "简短标题", "content": "记忆内容",
- "importance": 0-1, "tags": ["标签"], "topic_key": "英文/拼音短主题名"}]}
-items 可为空数组。importance 越高代表越像永久属性。"""
+ "importance": 0-1, "tags": ["标签"], "topic_key": "英文/拼音短主题名",
+ "type": "decision|fact|progress|note"}]}
+items 可为空数组。importance 越高代表越像永久属性。type 仅 project 项需要
+（decision=决策、fact=事实、progress=迭代进展、note=其他记录）。"""
 
 _MAX_TAIL = 3  # 提取输入上限：最后一条 user 及其后最多 2 条 assistant
 
@@ -102,12 +108,93 @@ async def _store_global_item(repo: MemoryRepository, user_id: uuid.UUID, item: d
 
 
 async def _store_project_items(workspace_root: str, items: list[dict[str, Any]], trace_id: str | None) -> int:
-    """project 项 → 工作区 .agent/memory/*.md（frontmatter + 同主题合并，P3 实现）。
+    """project 项 → 工作区 `.agent/memory/*.md`（frontmatter + 同主题合并更新）。
 
-    P1 阶段仅记录日志（提取判定先行，落盘随 P3 项目记忆文件化一并落地）。
+    文件组织：每主题/决策一文件 `{topic_key}.md`；已有同 topic_key（frontmatter 匹配）
+    → 追加「更新记录」段 + 刷新 updated_at；否则新建。单个文件写失败不影响其余。
     """
-    logger.info("project memory extraction deferred to P3: %d items (ws=%s)", len(items), workspace_root)
-    return 0
+    stored = 0
+    for item in items:
+        try:
+            if await _write_project_md(workspace_root, item, trace_id):
+                stored += 1
+        except Exception as exc:  # noqa: BLE001  单个项目项写失败不影响其余
+            logger.warning("project memory write failed: %s", exc)
+    return stored
+
+
+# ---- 项目记忆 md 文件（P3：工作区 .agent/memory/，frontmatter + 同主题合并）----
+
+_PROJECT_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.DOTALL)
+_PROJECT_LOCK: dict[str, asyncio.Lock] = {}
+_INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\s]+')
+
+
+def _slugify(text: str) -> str:
+    """topic_key/title → 安全文件名（非法字符折叠为下划线，空退化为 memory）。"""
+    slug = _INVALID_FILENAME_CHARS.sub("_", text.strip()).strip("_")
+    return slug or "memory"
+
+
+def _parse_project_md(text: str) -> tuple[dict[str, str], str] | None:
+    """解析已落盘 md → (meta, body)；无 frontmatter 返回 None。"""
+    m = _PROJECT_FRONTMATTER_RE.match(text)
+    if m is None:
+        return None
+    import yaml
+
+    try:
+        meta = yaml.safe_load(m.group(1))
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(meta, dict):
+        return None
+    return {str(k): v for k, v in meta.items()}, (m.group(2) or "").strip()
+
+
+def _render_project_md(meta: dict[str, Any], body: str) -> str:
+    """meta + body → md（YAML frontmatter + 空行 + 正文）。"""
+    import yaml
+
+    fm = yaml.safe_dump(meta, allow_unicode=True, default_flow_style=False, sort_keys=False).strip()
+    return f"---\n{fm}\n---\n\n{body.strip()}\n"
+
+
+async def _write_project_md(workspace_root: str, item: dict[str, Any], trace_id: str | None) -> bool:
+    """写/合并单个项目记忆项（asyncio 锁防并发；读-改-写原子）。"""
+    memory_dir = Path(workspace_root) / ".agent" / "memory"
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    topic_key = _slugify(item.get("topic_key") or item.get("title") or "memory")
+    path = memory_dir / f"{topic_key}.md"
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    lock = _PROJECT_LOCK.setdefault(str(path), asyncio.Lock())
+    async with lock:
+        body = str(item.get("content", "")).strip()
+        existing = None
+        try:
+            existing = _parse_project_md(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            existing = None
+        if existing is not None and str(existing[0].get("topic_key", "")) == topic_key:
+            # 同主题合并：追加更新记录 + 刷新 updated_at / 来源
+            meta, prev_body = existing
+            meta["updated_at"] = now
+            if trace_id:
+                meta["source_conversation"] = trace_id
+            merged = f"{prev_body}\n\n## {now[:10]} 更新\n\n{body}"
+            path.write_text(_render_project_md(meta, merged), encoding="utf-8")
+        else:
+            meta = {
+                "type": str(item.get("type") or "note"),
+                "title": str(item.get("title") or topic_key),
+                "topic_key": topic_key,
+                "created_at": now,
+                "updated_at": now,
+                "tags": [str(t) for t in (item.get("tags") or [])],
+                "source_conversation": trace_id or "",
+            }
+            path.write_text(_render_project_md(meta, body), encoding="utf-8")
+    return True
 
 
 async def _log_extract(

@@ -23,6 +23,9 @@ class AgentState(TypedDict, total=False):
     user_id: str
     # M3：本轮注入的长期记忆卡片（memory_inject 节点产出，build_context 渲染）
     memory_refs: list[dict[str, Any]]
+    # P3：项目记忆/知识索引（工作区 .agent/memory|knowledge 文件名+摘要；不进 system_prompt，
+    # build_context 渲染为尾部 SystemMessage，agent 细节按需 read_file）
+    project_memory_index: str | None
     # 工具执行结果（本轮，供 finalize 校验）
     tool_results: list[dict[str, Any]]
     # 跨节点运行标记：steps / max_steps / status / context_metrics

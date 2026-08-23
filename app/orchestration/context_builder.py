@@ -67,6 +67,11 @@ def build_context(state: AgentState) -> list[BaseMessage]:
         lines = [f"- [{r['title']}] {r['content_text']}" for r in refs]
         history.append(SystemMessage(content="[长期记忆]\n" + "\n".join(lines)))
 
+    # P3 项目记忆/知识索引（铁律：不进 system_prompt，消息通道渲染；细节由 read_file 按需取回）
+    project_index = state.get("project_memory_index")
+    if project_index:
+        history.append(SystemMessage(content=project_index))
+
     # 状态栏（代码维护，append-only 尾部，docs 01 §4.3）
     status_bar = state.get("flags", {}).get("status_bar")
     if status_bar:

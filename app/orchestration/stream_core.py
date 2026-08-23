@@ -114,12 +114,16 @@ def build_initial_state(
     route = skills_route_section(list(skills_by_name.values()))
     if route:
         system_prompt = f"{system_prompt}\n{route}"
-    # 项目记忆 / 项目知识（.agent/memory + knowledge，静态注入一次）
+    # 项目记忆 / 项目知识（P3 铁律）：只生成索引字段（走消息通道渲染），**绝不进 system_prompt**
+    project_memory_index: str | None = None
+    index_blocks: list[str] = []
     for key, label in (("memory", "项目记忆"), ("knowledge", "项目知识")):
         items = (workspace or {}).get(key) or []
         if items:
-            blocks = "\n\n".join(f"### {it['name']}\n{it['content']}" for it in items)
-            system_prompt = f"{system_prompt}\n\n[{label}]\n{blocks}"
+            lines = [f"- {it.get('title') or it.get('name', '')}: {it.get('summary', '')}" for it in items]
+            index_blocks.append(f"[{label}]\n" + "\n".join(lines))
+    if index_blocks:
+        project_memory_index = "\n\n".join(index_blocks)
     return {
         "messages": [HumanMessage(content=content)],
         "agent_config": {
@@ -133,6 +137,8 @@ def build_initial_state(
             "workspace_root": workspace_root,
         },
         "user_id": user_id,
+        # P3：项目记忆/知识索引（build_context 渲染为尾部 SystemMessage；随 checkpoint 保留）
+        "project_memory_index": project_memory_index,
         # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs
         "flags": {"steps": 0},
         "tool_results": [],

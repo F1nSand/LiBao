@@ -78,26 +78,47 @@ def discover_workspace_skills(root_path: str | Path) -> list[dict[str, str]]:
     return out
 
 
+def _md_index(text: str, stem: str) -> tuple[str, str]:
+    """md 文本 → (title, summary)：frontmatter title 优先（否则文件名）；summary = 正文首行 ≤120 字。"""
+    m = _FRONTMATTER_RE.match(text)
+    title = ""
+    body = text
+    if m is not None:
+        meta = _parse_frontmatter(m.group(1))
+        title = (meta.get("title") or "").strip()
+        body = (m.group(2) or "").strip()
+    if not title:
+        title = stem
+    first_line = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+    return title, first_line[:120]
+
+
 def _read_md_dir(directory: Path) -> list[dict[str, str]]:
-    """读目录下 *.md → [{name, content}]（静态注入片段；缺目录/非法编码静默跳过）。"""
+    """读目录下 *.md → 索引 [{name, title, summary}]（P3 起只读索引，正文不落内存。
+
+    项目记忆/知识铁律：正文不注入 system prompt；agent 需细节时用 read_file 按需取回。
+    """
     if not directory.is_dir():
         return []
     out: list[dict[str, str]] = []
     for md in sorted(directory.glob("*.md")):
         try:
-            content = md.read_text(encoding="utf-8").strip()
+            text = md.read_text(encoding="utf-8").strip()
         except (OSError, UnicodeDecodeError):
             continue
-        if content:
-            out.append({"name": md.stem, "content": content})
+        if not text:
+            continue
+        title, summary = _md_index(text, md.stem)
+        out.append({"name": md.stem, "title": title, "summary": summary})
     return out
 
 
 def discover_workspace_agent(root_path: str | Path) -> dict[str, Any]:
-    """扫描工作区 `.agent/` → 项目级能力叠加（skills 路由 + agent.md + memory + knowledge）。
+    """扫描工作区 `.agent/` → 项目级能力叠加（skills 路由 + agent.md + memory/knowledge 索引）。
 
     M7-B T7a/T8 重定位：agent 运行时 = 全局基座（org skills + 长期记忆 + 知识库 + 工具）
     + 项目级 `.agent/`（skills/memory/knowledge/agent.md）。此处只发现，注入在 build_initial_state。
+    P3：memory/knowledge 只返回索引（name/title/summary），正文由 read_file 按需读取。
     """
     root = Path(root_path)
     agent_dir = root / ".agent"
