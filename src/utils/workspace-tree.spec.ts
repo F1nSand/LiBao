@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   collectLoadedPaths,
+  preloadVisibleFolders,
   refreshExpandedTree,
   reloadNode,
   signatureOf,
@@ -123,17 +124,39 @@ describe('workspace-tree 保展开刷新', () => {
     expect(signatureOf(a)).not.toBe(signatureOf(c))
   })
 
-  it('collectLoadedPaths：根层 + 已加载非叶；未加载/叶节点排除', () => {
+  it('collectLoadedPaths：根层 + 已展开非叶；收起目录（含预加载）/未加载/叶节点排除', () => {
     const root = makeNode('', 0, { loaded: true, expanded: true })
     const docs = makeNode('docs', 1, { loaded: true, expanded: true })
     const src = makeNode('src', 1, { loaded: false }) // 未加载
+    const hidden = makeNode('hidden', 1, { loaded: true, expanded: false }) // 已加载但收起（预加载）→ 不轮询
     const readme = makeNode('README.md', 1, { loaded: true }) // 叶文件
-    root.childNodes = [docs, src, readme]
+    root.childNodes = [docs, src, hidden, readme]
     docs.isLeaf = false
     src.isLeaf = false
+    hidden.isLeaf = false
     readme.isLeaf = true
 
     const tree = makeTree(root)
     expect(collectLoadedPaths(tree)).toEqual(['', 'docs'])
+  })
+
+  it('preloadVisibleFolders：未加载非叶触发 loadData（loaded 置真）；已加载/加载中/叶跳过', () => {
+    const root = makeNode('', 0, { loaded: true, expanded: true })
+    const docs = makeNode('docs', 1, { loaded: false }) // 未加载目录 → 预载
+    const src = makeNode('src', 1, { loaded: true }) // 已加载 → 跳过（保持 loaded）
+    const busy = makeNode('busy', 1, { loaded: false }) // 加载中 → 跳过
+    busy.loading = true
+    const readme = makeNode('README.md', 1, { loaded: false }) // 叶文件 → 跳过
+    docs.isLeaf = false
+    src.isLeaf = false
+    busy.isLeaf = false
+    readme.isLeaf = true
+    root.childNodes = [docs, src, busy, readme]
+
+    preloadVisibleFolders(makeTree(root))
+    expect(docs.loaded).toBe(true) // 预载触发
+    expect(src.loaded).toBe(true) // 原本已加载，不受影响
+    expect(busy.loaded).toBe(false) // 加载中跳过
+    expect(readme.loaded).toBe(false) // 叶节点跳过
   })
 })

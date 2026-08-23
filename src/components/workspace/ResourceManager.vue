@@ -13,7 +13,7 @@ import {
 } from '@/api/workspace'
 import { isNotImplementedError } from '@/utils/http-envelope'
 import { useTaskPoll } from '@/composables/useTaskPoll'
-import { collectLoadedPaths, refreshExpandedTree, signatureOf } from '@/utils/workspace-tree'
+import { collectLoadedPaths, preloadVisibleFolders, refreshExpandedTree, signatureOf } from '@/utils/workspace-tree'
 import type { WorkspaceFile } from '@/types'
 
 /**
@@ -80,6 +80,8 @@ async function refreshAll() {
       // 文件被外部删除：静默保持当前内容
     }
   }
+  // 预加载可见文件夹子节点（不展开）——让空/有内容文件夹图标准确
+  preloadVisibleFolders(tree)
 }
 
 const FAST = import.meta.env.VITE_MOCK_FAST === '1'
@@ -95,6 +97,11 @@ async function loadNode(node: { level: number; data?: WorkspaceFile }, resolve: 
   } catch {
     resolve([])
   }
+}
+
+/** 文件夹图标：空文件夹（已加载且无子节点）→ 空文件夹图标；有内容（或未加载）→ FolderDot */
+function folderIcon(node: { loaded: boolean; childNodes: unknown[] }): string {
+  return node.loaded && node.childNodes.length === 0 ? 'Folder' : 'FolderDot'
 }
 
 async function onFileClick(data: WorkspaceFile) {
@@ -292,12 +299,12 @@ async function onDelete(data: WorkspaceFile) {
         node-key="path"
         :props="{ label: 'name', isLeaf: (d: WorkspaceFile) => !d.is_dir }"
         :load="loadNode"
-        :expand-on-click-node="false"
+        :expand-on-click-node="true"
         @node-click="onFileClick"
       >
-        <template #default="{ data }">
+        <template #default="{ data, node }">
           <span class="rm-node">
-            <el-icon :size="14"><component :is="data.is_dir ? 'Folder' : 'Document'" /></el-icon>
+            <el-icon :size="14"><component :is="data.is_dir ? folderIcon(node) : 'Document'" /></el-icon>
             <span class="rm-node-name">{{ data.name }}</span>
             <el-dropdown trigger="click" @command="(cmd: string) => onMenu(cmd, data)">
               <span class="rm-more" title="更多操作" @click.stop><el-icon :size="14"><MoreFilled /></el-icon></span>

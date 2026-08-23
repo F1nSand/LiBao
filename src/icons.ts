@@ -15,6 +15,7 @@ import {
   FilePlus,
   FileText,
   Folder,
+  FolderDot,
   FolderOpen,
   FolderPlus,
   Gauge,
@@ -74,6 +75,7 @@ export const appIcons: Record<string, Component> = {
   Fold: ChevronsUpDown, // 通用折叠 chevron
   Folder,
   FolderAdd: FolderPlus,
+  FolderDot, // 有内容的文件夹（空文件夹用 Folder）
   FolderOpened: FolderOpen,
   Grid: LayoutGrid,
   Hide: EyeOff,

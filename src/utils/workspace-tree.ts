@@ -83,10 +83,26 @@ export async function refreshExpandedTree(tree: ElTreeLike): Promise<boolean> {
  */
 export function collectLoadedPaths(tree: ElTreeLike): string[] {
   const paths: string[] = ['']
+  // 只收已展开的已加载非叶——预加载会让收起目录也 loaded，若按 loaded 收会触发对收起目录的重建
+  // （用户正交互时树被刷新、下拉被卸载）；只轮询已展开目录 = 无预加载时的原语义。
   tree.store.root.eachNode?.((node) => {
-    if (node.level > 0 && node.loaded && node.isLeaf === false && node.key != null) paths.push(node.key)
+    if (node.level > 0 && node.loaded && node.expanded && node.isLeaf === false && node.key != null)
+      paths.push(node.key)
   })
   return paths
+}
+
+/** 预加载所有可见文件夹的子节点（不展开、不改变 expanded）——让 `node.childNodes` 就绪，
+ * 供树节点插槽据此区分「空文件夹 / 有内容文件夹」的图标。
+ * 只处理已渲染（eachNode 可达）且未加载、非加载中的非叶节点；`loadData` 仅 `!loaded` 时真正拉取，
+ * 故重复调用廉价（首载后跳过）。
+ */
+export function preloadVisibleFolders(tree: ElTreeLike): void {
+  tree.store.root.eachNode?.((node) => {
+    if (node.level > 0 && node.isLeaf === false && !node.loaded && !node.loading) {
+      node.loadData?.()
+    }
+  })
 }
 
 /** 文件列表签名：name|is_dir|size 拼接。轮询对比用——签名不变说明该层未变化，跳过刷新避免闪烁。 */
