@@ -182,3 +182,60 @@ async def test_thinking_event_and_persistence(chat_fixture):
         assert [m.role for m in msgs] == ["user", "assistant", "assistant"]
         assert msgs[1].thinking == "我在思考调用时间工具。"  # 工具轮
         assert msgs[2].thinking == "我在思考调用时间工具。"  # 最终轮
+
+
+async def test_default_title_updated_by_first_message(chat_fixture):
+    """标题兜底：默认标题「新会话」在首条消息后自动用首句命名（前端新建按钮/API 创建的会话）。"""
+    from app.tools.builtin import register_builtin_tools
+
+    register_builtin_tools()
+    user, agent, conv = chat_fixture
+    conv.title = "新会话"  # 模拟新建按钮/API 创建的默认标题
+    graph = build_graph()
+
+    async with get_store().session() as session:
+        async for _ in chat_stream_events(
+            db=session,
+            graph=graph,
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="帮我写一个 Vue3 的计数器组件",
+            trace_id="trace-title",
+            model_override=FakeChatModel(),
+        ):
+            pass
+        assert conv.title == "帮我写一个 Vue3 的计数器组件"
+
+
+async def test_custom_title_not_overwritten(chat_fixture):
+    """自定义标题（非「新会话」）不被首句覆盖。"""
+    from app.tools.builtin import register_builtin_tools
+
+    register_builtin_tools()
+    user, agent, conv = chat_fixture
+    conv.title = "我的自定义标题"
+    graph = build_graph()
+
+    async with get_store().session() as session:
+        async for _ in chat_stream_events(
+            db=session,
+            graph=graph,
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="第一条消息内容",
+            trace_id="trace-title2",
+            model_override=FakeChatModel(),
+        ):
+            pass
+        assert conv.title == "我的自定义标题"
+
+
+def test_title_from_truncate_semantics():
+    """标题生成与前端 truncate 同语义：超长截断加省略号。"""
+    from app.orchestration.chat_stream import _title_from
+
+    assert _title_from("短标题") == "短标题"
+    assert _title_from("这" * 25) == "这" * 20 + "…"
+    assert _title_from("  空白  ") == "空白"

@@ -69,6 +69,12 @@ def _spawn_memory_extract(
     )
 
 
+def _title_from(content: str, max_chars: int = 20) -> str:
+    """会话标题生成：首条消息前 max_chars 字（超长加省略号，与前端 truncate 同语义）。"""
+    text = content.strip()
+    return f"{text[:max_chars]}…" if len(text) > max_chars else text
+
+
 def _graph_config(
     *, thread_id: str, trace_id: str, assistant_msg_id: uuid.UUID, model_override: Any = None
 ) -> dict[str, Any]:
@@ -137,6 +143,9 @@ async def chat_stream_events(
     if att_refs:
         await _backfill_attachments(db, [a["attachment_id"] for a in att_refs], conversation.id, user_msg.id)
     await ConversationRepository(db).touch_last_message(conversation.id)
+    # 标题兜底：默认标题会话（新建按钮/API 创建）在首条消息后自动用首句命名（与前端 truncate 同语义）
+    if conversation.title == "新会话" and content.strip():
+        conversation.title = _title_from(content)
     await db.commit()
 
     assistant_msg_id = uuid.uuid4()
