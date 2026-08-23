@@ -9,6 +9,7 @@ auto 推断：remember 有工作区 → project，否则 global；recall 两者�
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -163,15 +164,22 @@ async def forget_memory_handler(query: str, scope: str | None = None) -> dict[st
     user_id = get_tool_user_id()
     if not user_id:
         return {"error": "无法确定用户上下文"}
+    needle = (query or "").strip()
+    # review C2：空/空白 query 会匹配全部（"" in 任意字符串 恒真）→ 防全量误删
+    if not needle:
+        return {"error": "query 不能为空：请给出要删除记忆的标题或关键词"}
     ws_root = get_tool_workspace_root()
     try:
         if _resolve_scope(scope, ws_root) == "project":
-            removed = _archive_project_memory(ws_root, query)
+            removed = _archive_project_memory(ws_root, needle)
             return {"ok": True, "scope": "project", "archived": removed}
         repo = MemoryRepository()
         cards = await repo.table.list(filter_fn=lambda c: c.user_id == uuid.UUID(user_id) and c.deleted_at is None)
-        matches = [c for c in cards if query.strip().lower() in (c.title or "").lower() or
-                   query.strip().lower() in (c.content or {}).get("text", "").lower()]
+        matches = [c for c in cards if needle.lower() in (c.title or "").lower()
+                   or needle.lower() in (c.content or {}).get("text", "").lower()]
+        if len(matches) > 10:
+            # 匹配过宽（含糊 query 会误删大量记忆）→ 要求更精确
+            return {"error": f"匹配到 {len(matches)} 条记忆，query 过于宽泛：请给出更精确的标题/关键词"}
         for c in matches:
             await repo.soft_delete(c)
         return {"ok": True, "scope": "global", "deleted": len(matches), "card_ids": [str(c.id) for c in matches]}
@@ -181,7 +189,10 @@ async def forget_memory_handler(query: str, scope: str | None = None) -> dict[st
 
 
 def _archive_project_memory(workspace_root: str, query: str) -> int:
-    """项目记忆归档：匹配标题/文件名 → 移入 .trash/（不硬删，可恢复）。"""
+    """项目记忆归档：匹配标题/文件名 → 移入 .trash/（不硬删，可恢复）。
+
+    同名冲突（不同 query 先后匹配同一文件/重复归档）→ 追加时间戳后缀防覆盖。
+    """
     memory_dir = Path(workspace_root) / _PROJECT_MEMORY_DIR
     if not memory_dir.is_dir():
         return 0
@@ -194,6 +205,12 @@ def _archive_project_memory(workspace_root: str, query: str) -> int:
             parsed = _parse_project_md(md.read_text(encoding="utf-8", errors="ignore"))
             if parsed is None or needle not in str(parsed[0].get("title", "")).lower():
                 continue
-        md.rename(trash / md.name)
-        removed += 1
+        try:
+            target = trash / md.name
+            if target.exists():  # review C4：同名已归档 → 时间戳后缀防覆盖
+                target = trash / f"{md.stem}.{int(time.time())}{md.suffix}"
+            md.rename(target)
+            removed += 1
+        except OSError as exc:  # noqa: BLE001  单文件归档失败不影响其余
+            logger.warning("archive %s failed: %s", md.name, exc)
     return removed

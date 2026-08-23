@@ -111,7 +111,9 @@ async def _run_graph_common(
                     await maybe_notify_from_tool_results(db, updated.user_id, final_state)
                 # 主动记忆：任务完成后台提取（无工作区 → 只落全局）
                 if updated.user_id is not None:
-                    asyncio.create_task(
+                    from app.services.memory_extract import spawn_extract
+
+                    spawn_extract(
                         _extract_memory_after_task(final_state, updated.user_id, trace_id, task_id)
                     )
                 await push_event(

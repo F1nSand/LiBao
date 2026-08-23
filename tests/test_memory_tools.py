@@ -148,3 +148,36 @@ async def test_no_user_returns_error():
     set_tool_user_id(None)
     result = await remember_memory_handler("x")
     assert "error" in result
+
+
+async def test_forget_empty_query_rejected():
+    """review C2：空 query 拒绝（否则 "" in 任意标题 恒真 → 全量误删）。"""
+    await remember_memory_handler("用户喜欢喝咖啡", scope="global", title="偏好")
+    result = await forget_memory_handler("   ", scope="global")
+    assert "error" in result
+    cards = await get_store().table("memory_cards").list()
+    assert cards[0].deleted_at is None  # 未删
+
+
+async def test_forget_ambiguous_query_rejected(tmp_path, monkeypatch):
+    """review C2：匹配 >10 条 → 拒绝，要求更精确 query。"""
+    for i in range(12):
+        await remember_memory_handler(f"记忆 {i}", scope="global", title="记")
+    result = await forget_memory_handler("记", scope="global")
+    assert "error" in result and "宽泛" in result["error"]
+    cards = await get_store().table("memory_cards").list()
+    assert all(c.deleted_at is None for c in cards)
+
+
+async def test_forget_project_archive_same_name_twice(tmp_path, monkeypatch):
+    """review C4：同名二次归档 → 时间戳后缀，不抛 FileExistsError。"""
+    monkeypatch.setattr("app.tools.builtin.memory_tool.get_tool_workspace_root", lambda: str(tmp_path))
+    await remember_memory_handler("项目用 FastAPI", title="架构", scope="project")
+    r1 = await forget_memory_handler("架构", scope="project")
+    assert r1["archived"] == 1
+    # 再写同主题（topic_key 相同 → 同名文件）再归档
+    await remember_memory_handler("项目改用文件存储", title="架构", scope="project")
+    r2 = await forget_memory_handler("架构", scope="project")
+    assert r2["archived"] == 1
+    trash = tmp_path / ".agent" / "memory" / ".trash"
+    assert len(list(trash.glob("*.md"))) == 2  # 两个文件（后者时间戳后缀）

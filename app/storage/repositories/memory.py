@@ -8,6 +8,7 @@ semantic_search = RAG 检索注入源（embedding/向量表故障回退 importan
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _sync_card_vector(card: LongTermMemory) -> None:
-    """卡片 → 向量 upsert（失败静默：RAG 是增强，卡片/版本照常落盘）。"""
+    """卡片 → 向量 upsert（失败/超时静默：RAG 是增强，卡片/版本照常落盘）。"""
     try:
         from app.core.embeddings import EmbeddingService
         from app.storage.repositories.memory_vectors import _card_text, upsert_card
@@ -28,7 +29,8 @@ async def _sync_card_vector(card: LongTermMemory) -> None:
         text = _card_text(card)
         if not text.strip():
             return
-        vec = await EmbeddingService().embed_query(text[:8000])
+        # review C5：embedding 慢/挂不得拖住写卡热路径（工具 15s 超时前先内部超时降级）
+        vec = await asyncio.wait_for(EmbeddingService().embed_query(text[:8000]), timeout=10)
         await upsert_card(card, vec)
     except Exception as exc:  # noqa: BLE001  embedding/向量表故障不影响卡片写入
         logger.debug("memory vector sync skip: %s", exc)
@@ -164,7 +166,8 @@ class MemoryRepository:
             from app.core.embeddings import EmbeddingService
             from app.storage.repositories.memory_vectors import search as _vec_search
 
-            vec = await EmbeddingService().embed_query(query)
+            # review C5：检索 embedding 慢/挂同样限时（memory_inject 每轮注入路径不得拖慢对话）
+            vec = await asyncio.wait_for(EmbeddingService().embed_query(query), timeout=10)
             hits = await _vec_search(
                 str(user_id), vec, workspace_id=str(workspace_id) if workspace_id else None, limit=limit
             )

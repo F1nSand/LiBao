@@ -44,6 +44,7 @@ class MemoryService:
         body: dict,
         tags: list[str] | None = None,
         importance: float = 0.0,
+        workspace_id: uuid.UUID | None = None,
     ) -> LongTermMemory:
         card = await MemoryRepository(db).create_card(
             user_id=user_id,
@@ -52,6 +53,7 @@ class MemoryService:
             title=title,
             tags=tags,
             importance=_clamp_importance(importance),
+            workspace_id=workspace_id,
         )
         await db.commit()
         return card
@@ -92,10 +94,57 @@ class MemoryService:
         card = await self.get_card(db, user_id, card_id)
         return [serialize_longterm_version(v, card.title) for v in await MemoryRepository(db).list_versions(card.id)]
 
+    async def list_project_memory(self, workspace_root: str) -> list[dict[str, Any]]:
+        """工作区项目记忆文件列表（.agent/memory/*.md，frontmatter 元数据 + 摘要）。
+
+        P3/P5：项目记忆不走 RAG，正文按需 read_file；此处只出索引（P5 API 用）。
+        """
+        return list_project_memory_files(workspace_root)
+
 
 def _clamp_importance(value: float) -> float:
     """importance 钳位到 [0,1]（四处共用，Simplify 收敛）。"""
     return max(0.0, min(1.0, value))
+
+
+def list_project_memory_files(workspace_root: str) -> list[dict[str, Any]]:
+    """工作区项目记忆文件索引（P5 API / 提取分支共用）。
+
+    frontmatter 元数据（type/tags/created_at/updated_at/title）+ 正文首行摘要；
+    非法 md / 无 frontmatter 的行降级（title=文件名、type=note）。
+    """
+    from pathlib import Path
+
+    from app.services.memory_extract import _parse_project_md
+
+    memory_dir = Path(workspace_root) / ".agent" / "memory"
+    if not memory_dir.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for md in sorted(memory_dir.glob("*.md")):
+        try:
+            text = md.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        meta: dict[str, Any] = {}
+        body = text
+        parsed = _parse_project_md(text)
+        if parsed is not None:
+            meta, body = parsed
+        first_line = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+        out.append(
+            {
+                "path": f".agent/memory/{md.name}",
+                "name": md.stem,
+                "title": str(meta.get("title") or md.stem),
+                "type": str(meta.get("type") or "note"),
+                "tags": meta.get("tags") or [],
+                "created_at": meta.get("created_at"),
+                "updated_at": meta.get("updated_at"),
+                "summary": first_line[:120],
+            }
+        )
+    return out
 
 
 def _extract_json(text: Any) -> dict:

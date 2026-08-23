@@ -196,3 +196,24 @@ async def test_extract_writes_run_log():
     assert len(extract_logs) == 1
     assert extract_logs[0]["trace_id"] == trace
     assert extract_logs[0]["output"]["extracted"] == 1
+
+
+async def test_extract_global_card_persisted_to_disk():
+    """review C1：提取写卡后显式 commit——卡片落 memory_cards.json（重启不丢）。"""
+    import json as _json
+
+    uid = uuid.uuid4()
+    plan = {"items": [{"scope": "global", "title": "偏好", "content": "喜欢喝咖啡", "importance": 0.6}]}
+    result = await extract_and_store(
+        messages=_msgs(("user", "我喜欢喝咖啡")),
+        user_id=str(uid),
+        model=FakeExtractModel(json.dumps(plan)),
+    )
+    assert result["status"] == "ok" and result["extracted"] == 1
+    # 磁盘文件已含卡片（非仅内存）
+    json_path = get_store().root / "memory_cards.json"
+    assert json_path.exists()
+    data = _json.loads(json_path.read_text(encoding="utf-8"))
+    items = data.get("items", {})
+    assert len(items) == 1
+    assert list(items.values())[0]["title"] == "偏好"

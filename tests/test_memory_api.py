@@ -93,3 +93,43 @@ async def test_other_user_card_40409(memory_fixture):
         with pytest.raises(AppError) as exc:
             await svc.get_card(session, other.id, card.id)  # 他人卡片不可见
         assert exc.value.code == 40409
+
+
+async def test_create_card_with_workspace(memory_fixture):
+    """P5：create_card 支持 workspace_id 透传（工作区项目卡片）。"""
+    user, other = memory_fixture
+    ws = uuid.uuid4()
+    async with get_store().session() as session:
+        card = await MemoryService().create_card(
+            session, user.id, "note", "项目决策", {"text": "用 FastAPI"}, workspace_id=ws
+        )
+        assert card.workspace_id == ws
+        assert card.source == "manual"
+        # 工作区卡片不出现在个人列表（list_cards 不传 workspace_id = 全局）
+        cards = await MemoryService().list_cards(session, user.id)
+        assert all(c.workspace_id is None for c in cards)
+
+
+async def test_list_project_memory_files(tmp_path):
+    """P5：项目记忆文件索引（frontmatter 元数据 + 摘要；无 frontmatter 降级）。"""
+    ws_root = tmp_path / "ws"  # 独立工作区根（tmp_path/.agent 被 FileStore 占用）
+    memory_dir = ws_root / ".agent" / "memory"
+    memory_dir.mkdir(parents=True)
+    (memory_dir / "arch.md").write_text(
+        "---\ntype: decision\ntitle: 架构决策\ntags: [架构]\nupdated_at: 2026-08-23\n---\n\n决定用 FastAPI。",
+        encoding="utf-8",
+    )
+    (memory_dir / "note.md").write_text("无 frontmatter 的记录", encoding="utf-8")
+    files = await MemoryService().list_project_memory(str(ws_root))
+    assert len(files) == 2
+    arch = files[0]
+    assert arch["name"] == "arch"
+    assert arch["type"] == "decision"
+    assert arch["title"] == "架构决策"
+    assert arch["tags"] == ["架构"]
+    assert arch["summary"] == "决定用 FastAPI。"
+    note = files[1]
+    assert note["type"] == "note"  # 降级
+    assert note["title"] == "note"
+    # 缺目录 → 空
+    assert await MemoryService().list_project_memory(str(tmp_path / "nope")) == []

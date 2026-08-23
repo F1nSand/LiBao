@@ -7,7 +7,6 @@ M2：require_confirm 工具 → interrupt 事件（自动建 Task 承接）→ P
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -54,11 +53,11 @@ def _spawn_memory_extract(
     workspace: dict[str, Any] | None,
 ) -> None:
     """流结束后台触发主动记忆提取（best-effort：失败/禁用静默，不阻塞调用方）。"""
-    from app.services.memory_extract import extract_and_store
+    from app.services.memory_extract import extract_and_store, spawn_extract
 
     if not workspace:
         workspace = {}
-    asyncio.create_task(
+    spawn_extract(
         extract_and_store(
             messages=final_state.get("messages", []),
             user_id=str(user.id),
@@ -344,6 +343,10 @@ async def resume_stream_events(
             await db.commit()  # 拒绝分支无 set_done：此处落消息持久化（E5）
         # 2d：demo_notify 确认执行后落通知（工具结果产生源）
         await maybe_notify_from_tool_results(db, user.id, final_state)
+        # 主动记忆：resume 完成同样触发提取（首次流中断时 on_final 未执行；提取按最后 user
+        # 消息取尾部，天然不重复评估旧轮次；resume 无 workspace 上下文 → 只落全局）
+        if conversation_id:
+            _spawn_memory_extract(final_state, user, trace_id, conversation_id, None)
         return _done_payload(
             assistant_msg_id,
             fm.get("token_usage") or totals,

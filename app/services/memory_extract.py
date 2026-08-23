@@ -30,6 +30,17 @@ from app.storage.repositories.run_log import RunLogRepository
 
 logger = logging.getLogger(__name__)
 
+# 后台提取任务强引用集（review C3：asyncio.create_task 弱引用 + 提取含秒级 LLM 调用，
+# 无强引用可能被周期性 GC 回收 → "Task was destroyed" 静默中断）
+_EXTRACT_TASKS: set[asyncio.Task] = set()
+
+
+def spawn_extract(coro: Any) -> None:
+    """spawn 提取任务并持引用（done 后自动释放；best-effort 不阻塞调用方）。"""
+    task = asyncio.create_task(coro)
+    _EXTRACT_TASKS.add(task)
+    task.add_done_callback(_EXTRACT_TASKS.discard)
+
 _EXTRACT_PROMPT = """你是记忆提取器。基于本轮对话消息，判断用户表达的内容中是否有值得沉淀为长期记忆的部分。
 
 只提取**用户**表达的事实，绝不提取 AI 输出的内容（模型自述/建议/回答一律不记）。
@@ -260,6 +271,12 @@ async def extract_and_store(
         project_items = [it for it in items if it.get("scope") == "project"]
         for it in global_items:
             await _store_global_item(repo, uuid.UUID(user_id), it)
+        if global_items:
+            # C1-review：显式 commit——提取是独立后台任务，不依赖请求侧 FileContext.commit
+            # （否则卡片只在内存，重启/任意外部 rollback 即丢；版本 JSONL 与向量成孤儿）
+            from app.storage.file.store import FileContext, get_store
+
+            await FileContext(get_store()).commit()
         n_project = 0
         if project_items and workspace_root:
             n_project = await _store_project_items(workspace_root, project_items, trace_id)
