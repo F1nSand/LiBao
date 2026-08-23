@@ -37,7 +37,10 @@ class FileTable[T]:
 
     # ---- 加载 ----
 
-    async def _ensure_loaded(self) -> None:
+    def _load_now(self) -> None:
+        """同步加载（register/delete_row 前置）：未加载表先读磁盘再写内存，
+        否则后续 _ensure_loaded 整体覆盖会丢掉新写入的未落盘行
+        （启动后首请求窗口的会话行丢失根因，2026-08-23 定位）。"""
         if self._loaded:
             return
         if self.path.exists():
@@ -50,6 +53,9 @@ class FileTable[T]:
                 logger.warning("FileTable %s 读取失败，空表启动: %s", self.path, exc)
                 self._items = {}
         self._loaded = True
+
+    async def _ensure_loaded(self) -> None:
+        self._load_now()
 
     # ---- 读取（内存操作，单进程事件循环内原子）----
 
@@ -89,11 +95,13 @@ class FileTable[T]:
 
     def register(self, row: T) -> None:
         """新增行：入内存 + 标脏（供 repository create 调用）。"""
+        self._load_now()  # 未加载表先读磁盘（防 _ensure_loaded 整体覆盖丢新行）
         self._items[str(row.id)] = row
         row.mark_clean()  # 新行视为已持久化基线（服务层后续赋值才标脏）
 
     def delete_row(self, row: T) -> None:
         """硬删行：从内存移除（供 repository 级联硬删调用）。"""
+        self._load_now()  # 同上：未加载表先读磁盘（否则删除无效且 flush 写回旧行）
         self._items.pop(str(row.id), None)
 
     async def flush(self) -> None:
