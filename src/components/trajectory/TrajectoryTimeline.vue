@@ -93,7 +93,9 @@ const totalWidth = computed(() => {
   return max
 })
 
-/** 缩放/平移后钳制 panX：内容不脱离起始/终点（首 span 不左出、末 span 不右超视口） */
+/** 缩放/平移后钳制 panX：无论怎么缩放/平移，左右端点都保持在可达范围（不逃逸）。
+ * - 内容超视口：panX∈[-minR·s, viewW - minR·s] → 左端在 scrollLeft=0 可见（右端靠容器横向滚动可达）
+ * - 内容不超视口：panX∈[-minR·s, viewW - maxR·s] → 两端都在视口内 */
 function clampPan(): void {
   if (!cells.value.length) {
     panX.value = 0
@@ -103,14 +105,12 @@ function clampPan(): void {
   const minR = Math.min(...r.map((i) => i.x))
   const maxR = Math.max(...r.map((i) => i.x + i.width))
   const contentW = (maxR - minR) * scale.value
-  const viewW = scrollRef.value?.clientWidth ?? 0
-  if (contentW <= viewW) {
-    panX.value = Math.max(panX.value, -minR * scale.value)
-    panX.value = Math.min(panX.value, Math.max(0, viewW - maxR * scale.value))
-  } else {
-    // 内容超视口：首 span 不左出，右侧交给容器横向滚动
-    panX.value = Math.max(panX.value, -minR * scale.value)
-  }
+  // 用泳道内容区宽度（span 实际可见范围）而非整条时间轴宽度
+  const bodyEl = scrollRef.value?.querySelector('.tj-lane-body')
+  const viewW = bodyEl?.clientWidth ?? scrollRef.value?.clientWidth ?? 0
+  const minPan = -minR * scale.value
+  const maxPan = contentW <= viewW ? viewW - maxR * scale.value : viewW - minR * scale.value
+  panX.value = Math.min(Math.max(panX.value, minPan), Math.max(0, maxPan))
 }
 
 /** 最小缩放 = 内容恰好铺满泳道内容区（起点在最左、终点在最右即极限，不继续缩小） */
