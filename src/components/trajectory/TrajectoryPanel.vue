@@ -15,14 +15,14 @@ const props = defineProps<{ conversationId: string | null; focusToolCallId?: str
 const store = useTrajectoryStore()
 
 const selectedIndex = ref<number | null>(null)
+/** 聚焦区域集合（甘特拖选 → 框内内容不变、外部变灰透明，含甘特+台账）；selectedIndex 为单独「选中」的单元格 */
+const focusSet = ref<Set<number>>(new Set())
 const query = ref('')
 const collapsedAll = ref(false)
 /** 工具栏 toggle（选中=启用）：Duration=甘特按耗时；Turns=台账收起中间；Calls=隐藏 TOOL */
 const durationOn = ref(false)
 const turnsOn = ref(false)
 const callsOn = ref(false)
-/** 时间线选中 → 台账聚焦的 turn index（其余 turn 变浅透明）；台账点击/未聚焦点击恢复 */
-const focusTurn = ref<number | null>(null)
 const splitWidth = ref(480)
 const mainRef = ref<HTMLElement | null>(null)
 /** 窄屏（中窗口）下详情面板改为浮层覆盖台账 */
@@ -34,28 +34,16 @@ const selectedCell = computed<TrajectoryCell | null>(
   () => cells.value.find((c) => c.index === selectedIndex.value) ?? null,
 )
 
-/** cell 全局 index → 所属 turn.index（聚焦用） */
-function turnIndexOf(cellIndex: number): number | null {
-  for (const t of turns.value) {
-    const inTurn =
-      t.userCell?.index === cellIndex ||
-      t.contextCells.some((c) => c.index === cellIndex) ||
-      t.groups.some((g) => g.cells.some((c) => c.index === cellIndex))
-    if (inTurn) return t.index
-  }
-  return null
-}
-
 async function load() {
   const id = props.conversationId
   if (!id) {
     store.reset()
     selectedIndex.value = null
-    focusTurn.value = null
+    focusSet.value = new Set()
     return
   }
   selectedIndex.value = null
-  focusTurn.value = null
+  focusSet.value = new Set()
   query.value = ''
   collapsedAll.value = false
   await store.load(id)
@@ -63,7 +51,10 @@ async function load() {
   // 跨视图定位：focus=<toolCallId> → 选中该工具记录
   if (props.focusToolCallId) {
     const c = cells.value.find((cell) => cell.toolCallId === props.focusToolCallId)
-    if (c) selectedIndex.value = c.index
+    if (c) {
+      selectedIndex.value = c.index
+      focusSet.value = new Set([c.index])
+    }
   }
 }
 
@@ -110,24 +101,28 @@ watch(
   },
 )
 
-function onTimelineSelect(index: number) {
+/** 点击（甘特方块/台账行）→ 只「选中」该单元格，聚焦区域不变 */
+function onCellSelect(index: number) {
   selectedIndex.value = index
-  // 时间线滑动/框选/点击 → 台账聚焦该 turn
-  focusTurn.value = turnIndexOf(index)
+}
+/** 甘特拖选 → 设置「聚焦区域」（框内内容不变、外部变灰透明），首个为主选中 */
+function onTimelineFocus(indices: number[]) {
+  if (!indices.length) return
+  focusSet.value = new Set(indices)
+  selectedIndex.value = indices[0]
 }
 function onLedgerSelect(index: number) {
-  selectedIndex.value = index
-  focusTurn.value = null // 台账点击 → 恢复全部（取消聚焦）
+  onCellSelect(index)
 }
 function onResetSelection() {
   selectedIndex.value = null
-  focusTurn.value = null
+  focusSet.value = new Set()
 }
 function onLoadEarlier() {
   if (props.conversationId) void store.loadEarlier(props.conversationId)
 }
 function onEsc(e: KeyboardEvent) {
-  if (e.key === 'Escape') selectedIndex.value = null
+  if (e.key === 'Escape') onResetSelection()
 }
 onMounted(() => window.addEventListener('keydown', onEsc))
 onBeforeUnmount(() => {
@@ -192,9 +187,11 @@ function onSplitStart(e: MouseEvent) {
           :turns="turns"
           :duration-on="durationOn"
           :selected-index="selectedIndex"
+          :focus-set="focusSet"
           :query="query"
           :has-more="store.hasMore"
-          @select="onTimelineSelect"
+          @select="onCellSelect"
+          @focus="onTimelineFocus"
           @reset="onResetSelection"
           @load-earlier="onLoadEarlier"
         />
@@ -203,10 +200,10 @@ function onSplitStart(e: MouseEvent) {
             :turns="turns"
             :query="query"
             :selected-index="selectedIndex"
+            :focus-set="focusSet"
             :collapsed-all="collapsedAll"
             :turns-on="turnsOn"
             :calls-on="callsOn"
-            :focus-turn="focusTurn"
             @select="onLedgerSelect"
             class="tj-ledger"
           />

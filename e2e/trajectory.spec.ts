@@ -72,14 +72,37 @@ test.describe('对话轨迹页', () => {
     await expect(page.locator('.tj-cell-label', { hasText: 'ASSISTANT' })).toHaveCount(1)
   })
 
-  test('时间线点击选中 → 台账聚焦该轮次（其余变浅）', async ({ page }) => {
+  test('时间线点击选中 → 台账对应单元格高亮 + 轮次高光条', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/trajectory/c_001')
     await page.locator('.tj-timeline').waitFor({ timeout: 10_000 })
 
     await page.locator('.tj-span').first().click()
     await page.waitForTimeout(120)
-    await expect(page.locator('.tj-turn.focused')).toHaveCount(1)
+    await expect(page.locator('.tj-cell.selected')).toHaveCount(1)
+    await expect(page.locator('.tj-turn-bar.on')).toHaveCount(1)
+  })
+
+  test('拖动框选 → 甘特聚焦区域：框内正常、外部变灰，首个选中', async ({ page }) => {
+    await gotoChat(page)
+    await page.goto('/trajectory/c_001')
+    const body = page.locator('.tj-lane-body').first()
+    await body.waitFor({ timeout: 10_000 })
+    const bb = await body.boundingBox()
+    expect(bb).toBeTruthy()
+    if (!bb) return
+    // 从泳道标签列（左侧空白）向右拖一段 → 框住前几个方块，其余留在框外变灰
+    await page.mouse.move(bb.x - 24, bb.y + 9)
+    await page.mouse.down()
+    await page.mouse.move(bb.x + 96, bb.y + 9, { steps: 6 })
+    await page.mouse.up()
+    await page.waitForTimeout(120)
+    // 选中 = 1 个（框内首个）；框外（甘特 + 台账）同步变灰透明
+    await expect(page.locator('.tj-cell.selected')).toHaveCount(1)
+    await expect(page.locator('.tj-span.selected')).toHaveCount(1)
+    const dim = await page.locator('.tj-cell.focus-dim').count()
+    expect(dim).toBeGreaterThan(0)
+    await expect(page.locator('.tj-span.focus-dim')).toHaveCount(dim)
   })
 
   test('c_001：含 CONTEXT（Diff）与 COMPACTED 节点', async ({ page }) => {

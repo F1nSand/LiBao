@@ -7,16 +7,16 @@ import { formatDuration, formatTokens } from '@/utils/format'
 /** 事件台账（docs/02 §6.3）：Turn → Group → Cell。
  * grid 对齐：左留白列(轮次徽标) + 标签列(右对齐到最长) + 文本列 + dur/tok；
  * 轮次徽标在 USER 行、左侧窄高光条（z 高于行底，hover/选中不遮挡）；
- * turnsOn 收起中间（省略行可单独展开）、callsOn 隐藏 TOOL；focusTurn 聚焦（其余变浅）。
+ * turnsOn 收起中间（省略行可单独展开）、callsOn 隐藏 TOOL；focusSet 聚焦区域（框内不变、外部变灰透明）、selectedIndex 单独选中（行高亮 + 轮次高光条）。
  * 不渲染 Step/Message 分组横条。 */
 const props = defineProps<{
   turns: TrajectoryTurn[]
   query: string
   selectedIndex: number | null
+  focusSet: Set<number>
   collapsedAll: boolean
   turnsOn: boolean
   callsOn: boolean
-  focusTurn: number | null
 }>()
 const emit = defineEmits<{ select: [index: number] }>()
 
@@ -79,12 +79,25 @@ function visibleGroupCells(g: TrajectoryTurn['groups'][number]): TrajectoryCell[
   return props.callsOn ? g.cells.filter((c) => c.kind !== 'tool') : g.cells
 }
 
-/** 该 turn 是否含选中 cell（高光条 / 徽标着色） */
+/** 该 turn 是否含「选中」cell（高光条 / 徽标着色）——按主选中判 */
 function turnHasSelected(t: TrajectoryTurn): boolean {
   if (props.selectedIndex == null) return false
   if (t.userCell?.index === props.selectedIndex) return true
   if (t.contextCells.some((c) => c.index === props.selectedIndex)) return true
   return t.groups.some((g) => g.cells.some((c) => c.index === props.selectedIndex))
+}
+
+/** 该 turn 是否含「聚焦」cell（聚焦区域内 turn 的省略行不暗化） */
+function turnHasFocus(t: TrajectoryTurn): boolean {
+  if (props.focusSet.size === 0) return true
+  if (t.userCell && props.focusSet.has(t.userCell.index)) return true
+  if (t.contextCells.some((c) => props.focusSet.has(c.index))) return true
+  return t.groups.some((g) => g.cells.some((c) => props.focusSet.has(c.index)))
+}
+
+/** cell 是否在聚焦区域外（聚焦时外部变灰透明） */
+function isCellDimmed(index: number): boolean {
+  return props.focusSet.size > 0 && !props.focusSet.has(index)
 }
 
 /** Turns 收起模式：该 turn 是否处于折叠（显示省略行） */
@@ -104,7 +117,7 @@ function toggleFold(index: number) {
     <!-- 搜索模式：扁平命中行（Turn 头保留） -->
     <template v-if="hasQuery">
       <div v-for="{ turn, cells } in searchResults()" :key="`s-${turn.index}`" class="tj-turn">
-        <div v-for="c in cells" :key="c.index" class="tj-cell" :class="{ selected: c.index === selectedIndex }" @click="emit('select', c.index)">
+        <div v-for="c in cells" :key="c.index" class="tj-cell" :class="{ selected: selectedIndex === c.index, 'focus-dim': isCellDimmed(c.index) }" @click="emit('select', c.index)">
           <span v-if="c.index === turn.userCell?.index" class="tj-turn-badge">Turn {{ turn.index }}</span>
           <span v-else class="tj-cell-blank" />
           <span class="tj-cell-label" :style="labelStyle(c)">{{ kindLabel(c.kind) }}</span>
@@ -118,24 +131,19 @@ function toggleFold(index: number) {
 
     <!-- 普通模式：Turn →（USER/上下文）+（省略行 | 分组 cells） -->
     <template v-else>
-      <div
-        v-for="t in turns"
-        :key="t.index"
-        class="tj-turn"
-        :class="{ focused: focusTurn === t.index, dimmed: focusTurn != null && focusTurn !== t.index }"
-      >
-        <!-- 左侧窄高光条（z 高于行底，hover/选中不遮挡） -->
-        <span class="tj-turn-bar" :class="{ on: turnHasSelected(t) || focusTurn === t.index }" />
+      <div v-for="t in turns" :key="t.index" class="tj-turn">
+        <!-- 左侧窄高光条（z 高于行底，hover/选中不遮挡）；含选中 cell 即亮 -->
+        <span class="tj-turn-bar" :class="{ on: turnHasSelected(t) }" />
 
-        <div v-if="t.userCell" class="tj-cell turn-user" :class="{ selected: t.userCell.index === selectedIndex }" @click="emit('select', t.userCell.index)">
-          <span class="tj-turn-badge" :class="{ on: turnHasSelected(t) || focusTurn === t.index }">Turn {{ t.index }}</span>
+        <div v-if="t.userCell" class="tj-cell turn-user" :class="{ selected: selectedIndex === t.userCell.index, 'focus-dim': isCellDimmed(t.userCell.index) }" @click="emit('select', t.userCell.index)">
+          <span class="tj-turn-badge" :class="{ on: turnHasSelected(t) }">Turn {{ t.index }}</span>
           <span class="tj-cell-label" :style="labelStyle(t.userCell)">{{ kindLabel(t.userCell.kind) }}</span>
           <span class="tj-cell-text">{{ t.userCell.text }}</span>
           <span class="tj-cell-dur mono">{{ formatDuration(t.userCell.durationMs) }}</span>
           <span class="tj-cell-tok mono" />
         </div>
 
-        <div v-for="cc in t.contextCells" :key="cc.index" class="tj-cell" :class="{ selected: cc.index === selectedIndex }" @click="emit('select', cc.index)">
+        <div v-for="cc in t.contextCells" :key="cc.index" class="tj-cell" :class="{ selected: selectedIndex === cc.index, 'focus-dim': isCellDimmed(cc.index) }" @click="emit('select', cc.index)">
           <span class="tj-cell-blank" />
           <span class="tj-cell-label" :style="labelStyle(cc)">{{ kindLabel(cc.kind) }}</span>
           <span class="tj-cell-text">{{ cc.text }}</span>
@@ -144,7 +152,7 @@ function toggleFold(index: number) {
         </div>
 
         <template v-if="isTurnFolded(t)">
-          <div v-if="t.groups.length" class="tj-cell tj-fold" @click="toggleFold(t.index)">
+          <div v-if="t.groups.length" class="tj-cell tj-fold" :class="{ 'focus-dim': !turnHasFocus(t) }" @click="toggleFold(t.index)">
             <span class="tj-cell-blank" />
             <span class="tj-cell-label tj-fold-label">…</span>
             <span class="tj-cell-fold">{{ turnStepsSummary(t) }}</span>
@@ -155,7 +163,7 @@ function toggleFold(index: number) {
         <template v-else>
           <div v-for="g in t.groups" :key="`${t.index}-${g.step}`" class="tj-group">
             <template v-if="!isGroupCollapsed(t, g.step)">
-              <div v-for="c in visibleGroupCells(g)" :key="c.index" class="tj-cell" :class="{ selected: c.index === selectedIndex }" @click="emit('select', c.index)">
+              <div v-for="c in visibleGroupCells(g)" :key="c.index" class="tj-cell" :class="{ selected: selectedIndex === c.index, 'focus-dim': isCellDimmed(c.index) }" @click="emit('select', c.index)">
                 <span class="tj-cell-blank" />
                 <span class="tj-cell-label" :style="labelStyle(c)">{{ kindLabel(c.kind) }}</span>
                 <span class="tj-cell-text">{{ c.text }}</span>
@@ -184,10 +192,6 @@ function toggleFold(index: number) {
 .tj-turn {
   position: relative;
   border-radius: var(--app-radius-sm);
-  transition: opacity 0.15s;
-}
-.tj-turn.dimmed {
-  opacity: 0.3;
 }
 .tj-turn-bar {
   position: absolute;
@@ -219,6 +223,11 @@ function toggleFold(index: number) {
 .tj-cell:hover,
 .tj-cell.selected {
   background: var(--app-bg); /* 选中行保持 hover 灰，高亮靠左侧高光条 */
+}
+/* 聚焦区域外：变灰透明（聚焦内容本身不变） */
+.tj-cell.focus-dim {
+  opacity: 0.35;
+  filter: grayscale(0.7);
 }
 .tj-turn-badge {
   justify-self: start;

@@ -7,20 +7,22 @@ import { formatDuration, formatTime } from '@/utils/format'
 /**
  * 顶部时间轴（docs/02 §6.3）：三条泳道 Input/Model/Tools。
  * 投影：durationOn=false=等宽(sequence)，true=按耗时定宽(duration)。
- * 交互：滚轮缩放（以鼠标为锚）、右键拖拽平移、左键拖拽框选（选中区间首条）、
- *       点击空白选中最近记录、双击/Esc 复位、搜索时暗化非命中；hasMore 时左侧「加载更早」。
+ * 交互：滚轮缩放（以鼠标为锚，panX 钳制两端不逃逸）、左键拖拽框选（聚焦区域，外部变灰）、
+ *       点击选中单个单元格、双击/Esc 复位、搜索时暗化非命中；hasMore 时左侧「加载更早」。
  */
 const props = defineProps<{
   turns: TrajectoryTurn[]
   durationOn: boolean
   selectedIndex: number | null
+  focusSet: Set<number>
   query: string
   hasMore: boolean
 }>()
-const emit = defineEmits<{ select: [index: number]; reset: []; loadEarlier: [] }>()
+const emit = defineEmits<{ select: [index: number]; focus: [indices: number[]]; reset: []; loadEarlier: [] }>()
 
 const UNIT = 36
 const GAP = 4
+const LABEL_W = 44 // .tj-lane-label 列宽：时间轴坐标以 .tj-lane-body 为原点（label 右侧为 0），换算用
 const LANES = [
   { name: 'Input', index: 0 },
   { name: 'Model', index: 1 },
@@ -86,14 +88,8 @@ const spans = computed(() =>
   }),
 )
 
-const totalWidth = computed(() => {
-  let max = 60
-  for (const s of spans.value) max = Math.max(max, s.x + s.width + 40)
-  return max
-})
-
-/** 最小缩放 = 内容恰好铺满泳道内容区（起点在最左、终点在最右即极限，不继续缩小） */
-function minFitScale(): number {
+/** 最小缩放 = 内容恰好铺满泳道可视区（起点在最左、终点在最右即极限，不继续缩小） */
+function fitScale(): number {
   if (!cells.value.length) return 1
   const r = baseLayout()
   const minR = Math.min(...r.map((i) => i.x))
@@ -118,15 +114,35 @@ function contentX(clientX: number): number {
   const el = scrollRef.value
   if (!el) return 0
   const rect = el.getBoundingClientRect()
-  return clientX - rect.left + el.scrollLeft
+  // 泳道坐标系（label 右侧为 0），与 span 的 left 对齐
+  return clientX - rect.left - LABEL_W + el.scrollLeft
 }
 
-/** 左锚定缩放：start 恒在 x=0（最左），panX 恒 0 → 左端点永不右移；minFitScale 保证右端点不左移过视口右缘 */
+/**
+ * 鼠标锚定缩放：光标处内容点不动 → 可在任意位置（含右侧）放大；
+ * panX 钳制 → 左端不右移出视口左缘（可左移出屏）、右端不左移出视口右缘（不逃逸）；
+ * 最小缩放 = 内容恰好铺满可视区（两端贴边即极限，不再缩小）。
+ */
 function onWheel(e: WheelEvent) {
   e.preventDefault()
+  const bodyEl = scrollRef.value?.querySelector('.tj-lane-body') as HTMLElement | null
+  const viewW = bodyEl?.clientWidth || scrollRef.value?.clientWidth || 800
+  const rect = scrollRef.value?.getBoundingClientRect()
   const factor = e.deltaY < 0 ? 1.15 : 0.87
-  scale.value = Math.min(8, Math.max(minFitScale(), scale.value * factor))
-  panX.value = 0
+  const oldScale = scale.value
+  const newScale = Math.min(8, Math.max(fitScale(), oldScale * factor))
+  if (newScale === oldScale) return
+  // 光标内容坐标（泳道坐标系，label 右侧为 0）
+  const mouseX = rect ? e.clientX - rect.left - LABEL_W : viewW / 2
+  const b = (mouseX - panX.value) / oldScale
+  const r = baseLayout()
+  const minR = Math.min(...r.map((i) => i.x))
+  const maxR = Math.max(...r.map((i) => i.x + i.width))
+  // panX ∈ [viewW - maxR·s, -minR·s]：左端 ≤ 视口左、右端 ≥ 视口右
+  let newPan = panX.value + b * (oldScale - newScale)
+  newPan = Math.min(-minR * newScale, Math.max(viewW - maxR * newScale, newPan))
+  scale.value = newScale
+  panX.value = newPan
 }
 
 function onMouseDown(e: MouseEvent) {
@@ -147,7 +163,7 @@ function onDocUp() {
     const b = boxDrag.value
     boxDrag.value = null
     if (!b.moved) {
-      // 点击空白：命中或选最近 span
+      // 点击空白：命中或选最近 span（单选）
       const hit = spans.value.find((s) => s.x <= b.startX && b.startX <= s.x + s.width)
       if (hit) {
         emit('select', hit.index)
@@ -164,10 +180,12 @@ function onDocUp() {
         if (nearest) emit('select', nearest.index)
       }
     } else {
+      // 拖选：框内全部单元格 → 聚焦区域（框内不变、外部变灰透明），首个为主选中
       const lo = Math.min(b.startX, b.curX)
       const hi = Math.max(b.startX, b.curX)
-      const first = spans.value.find((s) => s.x + s.width >= lo && s.x <= hi)
-      if (first) emit('select', first.index)
+      const hit = spans.value.filter((s) => s.x + s.width >= lo && s.x <= hi).map((s) => s.index)
+      if (hit.length) emit('focus', hit)
+      else emit('reset')
     }
   }
   document.removeEventListener('mousemove', onDocMove)
@@ -202,7 +220,7 @@ function onKeydown(e: KeyboardEvent) {
     <div class="tj-hint">
       <button v-if="hasMore" class="tj-load-more" type="button" @click="emit('loadEarlier')">… 加载更早</button>
     </div>
-    <div class="tj-track" :style="{ width: `${totalWidth}px` }">
+    <div class="tj-track">
       <div v-for="lane in LANES" :key="lane.name" class="tj-lane">
         <span class="tj-lane-label">{{ lane.name }}</span>
         <div class="tj-lane-body">
@@ -210,7 +228,7 @@ function onKeydown(e: KeyboardEvent) {
             v-for="s in spansInLane(lane.index)"
             :key="s.index"
             class="tj-span"
-            :class="{ selected: s.index === selectedIndex, error: s.isError, dimmed: s.dimmed }"
+            :class="{ selected: selectedIndex === s.index, 'focus-dim': focusSet.size > 0 && !focusSet.has(s.index), error: s.isError, dimmed: s.dimmed }"
             :style="{ left: `${s.x}px`, width: `${s.width}px`, background: s.color }"
             role="button"
             :aria-label="s.toolTip"
@@ -229,7 +247,7 @@ function onKeydown(e: KeyboardEvent) {
           </div>
         </div>
       </div>
-      <div v-if="boxRect" class="tj-box" :style="{ left: `${boxRect.left}px`, width: `${boxRect.width}px` }" />
+      <div v-if="boxRect" class="tj-box" :style="{ left: `${LABEL_W + boxRect.left}px`, width: `${boxRect.width}px` }" />
     </div>
   </div>
 </template>
@@ -240,15 +258,11 @@ function onKeydown(e: KeyboardEvent) {
   border-radius: var(--app-radius);
   background: var(--app-content-bg);
   padding: 4px 6px 6px;
-  overflow: auto;
-  scrollbar-width: none; /* 隐藏横向滚轮条（不显示但可滚动） */
+  overflow: hidden; /* 平移/缩放由 panX 控制，内容溢出裁剪，无滚轮条 */
   user-select: none; /* 拖拽/点选不触发浏览器搜索文本 */
   flex-shrink: 0;
   outline: none;
   box-shadow: var(--app-shadow-card);
-}
-.tj-timeline::-webkit-scrollbar {
-  display: none;
 }
 .tj-hint {
   display: flex;
@@ -295,6 +309,7 @@ function onKeydown(e: KeyboardEvent) {
   flex: 1;
   height: 100%;
   z-index: 1;
+  overflow: hidden; /* 方块超出可视区裁剪（左右端点贴边） */
 }
 .tj-span {
   position: absolute;
@@ -316,6 +331,11 @@ function onKeydown(e: KeyboardEvent) {
 }
 .tj-span.dimmed {
   opacity: 0.15;
+}
+/* 聚焦区域外：变灰透明（聚焦内容本身不变） */
+.tj-span.focus-dim {
+  opacity: 0.35;
+  filter: grayscale(0.7);
 }
 .tj-span-fill {
   width: 100%;
