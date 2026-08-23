@@ -14,10 +14,12 @@
 
 2. **会话标题**：后端 `chat_stream` 首条消息落库时默认标题「新会话」→ 首句前 20 字（`_title_from`，与前端 truncate 同语义；commit `564cbd2`）；前端 ChatView/WorkspaceShell 发送时本地同步标题（不再一直显示「新会话」）。
 
-### ⚠️ 未闭环（重要，下次继续）
+### ✅ 会话行丢失已修复（2026-08-23 恢复后定位，commit `bc4d55b`）
 
-**会话行丢失边缘时序**：真实服务中**启动后首个断流请求**（如 a5c709f8/4f051b07）的 conversations.json 行**未落盘**（消息 JSONL 正常、内存短暂有、磁盘无 → 重启后 40401）。后续请求（bed5286f）正常落盘。已排除：模型 future-import、最小复现（不丢）、完整 init_runtime 模拟（不丢）、FileTable 锁、_atomic_write。疑似：**首请求 create 的 commit 与并发请求/drain 的 flush 竞态**（59652 完整流请求期间 a5c709f8 从内存消失）——未定位到确切机制，恢复后从「服务 C 首请求断流 → 完整流 → 行消失」复现路径继续。
-- 排查线索：FileContext.commit 全表 flush；_loaded 只在 rollback 置 False；无读取失败警告；a5c709f8 消失时点 = 59652 完整流请求期间
+**根因**：FileTable 惰性注册——服务重启后 conversations 表未加载（`_loaded=False`）时，`register()` 直接写 `_items`；此时任何并发请求触发 `_ensure_loaded()`（整体赋值覆盖 `_items`）→ 新行从内存消失 → 之后 flush 落盘无此行 → 重启 40401。与断流无关（断流请求恰好是最早的请求）。"最小复现不丢"因全局单例表早已加载；"磁盘空时不丢"因 `path.exists()` False 分支不覆盖——**必须磁盘有历史数据 + 表未加载 + 并发加载**三条件齐发。
+**修复**：`register`/`delete_row` 先同步预加载（`_load_now()` 拆出同步核心，`_ensure_loaded` 复用）——未加载表写内存前先读磁盘，杜绝后续整体覆盖。
+**验证**：回归测试 `test_register_before_load_survives_ensure_loaded`（还原修复后确认失败）→ 修复后 405 passed + ruff clean。
+- 排查线索（记录）：FileContext.commit 全表 flush；_loaded 只在 rollback 置 False；无读取失败警告；a5c709f8 消失时点 = 59652 完整流请求期间
 
 ### 前端遗留（用户工作区）
 
