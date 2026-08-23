@@ -175,8 +175,9 @@ const usageText = computed(() => {
               @mouseenter="setThinkingHover(i, true)"
               @mouseleave="setThinkingHover(i, false)"
             >
-              <span v-show="isThinkingHover(i)" class="thinking-arrow">
-                <el-icon :size="12"><component :is="isThinkingExpanded(i) ? 'ArrowDown' : 'ArrowRight'" /></el-icon>
+              <!-- 左侧：平时思考图标，hover 变展开三角（展开时保持三角） -->
+              <span class="thinking-arrow">
+                <el-icon :size="12"><component :is="isThinkingExpanded(i) ? 'ArrowDown' : (isThinkingHover(i) ? 'ArrowRight' : 'Aim')" /></el-icon>
               </span>
               <span v-if="isThinkingExpanded(i)" class="thinking-text">{{ item.text }}</span>
               <span v-else class="thinking-preview">{{ thinkPreview(item.text) }}</span>
@@ -306,6 +307,10 @@ const usageText = computed(() => {
   color: var(--app-text-muted);
   display: flex;
   flex-shrink: 0;
+  transition: color 0.15s;
+}
+.thinking-row:hover .thinking-arrow {
+  color: var(--app-primary);
 }
 .thinking-preview {
   flex: 1;

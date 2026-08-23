@@ -51,9 +51,9 @@ function primitiveText(v: unknown): string {
       @mouseenter="hover = true"
       @mouseleave="hover = false"
     >
-      <!-- hover 才出现的展开/收起三角 -->
-      <span v-show="hover" class="tool-arrow">
-        <el-icon :size="12"><component :is="expanded ? 'ArrowDown' : 'ArrowRight'" /></el-icon>
+      <!-- 左侧：平时工具图标，hover 变展开三角（展开时保持三角） -->
+      <span class="tool-leading">
+        <el-icon :size="12"><component :is="expanded ? 'ArrowDown' : (hover ? 'ArrowRight' : 'Cpu')" /></el-icon>
       </span>
       <span class="tool-summary">{{ preview }}</span>
       <span v-if="isRunning" class="tool-status running">处理中</span>
@@ -98,10 +98,14 @@ function primitiveText(v: unknown): string {
   cursor: pointer;
   color: var(--app-text-secondary);
 }
-.tool-arrow {
+.tool-leading {
   color: var(--app-text-muted);
   display: flex;
   flex-shrink: 0;
+  transition: color 0.15s;
+}
+.tool-row-head:hover .tool-leading {
+  color: var(--app-primary);
 }
 .tool-summary {
   font-size: 12px;

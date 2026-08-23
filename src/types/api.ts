@@ -323,8 +323,21 @@ export interface LongTermMemory {
   body: unknown
   tags?: string[]
   importance?: number
+  workspace_id?: string | null
   created_at: string
   updated_at?: string
+}
+
+/** 项目记忆文件索引（P5：工作区 .agent/memory/*.md，正文按需 readWorkspaceFile） */
+export interface ProjectMemoryFile {
+  path: string
+  name: string
+  title: string
+  type: string
+  tags: string[]
+  created_at?: string
+  updated_at?: string
+  summary: string
 }
 
 export interface LongTermMemoryVersion {
@@ -341,6 +354,8 @@ export interface CreateLongTermMemoryRequest {
   title: string
   body: unknown
   tags?: string[]
+  importance?: number
+  workspace_id?: string
 }
 
 export interface MemoryMaintenanceResult {
