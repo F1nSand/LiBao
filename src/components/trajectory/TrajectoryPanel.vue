@@ -161,17 +161,14 @@ function onSplitStart(e: MouseEvent) {
       <el-button text class="tj-tool-btn" @click="collapsedAll = !collapsedAll">
         {{ collapsedAll ? '全部展开' : '全部折叠' }}
       </el-button>
-      <el-button text class="tj-tool-btn" @click="durationOn = !durationOn">
-        <span class="tj-btn-ind"><el-icon v-if="durationOn" :size="12"><Check /></el-icon></span>
+      <el-button text class="tj-tool-btn" :class="{ active: durationOn }" @click="durationOn = !durationOn">
         <el-icon><Timer /></el-icon>Duration
       </el-button>
       <el-button text class="tj-tool-btn" @click="turnsOn = !turnsOn">
-        <span class="tj-btn-ind"><el-icon v-if="turnsOn" :size="12"><Check /></el-icon></span>
-        <el-icon><List /></el-icon>Turns
+        <el-icon><component :is="turnsOn ? 'Fold' : 'Expand'" /></el-icon>Turns
       </el-button>
       <el-button text class="tj-tool-btn" @click="callsOn = !callsOn">
-        <span class="tj-btn-ind"><el-icon v-if="callsOn" :size="12"><Check /></el-icon></span>
-        <el-icon><Tools /></el-icon>Calls
+        <el-icon><component :is="callsOn ? 'Hide' : 'Tools'" /></el-icon>Calls
       </el-button>
       <div class="tj-toolbar-spacer" />
       <el-input v-model="query" size="small" placeholder="搜索…" clearable class="tj-search" />
@@ -253,12 +250,8 @@ function onSplitStart(e: MouseEvent) {
 .tj-tool-btn:hover {
   background: var(--app-bg);
 }
-.tj-btn-ind {
-  width: 12px;
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  color: var(--app-primary);
+.tj-tool-btn.active {
+  background: var(--app-bg); /* Duration 选中：灰色高光底（不用图标区分） */
 }
 .tj-toolbar-spacer {
   flex: 1;

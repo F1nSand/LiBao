@@ -35,7 +35,6 @@ const hasAnyDuration = computed(() => cells.value.some((c) => c.durationMs != nu
 const scale = ref(1)
 const panX = ref(0)
 const boxDrag = ref<{ startX: number; curX: number; moved: boolean } | null>(null)
-const panDrag = ref<{ lastClientX: number } | null>(null)
 
 interface Layout {
   x: number
@@ -93,26 +92,6 @@ const totalWidth = computed(() => {
   return max
 })
 
-/** 缩放/平移后钳制 panX：无论怎么缩放/平移，左右端点都保持在可达范围（不逃逸）。
- * - 内容超视口：panX∈[-minR·s, viewW - minR·s] → 左端在 scrollLeft=0 可见（右端靠容器横向滚动可达）
- * - 内容不超视口：panX∈[-minR·s, viewW - maxR·s] → 两端都在视口内 */
-function clampPan(): void {
-  if (!cells.value.length) {
-    panX.value = 0
-    return
-  }
-  const r = baseLayout()
-  const minR = Math.min(...r.map((i) => i.x))
-  const maxR = Math.max(...r.map((i) => i.x + i.width))
-  const contentW = (maxR - minR) * scale.value
-  // 用泳道内容区宽度（span 实际可见范围）而非整条时间轴宽度
-  const bodyEl = scrollRef.value?.querySelector('.tj-lane-body')
-  const viewW = bodyEl?.clientWidth ?? scrollRef.value?.clientWidth ?? 0
-  const minPan = -minR * scale.value
-  const maxPan = contentW <= viewW ? viewW - maxR * scale.value : viewW - minR * scale.value
-  panX.value = Math.min(Math.max(panX.value, minPan), Math.max(0, maxPan))
-}
-
 /** 最小缩放 = 内容恰好铺满泳道内容区（起点在最左、终点在最右即极限，不继续缩小） */
 function minFitScale(): number {
   if (!cells.value.length) return 1
@@ -142,51 +121,28 @@ function contentX(clientX: number): number {
   return clientX - rect.left + el.scrollLeft
 }
 
+/** 左锚定缩放：start 恒在 x=0（最左），panX 恒 0 → 左端点永不右移；minFitScale 保证右端点不左移过视口右缘 */
 function onWheel(e: WheelEvent) {
   e.preventDefault()
-  const el = scrollRef.value
-  if (!el) return
-  const rect = el.getBoundingClientRect()
-  const mouseX = e.clientX - rect.left + el.scrollLeft
   const factor = e.deltaY < 0 ? 1.15 : 0.87
-  const newScale = Math.min(8, Math.max(minFitScale(), scale.value * factor))
-  panX.value = mouseX - (mouseX - panX.value) * (newScale / scale.value)
-  scale.value = newScale
-  clampPan()
+  scale.value = Math.min(8, Math.max(minFitScale(), scale.value * factor))
+  panX.value = 0
 }
 
 function onMouseDown(e: MouseEvent) {
-  if (e.button === 2) {
-    e.preventDefault()
-    panDrag.value = { lastClientX: e.clientX }
-    document.addEventListener('mousemove', onDocMove)
-    document.addEventListener('mouseup', onDocUp)
-    return
-  }
-  if (e.button === 0) {
-    boxDrag.value = { startX: contentX(e.clientX), curX: contentX(e.clientX), moved: false }
-    document.addEventListener('mousemove', onDocMove)
-    document.addEventListener('mouseup', onDocUp)
-  }
+  if (e.button !== 0) return
+  boxDrag.value = { startX: contentX(e.clientX), curX: contentX(e.clientX), moved: false }
+  document.addEventListener('mousemove', onDocMove)
+  document.addEventListener('mouseup', onDocUp)
 }
 
 function onDocMove(e: MouseEvent) {
-  if (panDrag.value) {
-    panX.value += e.clientX - panDrag.value.lastClientX
-    panDrag.value.lastClientX = e.clientX
-    clampPan()
-    return
-  }
-  if (boxDrag.value) {
-    boxDrag.value.curX = contentX(e.clientX)
-    if (Math.abs(boxDrag.value.curX - boxDrag.value.startX) > 3) boxDrag.value.moved = true
-  }
+  if (!boxDrag.value) return
+  boxDrag.value.curX = contentX(e.clientX)
+  if (Math.abs(boxDrag.value.curX - boxDrag.value.startX) > 3) boxDrag.value.moved = true
 }
 
 function onDocUp() {
-  if (panDrag.value) {
-    panDrag.value = null
-  }
   if (boxDrag.value) {
     const b = boxDrag.value
     boxDrag.value = null
@@ -263,7 +219,7 @@ function onKeydown(e: KeyboardEvent) {
             @mousedown.stop
             @click.stop="emit('select', s.index)"
           >
-            <el-tooltip placement="top" popper-class="tj-tip">
+            <el-tooltip placement="top" popper-class="tj-tip" :show-after="500">
               <div class="tj-span-fill" />
               <template #content>
                 <div class="tj-tip-line">{{ s.toolTip }}</div>
@@ -285,9 +241,14 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--app-content-bg);
   padding: 4px 6px 6px;
   overflow: auto;
+  scrollbar-width: none; /* 隐藏横向滚轮条（不显示但可滚动） */
+  user-select: none; /* 拖拽/点选不触发浏览器搜索文本 */
   flex-shrink: 0;
   outline: none;
   box-shadow: var(--app-shadow-card);
+}
+.tj-timeline::-webkit-scrollbar {
+  display: none;
 }
 .tj-hint {
   display: flex;
