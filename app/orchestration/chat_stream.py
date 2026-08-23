@@ -7,6 +7,7 @@ M2：require_confirm 工具 → interrupt 事件（自动建 Task 承接）→ P
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -43,6 +44,30 @@ async def _backfill_attachments(
         await repo.backfill_conversation(uuid.UUID(aid), conversation_id, message_id)
 
 logger = logging.getLogger(__name__)
+
+
+def _spawn_memory_extract(
+    final_state: dict[str, Any],
+    user: User,
+    trace_id: str,
+    session_id: uuid.UUID | None,
+    workspace: dict[str, Any] | None,
+) -> None:
+    """流结束后台触发主动记忆提取（best-effort：失败/禁用静默，不阻塞调用方）。"""
+    from app.services.memory_extract import extract_and_store
+
+    if not workspace:
+        workspace = {}
+    asyncio.create_task(
+        extract_and_store(
+            messages=final_state.get("messages", []),
+            user_id=str(user.id),
+            workspace_id=workspace.get("id"),
+            workspace_root=workspace.get("root_path"),
+            trace_id=trace_id,
+            session_id=session_id,
+        )
+    )
 
 
 def _graph_config(
@@ -179,6 +204,8 @@ async def chat_stream_events(
             await RunLogRepository(db).create(session_id=conversation.id, **log)
         await ConversationRepository(db).touch_last_message(conversation.id)
         await db.commit()
+        # 主动记忆：流结束 spawn 后台提取分支（独立 LLM 推理，不阻塞 SSE；resume 续流不触发防重复评估）
+        _spawn_memory_extract(final_state, user, trace_id, conversation.id, workspace)
         return _done_payload(assistant_msg_id, fm.get("token_usage") or totals, serialize_message(final_row))
 
     async for frame in stream_graph_events(

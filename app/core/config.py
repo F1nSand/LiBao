@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     memory_inject_limit: int = 5  # 每轮注入卡片上限（docs 01 §8.2）
     memory_card_max_chars: int = 500  # 单卡片注入序列化上限
     memory_maintenance_limit: int = 100  # maintenance 读取最近 messages 上限
+    # ---- 主动记忆（自动提取分支，docs 01 §8.3）----
+    memory_extract_enabled: bool = True  # 对话流结束后台提取长期记忆总开关
+    memory_extract_model: str = ""  # 提取判定模型（缺省复用主 LLM）
 
     # ---- M3 知识库 ----
     kb_max_chunks: int = 2000  # 单文档分块上限（防 20MB 文本爆 embedding 预算）

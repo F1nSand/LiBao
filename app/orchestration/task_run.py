@@ -37,6 +37,20 @@ def _task_input_text(input: Any) -> str:
     return str(input or {})
 
 
+async def _extract_memory_after_task(
+    final_state: dict[str, Any], user_id: Any, trace_id: str, task_id: uuid.UUID
+) -> None:
+    """任务完成后台主动记忆提取（无工作区 → 只落全局；best-effort 静默）。"""
+    from app.services.memory_extract import extract_and_store
+
+    await extract_and_store(
+        messages=final_state.get("messages", []),
+        user_id=str(user_id),
+        trace_id=trace_id,
+        task_id=task_id,
+    )
+
+
 async def _run_graph_common(
     *, graph, sessionmaker, task_id: uuid.UUID, initial: Any, trace_id: str, model_override: Any = None
 ) -> None:
@@ -95,6 +109,11 @@ async def _run_graph_common(
                 # 2d：demo_notify 确认执行后落通知（工具结果产生源）
                 if updated.user_id is not None:
                     await maybe_notify_from_tool_results(db, updated.user_id, final_state)
+                # 主动记忆：任务完成后台提取（无工作区 → 只落全局）
+                if updated.user_id is not None:
+                    asyncio.create_task(
+                        _extract_memory_after_task(final_state, updated.user_id, trace_id, task_id)
+                    )
                 await push_event(
                     str(task_id),
                     "done",
