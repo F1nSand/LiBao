@@ -71,3 +71,47 @@ export function toolCallSummary(name: string, input: unknown): string {
   }
   return `调用 ${name}${summary ? `：${truncate(summary, 40)}` : ''}`
 }
+
+/** 取首个非空行（思考预览用） */
+function firstLine(s: string): string {
+  return (s ?? '').split('\n').find((l) => l.trim())?.trim() ?? ''
+}
+
+/** 思考条目收起预览：`Think · 首行截断`（不要只显示 Think，附一小段实际思考） */
+export function thinkPreview(text: string): string {
+  const snippet = truncate(firstLine(text), 40)
+  return `Think · ${snippet || '…'}`
+}
+
+/** 工具调用收起预览：`{工具标识} · {摘要}`。
+ * Write → 路径；更新任务清单 → 状态摘要（done/total · 首条描述）；上下文/其它 → 入参摘要。 */
+export function toolCallPreview(name: string, input: unknown): string {
+  const lower = name.toLowerCase()
+  let label = name
+  if (/write/.test(lower)) label = 'Write'
+  else if (/update.*(task|todo|list)/.test(lower)) label = '更新任务清单'
+  else if (/context|inject/.test(lower)) label = '上下文注入'
+  else if (lower.startsWith('tl_')) label = name.slice(3)
+  let summary = ''
+  if (typeof input === 'string') summary = input
+  else if (input && typeof input === 'object' && !Array.isArray(input)) {
+    const obj = input as Record<string, unknown>
+    if (label === 'Write') {
+      summary = String(obj.path ?? obj.file_path ?? obj.filename ?? '')
+    } else if (label === '更新任务清单') {
+      const items = (obj.tasks ?? obj.list ?? obj.items) as Array<Record<string, unknown>> | undefined
+      if (Array.isArray(items)) {
+        const done = items.filter((t) => t.done === true || t.status === 'done' || t.completed).length
+        const firstDesc = String(items[0]?.text ?? items[0]?.desc ?? items[0]?.title ?? '')
+        summary = `${done}/${items.length} 已完成${firstDesc ? ` · ${firstDesc}` : ''}`
+      }
+    }
+    if (!summary) {
+      const vals = Object.values(obj).filter((v) => v != null && v !== '')
+      summary = vals.map((v) => (typeof v === 'string' ? v : safeJson(v))).join(', ')
+    }
+  } else if (input != null) {
+    summary = safeJson(input)
+  }
+  return `${label} · ${truncate(summary, 40)}`
+}

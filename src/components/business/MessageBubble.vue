@@ -5,7 +5,7 @@ import type { StreamState, ToolCallCardState } from '@/composables/useChatStream
 import MarkdownRenderer from '@/components/common/MarkdownRenderer.vue'
 import ToolCallCard from './ToolCallCard.vue'
 import AttachmentBubble from './AttachmentBubble.vue'
-import { formatCost, formatTokens, toolCallSummary } from '@/utils/format'
+import { formatCost, formatTokens, thinkPreview, toolCallSummary } from '@/utils/format'
 
 /**
  * 消息气泡（docs/02 §5.3/§5.4.3）：
@@ -92,7 +92,7 @@ const parts = computed<RenderParts>(() => {
   return { activity: [], text: null }
 })
 
-/** thinking 折叠展开态（按活动项索引）：默认收起只显示简短提示，点「展开」看全文 */
+/** thinking 折叠展开态（按活动项索引）：默认收起显示单行预览，整行点击展开全文 */
 const expandedThinking = ref<Set<number>>(new Set())
 function isThinkingExpanded(i: number): boolean {
   return expandedThinking.value.has(i)
@@ -102,6 +102,18 @@ function toggleThinking(i: number): void {
   if (s.has(i)) s.delete(i)
   else s.add(i)
   expandedThinking.value = s
+}
+
+/** thinking 行 hover 态（悬停时行左侧才出现三角） */
+const thinkingHover = ref<Set<number>>(new Set())
+function isThinkingHover(i: number): boolean {
+  return thinkingHover.value.has(i)
+}
+function setThinkingHover(i: number, v: boolean): void {
+  const s = new Set(thinkingHover.value)
+  if (v) s.add(i)
+  else s.delete(i)
+  thinkingHover.value = s
 }
 
 const role = computed(() => (props.stream ? 'assistant' : props.message?.role ?? 'user'))
@@ -154,13 +166,20 @@ const usageText = computed(() => {
               <span class="agent-switch-label"><b>{{ item.from }}</b> → <b>{{ item.to }}</b></span>
               <span v-if="item.reason" class="agent-switch-reason">{{ item.reason }}</span>
             </div>
-            <div v-else class="thinking-row" :class="{ collapsed: !isThinkingExpanded(i) }">
-              <el-icon :size="13"><Aim /></el-icon>
+            <div
+              v-else
+              class="thinking-row"
+              role="button"
+              :aria-expanded="isThinkingExpanded(i)"
+              @click="toggleThinking(i)"
+              @mouseenter="setThinkingHover(i, true)"
+              @mouseleave="setThinkingHover(i, false)"
+            >
+              <span v-show="isThinkingHover(i)" class="thinking-arrow">
+                <el-icon :size="12"><component :is="isThinkingExpanded(i) ? 'ArrowDown' : 'ArrowRight'" /></el-icon>
+              </span>
               <span v-if="isThinkingExpanded(i)" class="thinking-text">{{ item.text }}</span>
-              <span v-else class="thinking-hint">思考过程</span>
-              <button class="thinking-toggle" type="button" @click="toggleThinking(i)">
-                {{ isThinkingExpanded(i) ? '收起' : '展开' }}
-              </button>
+              <span v-else class="thinking-preview">{{ thinkPreview(item.text) }}</span>
             </div>
           </template>
         </div>
@@ -277,39 +296,35 @@ const usageText = computed(() => {
 .agent-switch-reason {
   color: var(--app-text-muted);
 }
+/* thinking：无外框平铺行（非气泡），默认收起单行预览，整行点击展开 */
 .thinking-row {
   width: 100%;
   align-items: flex-start;
-  border: 1px solid var(--app-border-light);
-  background: var(--app-content-bg);
-  border-radius: var(--app-radius);
-  padding: 6px 10px;
+  cursor: pointer;
 }
-.thinking-text,
-.thinking-hint {
+.thinking-arrow {
+  color: var(--app-text-muted);
+  display: flex;
+  flex-shrink: 0;
+}
+.thinking-preview {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--app-text-muted);
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thinking-text {
   flex: 1;
   min-width: 0;
   font-size: 12px;
   opacity: 0.85;
-}
-.thinking-text {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
-}
-.thinking-toggle {
-  border: none;
-  background: transparent;
-  color: var(--app-text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 0 2px;
-  flex-shrink: 0;
-  align-self: flex-start;
-  margin-top: 2px;
-}
-.thinking-toggle:hover {
-  color: var(--app-primary);
 }
 .msg-empty {
   color: var(--app-text-muted);

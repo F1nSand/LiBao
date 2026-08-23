@@ -77,10 +77,10 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     }
     const w = mount(MessageBubble, { props: { message: toolMsg } })
     expect(w.find('.msg-text').text()).toContain('调用 calculator：(3+4)*2-1')
-    expect(w.find('.msg-activity .tool-card').exists()).toBe(true)
+    expect(w.find('.msg-activity .tool-row').exists()).toBe(true)
   })
 
-  it('工具卡：入参/输出/耗时透传，「参数」展开可回放', async () => {
+  it('工具行：收起预览 `工具 · 摘要`，整行点击展开入参/输出/耗时', async () => {
     const toolMsg: Message = {
       id: 'm3',
       conversation_id: 'c1',
@@ -100,20 +100,20 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
       created_at: '2026-01-01T00:00:00Z',
     }
     const w = mount(MessageBubble, { props: { message: toolMsg } })
-    const card = w.find('.msg-activity .tool-card')
-    expect(card.exists()).toBe(true)
-    // 默认收起：无 .tool-params
-    expect(card.find('.tool-params').exists()).toBe(false)
-    expect(card.find('.tool-toggle').text()).toContain('参数')
-    // 点击展开 → 入参 + 输出 + 耗时可见
-    await card.find('.tool-toggle').trigger('click')
-    expect(card.find('.tool-params').exists()).toBe(true)
-    expect(card.find('.tool-params').text()).toContain('入参')
-    expect(card.find('.tool-params').text()).toContain('输出')
-    expect(card.find('.tool-params').text()).toContain('812ms')
+    const row = w.find('.msg-activity .tool-row')
+    expect(row.exists()).toBe(true)
+    // 默认收起：只显示单行预览（工具 · 摘要），无 .tool-params
+    expect(row.find('.tool-summary').text()).toContain('web_search · SSE')
+    expect(row.find('.tool-params').exists()).toBe(false)
+    // 整行点击展开 → 入参 + 输出 + 耗时可见
+    await row.find('.tool-row-head').trigger('click')
+    expect(row.find('.tool-params').exists()).toBe(true)
+    expect(row.find('.tool-params').text()).toContain('入参')
+    expect(row.find('.tool-params').text()).toContain('输出')
+    expect(row.find('.tool-params').text()).toContain('812ms')
   })
 
-  it('工具卡：无入参/输出时不显示「参数」toggle', () => {
+  it('工具行：无入参/输出时点击不展开详情', async () => {
     const noParamsMsg: Message = {
       id: 'm5',
       conversation_id: 'c1',
@@ -125,7 +125,7 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
       created_at: '2026-01-01T00:00:00Z',
     }
     const w = mount(MessageBubble, { props: { message: noParamsMsg } })
-    expect(w.find('.tool-toggle').exists()).toBe(false)
+    expect(w.find('.tool-params').exists()).toBe(false)
   })
 
   it('逐轮 token_usage/cost → 回复气泡下方 usage footer', () => {
@@ -150,7 +150,7 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     expect(w.find('.msg-usage').exists()).toBe(false)
   })
 
-  it('thinking：默认收起显示简短提示 + 展开/收起按钮，点击切换', async () => {
+  it('thinking：默认收起显示 `Think · 首行` 预览，整行点击展开全文', async () => {
     const msg: Message = {
       id: 'm6',
       conversation_id: 'c1',
@@ -161,26 +161,24 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     }
     const w = mount(MessageBubble, { props: { message: msg } })
     expect(w.find('.thinking-row').exists()).toBe(true)
-    const toggle = w.find('.thinking-toggle')
-    expect(toggle.exists()).toBe(true)
-    expect(toggle.text()).toBe('展开')
-    // 默认收起：只显示简短提示，不显示全文
-    expect(w.find('.thinking-hint').exists()).toBe(true)
-    expect(w.find('.thinking-hint').text()).toBe('思考过程')
+    // 默认收起：单行预览 `Think · 首行截断`，不显示全文
+    const preview = w.find('.thinking-preview')
+    expect(preview.exists()).toBe(true)
+    expect(preview.text()).toMatch(/^Think · /)
+    expect(preview.text()).toContain('这是一段足够长的推理内容')
     expect(w.find('.thinking-text').exists()).toBe(false)
-    // 点击展开 → 全文显示、按钮变收起
-    await toggle.trigger('click')
-    expect(w.find('.thinking-hint').exists()).toBe(false)
+    // 整行点击展开 → 全文显示
+    await w.find('.thinking-row').trigger('click')
+    expect(w.find('.thinking-preview').exists()).toBe(false)
     expect(w.find('.thinking-text').exists()).toBe(true)
     expect(w.find('.thinking-text').text()).toContain('测试文本')
-    expect(w.find('.thinking-toggle').text()).toBe('收起')
-    // 再点收起 → 恢复提示
-    await w.find('.thinking-toggle').trigger('click')
-    expect(w.find('.thinking-hint').exists()).toBe(true)
+    // 再点收起 → 恢复预览
+    await w.find('.thinking-row').trigger('click')
+    expect(w.find('.thinking-preview').exists()).toBe(true)
     expect(w.find('.thinking-text').exists()).toBe(false)
   })
 
-  it('thinking 短文本：同样默认收起（提示 + 展开按钮），点击展开全文', async () => {
+  it('thinking 短文本：同样默认收起（`Think · 简短推理`），整行点击展开', async () => {
     const msg: Message = {
       id: 'm7',
       conversation_id: 'c1',
@@ -190,10 +188,9 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
       created_at: '2026-01-01T00:00:00Z',
     }
     const w = mount(MessageBubble, { props: { message: msg } })
-    expect(w.find('.thinking-toggle').exists()).toBe(true)
-    expect(w.find('.thinking-hint').exists()).toBe(true)
+    expect(w.find('.thinking-preview').text()).toBe('Think · 简短推理')
     expect(w.find('.thinking-text').exists()).toBe(false)
-    await w.find('.thinking-toggle').trigger('click')
+    await w.find('.thinking-row').trigger('click')
     expect(w.find('.thinking-text').text()).toBe('简短推理')
   })
 })
