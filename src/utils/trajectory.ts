@@ -227,36 +227,60 @@ export function cellMatches(c: TrajectoryCell, q: string): boolean {
 export function kindLabel(kind: TrajectoryCellKind): string {
   switch (kind) {
     case 'user':
-      return '用户'
+      return 'USER'
     case 'steering':
-      return '引导'
+      return 'SYSTEM'
     case 'context':
-      return '上下文'
+      return 'CONTEXT'
     case 'message':
-      return 'Message'
+      return 'ASSISTANT'
     case 'tool':
-      return '工具'
+      return 'TOOL'
     default:
-      return '压缩'
+      return 'COMPACTED'
   }
 }
 
+/** 标签主色（甘特块 / 标签名），返回主题 var；错误优先红 */
 export function kindColor(kind: TrajectoryCellKind, isError?: boolean): string {
   if (isError) return '#ef4444'
   switch (kind) {
     case 'user':
-      return '#22c55e'
+      return 'var(--tj-user)'
     case 'steering':
-      return '#10b981'
     case 'context':
-      return '#15803d'
+      return 'var(--tj-context)'
     case 'message':
-      return '#6366f1'
+      return 'var(--tj-assistant)'
     case 'tool':
-      return '#f59e0b'
+      return 'var(--tj-tool)'
     default:
-      return '#6b7280'
+      return 'var(--tj-muted)'
   }
+}
+
+/** 标签框浅色背景（圆角矩形），返回主题 var */
+export function kindBgColor(kind: TrajectoryCellKind): string {
+  switch (kind) {
+    case 'user':
+      return 'var(--tj-user-bg)'
+    case 'steering':
+    case 'context':
+      return 'var(--tj-context-bg)'
+    case 'message':
+      return 'var(--tj-assistant-bg)'
+    case 'tool':
+      return 'var(--tj-tool-bg)'
+    default:
+      return 'var(--tj-muted-bg)'
+  }
+}
+
+/** 轮次收起省略摘要：`N steps · M tools`（组数 = steps，组内 tool cell 数 = tools） */
+export function turnStepsSummary(turn: TrajectoryTurn): string {
+  const steps = turn.groups.length
+  const tools = turn.groups.reduce((n, g) => n + g.cells.filter((c) => c.kind === 'tool').length, 0)
+  return `${steps} steps · ${tools} tools`
 }
 
 /** 时间轴泳道：0=Input(user/steering/context) 1=Model(message/compacted) 2=Tools(tool) */

@@ -6,8 +6,8 @@ test.describe('对话轨迹页', () => {
     await gotoChat(page)
     await page.goto('/trajectory/c_001')
 
-    // 台账：user #1 与 calculator 工具行
-    await expect(page.locator('.tj-ledger')).toContainText('#1', { timeout: 10_000 })
+    // 台账：USER 标签 + calculator 工具行
+    await expect(page.locator('.tj-cell-label', { hasText: 'USER' })).toHaveCount(1, { timeout: 10_000 })
     await expect(page.locator('.tj-ledger')).toContainText('calculator')
     // 时间轴 + 三条泳道
     await expect(page.locator('.tj-timeline')).toBeVisible()
@@ -28,12 +28,12 @@ test.describe('对话轨迹页', () => {
     await expect(page).toHaveURL(/\/chat/)
   })
 
-  test('c_002：纯文本会话，无工具行', async ({ page }) => {
+  test('c_002：纯文本会话，无 TOOL 标签行', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/trajectory/c_002')
 
     await expect(page.locator('.tj-ledger')).toContainText('什么是 SSE', { timeout: 10_000 })
-    await expect(page.locator('.tj-cell-pill', { hasText: '工具' })).toHaveCount(0)
+    await expect(page.locator('.tj-cell-label', { hasText: 'TOOL' })).toHaveCount(0)
   })
 
   test('跨视图定位：?focus=tc_seed 自动选中工具记录并打开详情', async ({ page }) => {
@@ -44,26 +44,51 @@ test.describe('对话轨迹页', () => {
     await expect(page.locator('.tj-detail')).toContainText('入参')
   })
 
-  test('四种投影（顺序/耗时/时间/实际）均可渲染', async ({ page }) => {
+  test('Duration 切换甘特图投影（默认顺序 → 启用耗时）', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/trajectory/c_001')
     await page.locator('.tj-timeline').waitFor({ timeout: 10_000 })
 
-    for (const name of ['顺序', '耗时', '时间', '实际']) {
-      await page.locator('.el-radio-button', { hasText: name }).click()
-      await page.waitForTimeout(120)
-      await expect(page.locator('.tj-timeline')).toBeVisible()
-      await expect(page.locator('.tj-lane')).toHaveCount(3)
-    }
+    await page.getByRole('button', { name: 'Duration' }).click()
+    await page.waitForTimeout(120)
+    await expect(page.locator('.tj-timeline')).toBeVisible()
+    await expect(page.locator('.tj-lane')).toHaveCount(3)
   })
 
-  test('c_001：含 context（Diff）与 compaction 节点', async ({ page }) => {
+  test('Turns 收起：仅 USER + CONTEXT，省略行可单独展开', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/trajectory/c_001')
     await page.locator('.tj-ledger').waitFor({ timeout: 10_000 })
 
-    await expect(page.locator('.tj-cell-pill', { hasText: '上下文' })).toHaveCount(1)
-    await expect(page.locator('.tj-cell-pill', { hasText: '压缩' })).toHaveCount(1)
+    // 默认全展开：ASSISTANT 行可见
+    await expect(page.locator('.tj-cell-label', { hasText: 'ASSISTANT' })).toHaveCount(1)
+    // 点 Turns → 收起中间，省略行出现、ASSISTANT 隐藏
+    await page.getByRole('button', { name: 'Turns' }).click()
+    await page.waitForTimeout(120)
+    await expect(page.locator('.tj-cell-label', { hasText: 'ASSISTANT' })).toHaveCount(0)
+    await expect(page.locator('.tj-fold')).toBeVisible()
+    // 点击省略行 → 单独展开该轮次
+    await page.locator('.tj-fold').click()
+    await expect(page.locator('.tj-cell-label', { hasText: 'ASSISTANT' })).toHaveCount(1)
+  })
+
+  test('时间线点击选中 → 台账聚焦该轮次（其余变浅）', async ({ page }) => {
+    await gotoChat(page)
+    await page.goto('/trajectory/c_001')
+    await page.locator('.tj-timeline').waitFor({ timeout: 10_000 })
+
+    await page.locator('.tj-span').first().click()
+    await page.waitForTimeout(120)
+    await expect(page.locator('.tj-turn.focused')).toHaveCount(1)
+  })
+
+  test('c_001：含 CONTEXT（Diff）与 COMPACTED 节点', async ({ page }) => {
+    await gotoChat(page)
+    await page.goto('/trajectory/c_001')
+    await page.locator('.tj-ledger').waitFor({ timeout: 10_000 })
+
+    await expect(page.locator('.tj-cell-label', { hasText: 'CONTEXT' })).toHaveCount(1)
+    await expect(page.locator('.tj-cell-label', { hasText: 'COMPACTED' })).toHaveCount(1)
   })
 
   test('长会话 c_long：「加载更早」后节点数增加', async ({ page }) => {

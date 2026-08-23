@@ -17,7 +17,12 @@ const store = useTrajectoryStore()
 const selectedIndex = ref<number | null>(null)
 const query = ref('')
 const collapsedAll = ref(false)
-const projection = ref<'sequence' | 'duration' | 'time' | 'actual'>('sequence')
+/** 工具栏 toggle（选中=启用）：Duration=甘特按耗时；Turns=台账收起中间；Calls=隐藏 TOOL */
+const durationOn = ref(false)
+const turnsOn = ref(false)
+const callsOn = ref(false)
+/** 时间线选中 → 台账聚焦的 turn index（其余 turn 变浅透明）；台账点击/未聚焦点击恢复 */
+const focusTurn = ref<number | null>(null)
 const splitWidth = ref(480)
 const mainRef = ref<HTMLElement | null>(null)
 /** 窄屏（中窗口）下详情面板改为浮层覆盖台账 */
@@ -29,14 +34,28 @@ const selectedCell = computed<TrajectoryCell | null>(
   () => cells.value.find((c) => c.index === selectedIndex.value) ?? null,
 )
 
+/** cell 全局 index → 所属 turn.index（聚焦用） */
+function turnIndexOf(cellIndex: number): number | null {
+  for (const t of turns.value) {
+    const inTurn =
+      t.userCell?.index === cellIndex ||
+      t.contextCells.some((c) => c.index === cellIndex) ||
+      t.groups.some((g) => g.cells.some((c) => c.index === cellIndex))
+    if (inTurn) return t.index
+  }
+  return null
+}
+
 async function load() {
   const id = props.conversationId
   if (!id) {
     store.reset()
     selectedIndex.value = null
+    focusTurn.value = null
     return
   }
   selectedIndex.value = null
+  focusTurn.value = null
   query.value = ''
   collapsedAll.value = false
   await store.load(id)
@@ -91,11 +110,18 @@ watch(
   },
 )
 
-function onSelect(index: number) {
+function onTimelineSelect(index: number) {
   selectedIndex.value = index
+  // 时间线滑动/框选/点击 → 台账聚焦该 turn
+  focusTurn.value = turnIndexOf(index)
+}
+function onLedgerSelect(index: number) {
+  selectedIndex.value = index
+  focusTurn.value = null // 台账点击 → 恢复全部（取消聚焦）
 }
 function onResetSelection() {
   selectedIndex.value = null
+  focusTurn.value = null
 }
 function onLoadEarlier() {
   if (props.conversationId) void store.loadEarlier(props.conversationId)
@@ -131,16 +157,21 @@ function onSplitStart(e: MouseEvent) {
 <template>
   <div class="tj-panel">
     <div class="tj-panel-toolbar">
-      <el-input v-model="query" size="small" placeholder="搜索…" clearable class="tj-search" />
+      <!-- 按钮从左向右排，搜索框在最右侧 -->
       <el-button size="small" @click="collapsedAll = !collapsedAll">
         {{ collapsedAll ? '全部展开' : '全部折叠' }}
       </el-button>
-      <el-radio-group v-model="projection" size="small">
-        <el-radio-button value="sequence">顺序</el-radio-button>
-        <el-radio-button value="duration">耗时</el-radio-button>
-        <el-radio-button value="time">时间</el-radio-button>
-        <el-radio-button value="actual">实际</el-radio-button>
-      </el-radio-group>
+      <el-button size="small" :type="durationOn ? 'primary' : ''" @click="durationOn = !durationOn">
+        <el-icon><Timer /></el-icon>Duration
+      </el-button>
+      <el-button size="small" :type="turnsOn ? 'primary' : ''" @click="turnsOn = !turnsOn">
+        <el-icon><List /></el-icon>Turns
+      </el-button>
+      <el-button size="small" :type="callsOn ? 'primary' : ''" @click="callsOn = !callsOn">
+        <el-icon><Tools /></el-icon>Calls
+      </el-button>
+      <div class="tj-toolbar-spacer" />
+      <el-input v-model="query" size="small" placeholder="搜索…" clearable class="tj-search" />
     </div>
 
     <div class="tj-panel-body">
@@ -159,11 +190,11 @@ function onSplitStart(e: MouseEvent) {
       <template v-else>
         <TrajectoryTimeline
           :turns="turns"
-          :projection="projection"
+          :duration-on="durationOn"
           :selected-index="selectedIndex"
           :query="query"
           :has-more="store.hasMore"
-          @select="onSelect"
+          @select="onTimelineSelect"
           @reset="onResetSelection"
           @load-earlier="onLoadEarlier"
         />
@@ -173,7 +204,10 @@ function onSplitStart(e: MouseEvent) {
             :query="query"
             :selected-index="selectedIndex"
             :collapsed-all="collapsedAll"
-            @select="onSelect"
+            :turns-on="turnsOn"
+            :calls-on="callsOn"
+            :focus-turn="focusTurn"
+            @select="onLedgerSelect"
             class="tj-ledger"
           />
           <div class="tj-splitter" title="拖拽调宽" @mousedown="onSplitStart" />
@@ -203,6 +237,9 @@ function onSplitStart(e: MouseEvent) {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+.tj-toolbar-spacer {
+  flex: 1;
 }
 .tj-search {
   width: 180px;

@@ -42,4 +42,16 @@
   --app-font-size-lg: 16px;
   --app-font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', -apple-system, 'Segoe UI', sans-serif;
   --app-font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  /* 轨迹页标签色（甘特图 + 台账；主色 = 标签名/甘特块，-bg = 标签框浅色） */
+  --tj-user: #38bdf8;        /* USER 湖蓝 */
+  --tj-user-bg: #bae6fd;
+  --tj-context: #a3e635;     /* CONTEXT 黄绿 */
+  --tj-context-bg: #d9f99d;
+  --tj-assistant: #a78bfa;   /* ASSISTANT 紫罗兰 */
+  --tj-assistant-bg: #ddd6fe;
+  --tj-tool: #fb923c;        /* TOOL 爱马仕橙 */
+  --tj-tool-bg: #fed7aa;
+  --tj-muted: #94a3b8;       /* compacted/次要 灰 */
+  --tj-muted-bg: #e2e8f0;
 }

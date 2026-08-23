@@ -104,11 +104,13 @@ describe('foldTrajectory（对话轨迹折叠）', () => {
     expect(cellMatches(cells[0], 'web')).toBe(false)
   })
 
-  it('kindColor：错误工具红色，其余按类着色', () => {
+  it('kindColor：错误工具红色，其余按类返回主题 var（USER/CONTEXT/ASSISTANT/TOOL）', () => {
     expect(kindColor('tool', true)).toBe('#ef4444')
-    expect(kindColor('user')).toBe('#22c55e')
-    expect(kindColor('message')).toBe('#6366f1')
-    expect(kindColor('tool')).toBe('#f59e0b')
+    expect(kindColor('user')).toBe('var(--tj-user)')
+    expect(kindColor('context')).toBe('var(--tj-context)')
+    expect(kindColor('message')).toBe('var(--tj-assistant)')
+    expect(kindColor('tool')).toBe('var(--tj-tool)')
+    expect(kindColor('compacted')).toBe('var(--tj-muted)')
   })
 
   it('context 节点进当前 Turn 的 contextCells（含 diff）', () => {

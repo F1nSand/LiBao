@@ -6,13 +6,13 @@ import { formatDuration, formatTime } from '@/utils/format'
 
 /**
  * 顶部时间轴（docs/02 §6.3）：三条泳道 Input/Model/Tools。
- * 投影：sequence(等宽) / duration(按耗时定宽) / time(按时间定位等宽) / actual(真实墙钟含空闲)。
+ * 投影：durationOn=false=等宽(sequence)，true=按耗时定宽(duration)。
  * 交互：滚轮缩放（以鼠标为锚）、右键拖拽平移、左键拖拽框选（选中区间首条）、
  *       点击空白选中最近记录、双击/Esc 复位、搜索时暗化非命中；hasMore 时左侧「加载更早」。
  */
 const props = defineProps<{
   turns: TrajectoryTurn[]
-  projection: 'sequence' | 'duration' | 'time' | 'actual'
+  durationOn: boolean
   selectedIndex: number | null
   query: string
   hasMore: boolean
@@ -44,7 +44,8 @@ interface Layout {
 
 function baseLayout(): Layout[] {
   const cs = cells.value
-  if (props.projection === 'sequence' || (props.projection === 'duration' && !hasAnyDuration.value)) {
+  // 默认 sequence 等宽；durationOn 且有耗时数据 → 按耗时定宽
+  if (!props.durationOn || !hasAnyDuration.value) {
     let x = 0
     return cs.map(() => {
       const r = { x, width: UNIT }
@@ -52,25 +53,12 @@ function baseLayout(): Layout[] {
       return r
     })
   }
-  if (props.projection === 'duration') {
-    let x = 0
-    return cs.map((c) => {
-      const w = c.durationMs != null ? Math.max(UNIT, Math.round(c.durationMs / 4)) : UNIT
-      const r = { x, width: w }
-      x += w + GAP
-      return r
-    })
-  }
-  // time / actual：按 startedAt 定位
-  const times = cs.map((c) => c.startedAt)
-  const minT = Math.min(...times)
-  const maxT = Math.max(...times)
-  const pxPerMs = 1600 / Math.max(1, maxT - minT)
+  let x = 0
   return cs.map((c) => {
-    const left = (c.startedAt - minT) * pxPerMs
-    const w =
-      props.projection === 'actual' && c.durationMs != null ? Math.max(UNIT, Math.round(c.durationMs / 4)) : UNIT
-    return { x: left, width: w }
+    const w = c.durationMs != null ? Math.max(UNIT, Math.round(c.durationMs / 4)) : UNIT
+    const r = { x, width: w }
+    x += w + GAP
+    return r
   })
 }
 
@@ -105,18 +93,41 @@ const totalWidth = computed(() => {
   return max
 })
 
-/** Turn 起始竖分隔线 x */
+/** Turn 起始竖分隔线 x：低缩放时相邻线过近（<4px）则跳过，防乱画 */
 const turnSeparators = computed(() => {
   const xs: number[] = []
+  let last = -Infinity
   for (const t of props.turns) {
     const firstCell = t.userCell ?? t.groups[0]?.cells[0]
-    if (firstCell) {
-      const s = spans.value.find((sp) => sp.index === firstCell.index)
-      if (s) xs.push(s.x)
+    if (!firstCell) continue
+    const s = spans.value.find((sp) => sp.index === firstCell.index)
+    if (s && s.x - last >= 4) {
+      xs.push(s.x)
+      last = s.x
     }
   }
   return xs
 })
+
+/** 缩放/平移后钳制 panX：内容不脱离起始/终点（首 span 不左出、末 span 不右超视口） */
+function clampPan(): void {
+  if (!cells.value.length) {
+    panX.value = 0
+    return
+  }
+  const r = baseLayout()
+  const minR = Math.min(...r.map((i) => i.x))
+  const maxR = Math.max(...r.map((i) => i.x + i.width))
+  const contentW = (maxR - minR) * scale.value
+  const viewW = scrollRef.value?.clientWidth ?? 0
+  if (contentW <= viewW) {
+    panX.value = Math.max(panX.value, -minR * scale.value)
+    panX.value = Math.min(panX.value, Math.max(0, viewW - maxR * scale.value))
+  } else {
+    // 内容超视口：首 span 不左出，右侧交给容器横向滚动
+    panX.value = Math.max(panX.value, -minR * scale.value)
+  }
+}
 
 const boxRect = computed(() => {
   if (!boxDrag.value) return null
@@ -145,6 +156,7 @@ function onWheel(e: WheelEvent) {
   const newScale = Math.min(8, Math.max(0.2, scale.value * factor))
   panX.value = mouseX - (mouseX - panX.value) * (newScale / scale.value)
   scale.value = newScale
+  clampPan()
 }
 
 function onMouseDown(e: MouseEvent) {
@@ -166,6 +178,7 @@ function onDocMove(e: MouseEvent) {
   if (panDrag.value) {
     panX.value += e.clientX - panDrag.value.lastClientX
     panDrag.value.lastClientX = e.clientX
+    clampPan()
     return
   }
   if (boxDrag.value) {
@@ -233,10 +246,9 @@ function onKeydown(e: KeyboardEvent) {
     @dblclick="onDblClick"
     @keydown="onKeydown"
   >
-    <div v-if="projection === 'duration' && !hasAnyDuration" class="tj-note">无耗时数据，已回退为顺序视图</div>
+    <div v-if="durationOn && !hasAnyDuration" class="tj-note">无耗时数据，已回退为顺序视图</div>
     <div class="tj-hint">
       <button v-if="hasMore" class="tj-load-more" type="button" @click="emit('loadEarlier')">… 加载更早</button>
-      <span class="tj-hint-text">滚轮缩放 · 右键拖拽平移 · 左键拖拽框选 · 点击空白选最近 · 双击/Esc 复位</span>
     </div>
     <div class="tj-track" :style="{ width: `${totalWidth}px` }">
       <div v-for="lane in LANES" :key="lane.name" class="tj-lane">
@@ -276,7 +288,7 @@ function onKeydown(e: KeyboardEvent) {
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius);
   background: var(--app-content-bg);
-  padding: 8px;
+  padding: 4px 6px 6px;
   overflow: auto;
   flex-shrink: 0;
   outline: none;
@@ -288,7 +300,7 @@ function onKeydown(e: KeyboardEvent) {
   gap: 10px;
   font-size: 11px;
   color: var(--app-text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .tj-load-more {
   border: 1px solid var(--app-border);
@@ -305,7 +317,7 @@ function onKeydown(e: KeyboardEvent) {
 .tj-note {
   font-size: 12px;
   color: var(--app-text-muted);
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 .tj-track {
   position: relative;
@@ -313,24 +325,25 @@ function onKeydown(e: KeyboardEvent) {
 .tj-lane {
   display: flex;
   align-items: center;
-  height: 26px;
-  margin: 2px 0;
+  height: 18px;
+  margin: 1px 0;
 }
 .tj-lane-label {
-  width: 48px;
+  width: 44px;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--app-text-muted);
 }
 .tj-lane-body {
   position: relative;
   flex: 1;
   height: 100%;
+  z-index: 1;
 }
 .tj-span {
   position: absolute;
-  top: 3px;
-  bottom: 3px;
+  top: 2px;
+  bottom: 2px;
   border-radius: 3px;
   cursor: pointer;
   opacity: 0.85;
@@ -356,8 +369,9 @@ function onKeydown(e: KeyboardEvent) {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 1px;
-  background: var(--app-border);
+  width: 0;
+  border-left: 1px dashed var(--app-border);
+  z-index: 0;
   pointer-events: none;
 }
 .tj-box {
