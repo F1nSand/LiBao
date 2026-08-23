@@ -1,5 +1,23 @@
 # 进度账本 — 本地单机化改造（2026-08-22/23，L3，plan: agent-c-users-admin1-desktop-agent-md-cozy-walrus.md）
 
+## ⚡ 当前状态快照（2026-08-23 03:10，上下文压缩恢复点）
+
+**本地单机化改造已 100% 完成**（P0-P8 全落地，方案 §7 验收五项实测全过，git 双仓库 clean，356 passed + 2 skipped + ruff 全过）。
+
+- 后端 HEAD：`2a80908`（docs 账本存档），commit 链 82c74d8→68553f3；tags：v0-db-baseline / v1-file-core / v2-auth-folded / v3-kb-lancedb / v4-modules-cut
+- 前端 HEAD：`080cdaf`（交接板三纸条划 done）
+- 形态：单进程 FastAPI :8000 绑 127.0.0.1 + frontend_dist 静态托管（SPA fallback）；数据全落 .agent/ + kb/（LanceDB）+ uploads/ + data/workspaces/；无 Docker/PostgreSQL/Redis/alembic；固定 admin（app/storage/constants.py）；JsonFileSaver 断点（get_next_version 必须 `{n:032}.{rand:016}`）
+- 关键修复（勿回退）：JsonFileSaver 版本格式（多轮续跑短路）、BM25 IDF 恒正平滑（中文排序反转）、SPA fallback 捕获 starlette HTTPException、FileContext.flush async no-op
+- M8 热点实测已闭环（github_trending 工具真实回答 688 字）
+
+**未做/待用户**：Docker 旧数据卷清理（用户拍板）；主动记忆方向（记忆工具 vs Mem0，待议）；docs 9 篇全量重写（已追加 00/04/05 附录）；前端 progress.md/联调检查清单.md 的 Webhook 历史记录清理（可选）。
+
+**恢复指引**：继续任何工作先 `uv run pytest tests/`（356 绿）确认基线；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`（首启自动种子）；前端 build 产物复制 `../FrontEnd/dist` → `frontend_dist/`。
+
+---
+
+# 进度账本 — 本地单机化改造（2026-08-22/23，L3，plan: agent-c-users-admin1-desktop-agent-md-cozy-walrus.md）
+
 ## 会话收尾（2026-08-23 存档）
 
 **本地单机化改造全部完成**（P0-P8，commit 链 82c74d8 → 68553f3，tag v0-db-baseline → v4-modules-cut）：
