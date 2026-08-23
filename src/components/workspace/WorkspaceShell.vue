@@ -13,6 +13,7 @@ import type { Conversation, FileRef, Message } from '@/types'
 import { truncate } from '@/utils/format'
 import { useMediaQuery } from '@/composables/useMediaQuery'
 import { NARROW_LAYOUT_MQ } from '@/constants/layout'
+import ResourceManager from './ResourceManager.vue'
 import MessageList from '@/components/business/MessageList.vue'
 import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
 import AttachmentUploader from '@/components/business/AttachmentUploader.vue'
@@ -22,8 +23,9 @@ import WorkspaceConvList from './WorkspaceConvList.vue'
 import WorkspaceFileRefPicker from './WorkspaceFileRefPicker.vue'
 
 /**
- * 工作区对话面板（M7-B，docs/02 §4）：工作区作用域会话 + 独立 useChatStream 实例（与全局 /chat 互不干扰）+ 引用工作区文件。
- * 不复用全局 chat store / ConversationList（工作区会话按 workspace_id 隔离）；复用 MessageList/MessageBubble/轨迹/中断弹窗。
+ * 工作区内部页 shell（M7-B，docs/02 §4）：左列 = 文件资源管理器（上）+ 工作区会话（下）；
+ * 右侧 = 对话区（工具栏 + 消息 + composer + 轨迹）。会话状态/stream 全在此持有（不提升到详情页）。
+ * 单折叠模型：左列整体收起成 28px 竖条；窗口变窄自动收、变宽自动开、手动折叠不自动开。
  */
 const props = defineProps<{ workspaceId: string }>()
 
@@ -52,12 +54,13 @@ const conversations = ref<Conversation[]>([])
 const currentId = ref<string | null>(null)
 const messages = ref<Message[]>([])
 const convLoading = ref(false)
-/** 会话侧边栏折叠（窄条保留）：窗口变窄（≤960px）自动收起；变宽自动展开——用户手动点汉堡收起过的不自动展开 */
-const convUserCollapsed = ref(false)
+
+/** 左列（文件树 + 会话）整体折叠：窗口变窄自动收、变宽自动开；用户手动折叠不自动展开 */
+const leftUserCollapsed = ref(false)
 const isNarrow = useMediaQuery(NARROW_LAYOUT_MQ)
-const convCollapsed = computed(() => isNarrow.value || convUserCollapsed.value)
-function toggleConv(): void {
-  convUserCollapsed.value = !convUserCollapsed.value
+const leftCollapsed = computed(() => isNarrow.value || leftUserCollapsed.value)
+function toggleLeft(): void {
+  leftUserCollapsed.value = !leftUserCollapsed.value
 }
 
 const input = ref('')
@@ -185,74 +188,80 @@ async function onInterruptConfirm(approved: boolean) {
 </script>
 
 <template>
-  <div class="ws-chat">
-    <div class="ws-chat-toolbar">
-      <el-radio-group v-model="mode" size="small">
-        <el-radio-button value="chat">会话</el-radio-button>
-        <el-radio-button value="trajectory" :disabled="!currentId">轨迹</el-radio-button>
-      </el-radio-group>
-      <StatusTag :status="currentStream.status ?? ''" />
-    </div>
-
-    <div class="ws-chat-body">
+  <div class="ws-shell">
+    <!-- 左列：文件树（上） + 会话（下），整体一个折叠态 -->
+    <aside class="ws-left" :class="{ collapsed: leftCollapsed }">
+      <ResourceManager :workspace-id="workspaceId" :collapsed="leftCollapsed" @toggle="toggleLeft" />
       <WorkspaceConvList
         :items="conversations"
         :active-id="currentId"
         :loading="convLoading"
-        :collapsed="convCollapsed"
-        @toggle="toggleConv"
+        :collapsed="leftCollapsed"
+        @toggle="toggleLeft"
         @select="selectConversation"
         @create="createConv"
         @delete="deleteConv"
       />
+      <button v-show="leftCollapsed" class="ws-left-strip" type="button" title="展开侧边栏" @click="toggleLeft">
+        <el-icon :size="18"><Expand /></el-icon>
+      </button>
+    </aside>
 
-      <div class="ws-chat-main">
-        <MessageList v-show="mode === 'chat'" :messages="messages" :stream="currentStream" />
-
-        <div v-show="mode === 'chat'" class="composer">
-          <div class="composer-input">
-            <AttachmentUploader @add="onAttach" />
-            <el-input
-              v-model="input"
-              type="textarea"
-              :rows="1"
-              resize="none"
-              autosize
-              :maxlength="TOKEN_LIMIT"
-              placeholder="输入消息，Enter 发送 / Shift+Enter 换行"
-              :disabled="composerDisabled"
-              @keydown="onKeydown"
-            />
-            <el-button :icon="'DocumentAdd'" title="引用工作区文件" :disabled="composerDisabled" @click="refPickerVisible = true">
-              引用
-            </el-button>
-            <el-button v-if="currentStream.streaming" type="danger" :icon="'VideoPause'" @click="stop">
-              停止
-            </el-button>
-            <el-button v-else type="primary" :icon="'Promotion'" :disabled="composerDisabled || !input.trim()" @click="send">
-              发送
-            </el-button>
-          </div>
-          <div v-if="fileRefs.length" class="composer-refs">
-            <span v-for="r in fileRefs" :key="r.path" class="composer-ref-chip" :title="r.path">
-              <el-icon :size="12"><Document /></el-icon>
-              <span class="mono">{{ r.path }}</span>
-              <el-icon :size="12" class="chip-close" @click="removeFileRef(r.path)"><Close /></el-icon>
-            </span>
-          </div>
-          <div class="composer-foot">
-            <span class="char-count" :class="{ over: charCount > TOKEN_LIMIT }">{{ charCount }} / {{ TOKEN_LIMIT }}</span>
-          </div>
-        </div>
-
-        <TrajectoryPanel
-          v-if="mode === 'trajectory' && currentId"
-          :conversation-id="currentId"
-          :live="currentStream.streaming"
-          class="trajectory-panel"
-        />
-        <el-empty v-if="mode === 'trajectory' && !currentId" description="请先选择会话" :image-size="60" />
+    <!-- 右侧：对话区 -->
+    <div class="ws-main">
+      <div class="ws-toolbar">
+        <el-radio-group v-model="mode" size="small">
+          <el-radio-button value="chat">会话</el-radio-button>
+          <el-radio-button value="trajectory" :disabled="!currentId">轨迹</el-radio-button>
+        </el-radio-group>
+        <StatusTag :status="currentStream.status ?? ''" />
       </div>
+
+      <MessageList v-show="mode === 'chat'" :messages="messages" :stream="currentStream" />
+
+      <div v-show="mode === 'chat'" class="composer">
+        <div class="composer-input">
+          <AttachmentUploader @add="onAttach" />
+          <el-input
+            v-model="input"
+            type="textarea"
+            :rows="1"
+            resize="none"
+            autosize
+            :maxlength="TOKEN_LIMIT"
+            placeholder="输入消息，Enter 发送 / Shift+Enter 换行"
+            :disabled="composerDisabled"
+            @keydown="onKeydown"
+          />
+          <el-button :icon="'DocumentAdd'" title="引用工作区文件" :disabled="composerDisabled" @click="refPickerVisible = true">
+            引用
+          </el-button>
+          <el-button v-if="currentStream.streaming" type="danger" :icon="'VideoPause'" @click="stop">
+            停止
+          </el-button>
+          <el-button v-else type="primary" :icon="'Promotion'" :disabled="composerDisabled || !input.trim()" @click="send">
+            发送
+          </el-button>
+        </div>
+        <div v-if="fileRefs.length" class="composer-refs">
+          <span v-for="r in fileRefs" :key="r.path" class="composer-ref-chip" :title="r.path">
+            <el-icon :size="12"><Document /></el-icon>
+            <span class="mono">{{ r.path }}</span>
+            <el-icon :size="12" class="chip-close" @click="removeFileRef(r.path)"><Close /></el-icon>
+          </span>
+        </div>
+        <div class="composer-foot">
+          <span class="char-count" :class="{ over: charCount > TOKEN_LIMIT }">{{ charCount }} / {{ TOKEN_LIMIT }}</span>
+        </div>
+      </div>
+
+      <TrajectoryPanel
+        v-if="mode === 'trajectory' && currentId"
+        :conversation-id="currentId"
+        :live="currentStream.streaming"
+        class="trajectory-panel"
+      />
+      <el-empty v-if="mode === 'trajectory' && !currentId" description="请先选择会话" :image-size="60" />
     </div>
 
     <InterruptConfirmDialog
@@ -269,13 +278,56 @@ async function onInterruptConfirm(approved: boolean) {
 </template>
 
 <style scoped>
-.ws-chat {
+.ws-shell {
   display: flex;
-  flex-direction: column;
   height: 100%;
   min-height: 0;
 }
-.ws-chat-toolbar {
+.ws-left {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--app-border);
+  background: var(--app-content-bg);
+  transition: width 0.2s ease;
+  overflow: hidden;
+}
+.ws-left.collapsed {
+  width: 28px;
+}
+.ws-left :deep(.rm-root) {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.ws-left :deep(.ws-conv-list) {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.ws-left-strip {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--app-text-muted);
+}
+.ws-left-strip:hover {
+  color: var(--app-primary);
+  background: var(--app-bg);
+}
+.ws-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ws-toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -283,17 +335,6 @@ async function onInterruptConfirm(approved: boolean) {
   background: var(--app-content-bg);
   border-bottom: 1px solid var(--app-border);
   flex-shrink: 0;
-}
-.ws-chat-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-.ws-chat-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
 }
 .trajectory-panel {
   flex: 1;

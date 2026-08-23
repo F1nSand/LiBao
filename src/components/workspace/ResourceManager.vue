@@ -13,8 +13,6 @@ import {
 } from '@/api/workspace'
 import { isNotImplementedError } from '@/utils/http-envelope'
 import { useTaskPoll } from '@/composables/useTaskPoll'
-import { useMediaQuery } from '@/composables/useMediaQuery'
-import { NARROW_LAYOUT_MQ } from '@/constants/layout'
 import { collectLoadedPaths, refreshExpandedTree, signatureOf } from '@/utils/workspace-tree'
 import type { WorkspaceFile } from '@/types'
 
@@ -23,7 +21,8 @@ import type { WorkspaceFile } from '@/types'
  * 增强（2026-08-21）：折叠（窄条保留）+ 轮询同步（签名对比防闪烁）+ 打开本地文件夹 + 行尾「三个点」菜单
  * （重命名/删除；文件夹额外：新建文件/新建文件夹）+ 顶部新建文件/文件夹 + 新建文件默认 .txt。
  */
-const props = defineProps<{ workspaceId: string }>()
+const props = defineProps<{ workspaceId: string; collapsed: boolean }>()
+const emit = defineEmits<{ toggle: [] }>()
 
 const treeRef = ref()
 const previewVisible = ref(false)
@@ -32,12 +31,7 @@ const previewContent = ref('')
 const previewDirty = ref(false)
 const previewFocused = ref(false)
 
-/** 折叠（窄条保留，VS Code 风格）：折叠成 28px 竖条，暂停文件树轮询。
- * 窗口变窄（≤960px）自动收起；变宽自动展开——用户手动点汉堡收起过的不自动展开。 */
-const userCollapsed = ref(false)
-const isNarrow = useMediaQuery(NARROW_LAYOUT_MQ)
-const collapsed = computed(() => isNarrow.value || userCollapsed.value)
-/** 本地根路径（打开文件夹按钮 title + 降级复制用） */
+/** 折叠由 WorkspaceShell 持有（左列整体），此处只响应 props.collapsed 隐藏内容 + Fold 触发 toggle（受控组件） */
 const rootPath = ref<string | undefined>()
 
 /** 新建文件/文件夹/重命名 弹窗 */
@@ -91,7 +85,7 @@ async function refreshAll() {
 const FAST = import.meta.env.VITE_MOCK_FAST === '1'
 useTaskPoll(refreshAll, {
   intervalMs: FAST ? 500 : 3000,
-  enabled: computed(() => !collapsed.value),
+  enabled: computed(() => !props.collapsed),
 })
 
 async function loadNode(node: { level: number; data?: WorkspaceFile }, resolve: (data: WorkspaceFile[]) => void) {
@@ -266,10 +260,10 @@ async function onDelete(data: WorkspaceFile) {
 </script>
 
 <template>
-  <div class="rm-root" :class="{ collapsed }">
+  <div class="rm-root">
     <div v-show="!collapsed" class="rm-head">
       <div class="rm-head-left">
-        <el-button text class="rm-toggle" title="折叠文件面板" :icon="'Fold'" @click="userCollapsed = true" />
+        <el-button text class="rm-toggle" title="折叠侧边栏" :icon="'Fold'" @click="emit('toggle')" />
         <span class="rm-title">文件</span>
       </div>
       <div class="rm-head-right">
@@ -320,10 +314,6 @@ async function onDelete(data: WorkspaceFile) {
         </template>
       </el-tree>
     </div>
-
-    <button v-show="collapsed" class="rm-strip" type="button" title="展开文件面板" @click="userCollapsed = false">
-      <el-icon :size="18"><Expand /></el-icon>
-    </button>
 
     <!-- 文件预览/编辑 -->
     <el-dialog :model-value="previewVisible" :title="`预览 / 编辑：${previewPath}`" width="560px" @close="previewVisible = false; previewDirty = false">
@@ -389,16 +379,11 @@ async function onDelete(data: WorkspaceFile) {
 
 <style scoped>
 .rm-root {
-  width: 260px;
-  transition: width 0.2s ease;
+  width: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
-}
-.rm-root.collapsed {
-  width: 28px;
 }
 .rm-head {
   display: flex;
@@ -432,21 +417,6 @@ async function onDelete(data: WorkspaceFile) {
   min-height: 0;
   overflow-y: auto;
   padding: 0 8px 12px;
-}
-.rm-strip {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  color: var(--app-text-muted);
-}
-.rm-strip:hover {
-  color: var(--app-primary);
-  background: var(--app-bg);
 }
 .rm-node {
   display: inline-flex;

@@ -62,25 +62,28 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
     await expect(page.locator('.ws-conv-item')).not.toHaveCount(0)
   })
 
-  test('详情页：侧边栏折叠/展开（窄条保留）', async ({ page }) => {
+  test('详情页：侧边栏折叠/展开（左列整体收起成窄条）', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/workspace')
     await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
     await expect(page).toHaveURL(/\/workspace\/ws_001/)
 
-    // 文件资源管理器：点头部汉堡折叠成 28px 窄条，树隐藏；点窄条展开恢复
-    await page.locator('.rm-toggle').click()
-    await expect(page.locator('.rm-root')).toHaveCSS('width', '28px')
-    await expect(page.locator('.rm-tree-wrap')).toBeHidden()
-    await page.locator('.rm-strip').click()
-    await expect(page.locator('.rm-root')).toHaveCSS('width', '260px')
+    // 默认展开：左列 260px，文件树 + 会话可见
+    await expect(page.locator('.ws-left')).toHaveCSS('width', '260px')
     await expect(page.locator('.rm-tree-wrap')).toBeVisible()
+    await expect(page.locator('.ws-conv-items')).toBeVisible()
 
-    // 会话侧边栏：折叠成 28px，展开恢复 172px
-    await page.locator('.ws-conv-toggle').click()
-    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '28px')
-    await page.locator('.ws-conv-strip').click()
-    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '172px')
+    // 点头部汉堡（文件树 / 会话任一个）→ 左列整体收起成 28px 窄条，树与会话隐藏
+    await page.locator('.rm-toggle').click()
+    await expect(page.locator('.ws-left')).toHaveCSS('width', '28px')
+    await expect(page.locator('.rm-tree-wrap')).toBeHidden()
+    await expect(page.locator('.ws-conv-items')).toBeHidden()
+
+    // 点窄条展开恢复
+    await page.locator('.ws-left-strip').click()
+    await expect(page.locator('.ws-left')).toHaveCSS('width', '260px')
+    await expect(page.locator('.rm-tree-wrap')).toBeVisible()
+    await expect(page.locator('.ws-conv-items')).toBeVisible()
   })
 
   test('详情页：侧边栏窗口变窄自动收起、变宽自动展开（手动折叠不自动展开）', async ({ page }) => {
@@ -91,27 +94,22 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
 
     // 宽视口（>960）默认展开
     await page.setViewportSize({ width: 1280, height: 720 })
-    await expect(page.locator('.rm-root')).toHaveCSS('width', '260px')
-    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '172px')
+    await expect(page.locator('.ws-left')).toHaveCSS('width', '260px')
 
-    // 变窄（≤960）→ 两侧栏自动收起成 28px 窄条
+    // 变窄（≤960）→ 左列自动收起成 28px 窄条
     await page.setViewportSize({ width: 800, height: 720 })
-    await expect(page.locator('.rm-root')).toHaveCSS('width', '28px')
-    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '28px')
+    await expect(page.locator('.ws-left')).toHaveCSS('width', '28px')
 
     // 变宽 → 自动展开
     await page.setViewportSize({ width: 1280, height: 720 })
-    await expect(page.locator('.rm-root')).toHaveCSS('width', '260px')
-    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '172px')
+    await expect(page.locator('.ws-left')).toHaveCSS('width', '260px')
 
     // 手动折叠（汉堡）后 → 再变窄/变宽都不自动展开
     await page.locator('.rm-toggle').click()
-    await page.locator('.ws-conv-toggle').click()
     await page.setViewportSize({ width: 800, height: 720 })
-    await expect(page.locator('.rm-root')).toHaveCSS('width', '28px')
+    await expect(page.locator('.ws-left')).toHaveCSS('width', '28px')
     await page.setViewportSize({ width: 1280, height: 720 })
-    await expect(page.locator('.rm-root')).toHaveCSS('width', '28px')
-    await expect(page.locator('.ws-conv-list')).toHaveCSS('width', '28px')
+    await expect(page.locator('.ws-left')).toHaveCSS('width', '28px')
   })
 
   test('详情页：文件树轮询捕获外部更新（动态显示）', async ({ page }) => {
