@@ -1,13 +1,12 @@
-import { nextTick } from 'vue'
+import type { WorkspaceFile } from '@/types'
 
 /**
- * el-tree lazy 保展开刷新（工作区文件树轮询专用，docs/02 §4 资源管理器「动态显示」）。
+ * el-tree lazy 树外科逐层修补（工作区文件树轮询专用，docs/02 §4 资源管理器「动态显示」）。
  *
- * 背景：el-tree 实例**没有 reload() 方法**（`treeRef.reload()` 是静默 no-op bug）；而
- * `Node.loadData()` 仅在 `!loaded` 时真正拉取（node.mjs），且 reload 父节点会重建子 Node
- * （insertChild 每次 new Node）、`expanded` 重置为 false。故「刷新已展开目录并保持展开」=
- * 快照展开路径 → 重载根 → 按快照顺序（父先子后）逐个 `expand(cb)` 补展开
- * （`expand` 对未加载节点会自动 loadData 并在完成后回调，天然提供顺序化钩子）。
+ * 背景：旧实现「快照展开路径 → 重载根 → 逐级补展开」会整树重建（所有顶层 Node 对象替换、
+ * expanded 归 false），任何一层变化都导致已展开目录先收起再逐层展开（闪烁）。现改为**只修补
+ * 变化层**：el-tree Node 提供 `insertChild/removeChild`（node.d.ts 公共 API），按最新 children
+ * 列表增删改，未变化子节点（DOM/展开态/loaded）原样保留。
  *
  * 只依赖 el-tree store/Node 的最小接口，便于单测（可传假树）。
  */
@@ -26,54 +25,38 @@ export interface TreeNodeLike {
   loading: boolean
   expanded: boolean
   isLeaf?: boolean
+  /** 节点数据（reactive 深代理：就地 Object.assign 即触发行渲染） */
+  data?: WorkspaceFile
+  childNodes?: TreeNodeLike[]
   loadData?: (cb?: () => void) => void
-  expand?: (cb?: () => void) => void
   eachNode?: (cb: (node: TreeNodeLike) => void) => void
+  /** 插入子节点。必须传 batch=true：否则内部 getChildren(true) 会给 node.data 塞 children 数组（副作用，触发 tree-node 的 data.children watch） */
+  insertChild?: (child: { data: WorkspaceFile } | TreeNodeLike, index?: number, batch?: boolean) => void
+  removeChild?: (child: TreeNodeLike) => void
 }
 
 export interface ElTreeLike {
   store: TreeStoreLike
-  /** 防重入标记（挂在树对象上而非模块级，避免多实例互相干扰） */
-  __refreshing?: boolean
-}
-
-/** 快照当前已展开的目录路径（eachNode 遍历，父先子后；排除 level 0 根节点） */
-export function snapshotExpandedPaths(tree: ElTreeLike): string[] {
-  const paths: string[] = []
-  tree.store.root.eachNode?.((node) => {
-    if (node.level > 0 && node.loaded && node.expanded && node.key != null) paths.push(node.key)
-  })
-  return paths
-}
-
-/** 重载单个节点：置 loaded=false 后 loadData（拉取完成后 resolve）。调用方须保证该节点非 loading 中。 */
-export function reloadNode(node: TreeNodeLike): Promise<void> {
-  node.loaded = false
-  return new Promise<void>((resolve) => {
-    node.loadData?.(() => resolve())
-  })
 }
 
 /**
- * 刷新文件树并保持已展开目录展开。
- * 防重入：刷新进行中重复调用直接返回 false（el-tree 并发 loadData 会静默丢回调导致展开卡住）。
- * 返回是否实际执行了刷新。
+ * 单层外科修补：按最新 children 列表对已加载节点做 diff——
+ * ① 删：旧 childNodes 中 path 不在新列表的 → removeChild（deregister 递归清理子树）；
+ * ② 改：同 path 但数据变化 → Object.assign 就地更新（节点身份保留，不重建）；
+ * ③ 增：缺失项按最终下标升序 insertChild（先删后插 + 升序 splice 保证最终顺序正确）。
+ * 未变化子节点完全不触碰 → 其 DOM/展开态/loaded 保留，杜绝整树重建闪烁。
  */
-export async function refreshExpandedTree(tree: ElTreeLike): Promise<boolean> {
-  if (tree.__refreshing) return false
-  tree.__refreshing = true
-  try {
-    const paths = snapshotExpandedPaths(tree)
-    await reloadNode(tree.store.root)
-    await nextTick()
-    for (const p of paths) {
-      const node = tree.store.getNode(p)
-      if (!node || node.expanded) continue
-      await new Promise<void>((resolve) => node.expand?.(() => resolve()))
-    }
-    return true
-  } finally {
-    tree.__refreshing = false
+export function patchLayerChildren(node: TreeNodeLike, files: WorkspaceFile[]): void {
+  const old = [...(node.childNodes ?? [])]
+  const kept = new Map(old.map((c) => [c.data?.path, c]))
+  for (const c of old) {
+    if (c.data && !files.some((f) => f.path === c.data!.path)) node.removeChild?.(c)
+  }
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i]
+    const ex = kept.get(f.path)
+    if (ex && ex.data) Object.assign(ex.data, f)
+    else node.insertChild?.({ data: f }, i, true)
   }
 }
 

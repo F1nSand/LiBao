@@ -13,7 +13,7 @@ import {
 } from '@/api/workspace'
 import { isNotImplementedError } from '@/utils/http-envelope'
 import { useTaskPoll } from '@/composables/useTaskPoll'
-import { collectLoadedPaths, preloadVisibleFolders, refreshExpandedTree, signatureOf } from '@/utils/workspace-tree'
+import { collectLoadedPaths, patchLayerChildren, preloadVisibleFolders, signatureOf } from '@/utils/workspace-tree'
 import type { WorkspaceFile } from '@/types'
 
 /**
@@ -57,21 +57,17 @@ let cacheInitialized = false
 async function refreshAll() {
   const tree = treeRef.value
   if (!tree) return
-  let changed = false
+  const changedLayers: string[] = []
   for (const path of collectLoadedPaths(tree)) {
     const files = await listWorkspaceFiles(props.workspaceId, path).catch(() => null)
     if (!files) continue
     const sig = signatureOf(files)
-    if (!cacheInitialized) layerSignatures.set(path, sig)
-    else if (layerSignatures.has(path) && layerSignatures.get(path) !== sig) {
-      layerSignatures.set(path, sig)
-      changed = true
-    } else if (!layerSignatures.has(path)) {
-      layerSignatures.set(path, sig)
-    }
+    if (!cacheInitialized || !layerSignatures.has(path)) layerSignatures.set(path, sig)
+    else if (layerSignatures.get(path) !== sig) changedLayers.push(path)
   }
   cacheInitialized = true
-  if (changed) await refreshExpandedTree(tree)
+  // 逐层外科修补：只刷新变化层（未变化目录的 DOM/展开态/loaded 保留，杜绝整树重建闪烁）
+  for (const path of changedLayers) await refreshLayer(path)
   if (previewVisible.value && !previewDirty.value && !previewFocused.value && previewPath.value) {
     try {
       const res = await readWorkspaceFile(props.workspaceId, previewPath.value)
@@ -82,6 +78,20 @@ async function refreshAll() {
   }
   // 预加载可见文件夹子节点（不展开）——让空/有内容文件夹图标准确
   preloadVisibleFolders(tree)
+}
+
+/** 单层外科修补：拉取该层最新 children 后 patch（node 缺失/加载中跳过且不更新签名，下轮重查） */
+async function refreshLayer(path: string) {
+  const tree = treeRef.value
+  if (!tree) return
+  const node = path === '' ? tree.store.root : tree.store.getNode(path)
+  // 根层由 store 初始化直建子节点（不经 loadData，loaded 恒 false）——只查 loading；非根懒加载节点才校验 loaded
+  if (!node || node.loading) return
+  if (path !== '' && !node.loaded) return
+  const files = await listWorkspaceFiles(props.workspaceId, path).catch(() => null)
+  if (!files) return
+  patchLayerChildren(node, files)
+  layerSignatures.set(path, signatureOf(files))
 }
 
 const FAST = import.meta.env.VITE_MOCK_FAST === '1'
@@ -180,7 +190,7 @@ async function createFile() {
   const path = newFileDir.value ? `${newFileDir.value}/${name}` : name
   await writeWorkspaceFile(props.workspaceId, { path, content: newFileForm.content })
   newFileVisible.value = false
-  await refreshExpandedTree(treeRef.value)
+  await refreshLayer(newFileDir.value)
   ElMessage.success('已创建')
 }
 
@@ -200,7 +210,7 @@ async function createDir() {
   try {
     await createWorkspaceDir(props.workspaceId, path)
     newDirVisible.value = false
-    await refreshExpandedTree(treeRef.value)
+    await refreshLayer(newDirTarget.value)
     ElMessage.success('已创建文件夹')
   } catch (e) {
     if (isNotImplementedError(e)) {
@@ -233,7 +243,7 @@ async function renameFile() {
   try {
     await renameWorkspaceFile(props.workspaceId, { old_path: renameForm.oldPath, new_path: newPath })
     renameVisible.value = false
-    await refreshExpandedTree(treeRef.value)
+    await refreshLayer(parentOf(renameForm.oldPath))
     ElMessage.success('已重命名')
   } catch (e) {
     if (isNotImplementedError(e)) {

@@ -112,16 +112,62 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
     await expect(page.locator('.ws-left')).toHaveCSS('width', '28px')
   })
 
-  test('详情页：文件树轮询捕获外部更新（动态显示）', async ({ page }) => {
+  test('详情页：文件树轮询捕获外部更新（动态显示，且未变化目录不重建不闪烁）', async ({ page, request }) => {
+    // 放大刷新窗口：files 请求延迟 150ms——旧实现整树重建时 docs 收起 + loading 可被采样命中
+    await page.route('**/workspaces/*/files*', async (route) => {
+      await new Promise((r) => setTimeout(r, 150))
+      await route.continue()
+    })
+
     await gotoChat(page)
     await page.goto('/workspace')
     await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
     await expect(page).toHaveURL(/\/workspace\/ws_001/)
 
-    // mock 注入「外部注入.md」（fast 模式 ~300ms 注入 + 500ms 轮询），无需刷新自动出现
-    await expect(
-      page.locator('.rm-tree-wrap .el-tree-node__content', { hasText: '外部注入.md' }),
-    ).toBeVisible({ timeout: 5000 })
+    // 展开 docs（其子树是「不被重建」的观察对象）
+    const tree = page.locator('.rm-tree-wrap')
+    await tree.locator('.el-tree-node__content', { hasText: 'docs' }).locator('.el-tree-node__expand-icon').click()
+    await expect(tree.locator('.el-tree-node__content', { hasText: '入门指南.md' })).toBeVisible()
+
+    // 采样器：每 30ms 检查 docs 子树是否被隐藏（v-show display:none）/ loading 图标出现
+    await page.evaluate(() => {
+      ;(window as unknown as Record<string, unknown>).__treeFlash = { hidden: 0, loading: 0 }
+      const started = Date.now()
+      const timer = setInterval(() => {
+        if (Date.now() - started > 8000) {
+          clearInterval(timer)
+          return
+        }
+        const nodes = [...document.querySelectorAll('.rm-tree-wrap .el-tree-node')]
+        const docs = nodes.find((n) => n.querySelector('.el-tree-node__content .rm-node-name')?.textContent === 'docs')
+        if (!docs) return
+        const wrapper = docs.querySelector(':scope > .el-tree-node__children') as HTMLElement | null
+        const flash = (window as unknown as Record<string, unknown>).__treeFlash as { hidden: number; loading: number }
+        if (wrapper && wrapper.style.display === 'none') flash.hidden++
+        if (docs.querySelector('.el-tree-node__loading-icon')) flash.loading++
+      }, 30)
+    })
+
+    // 等首个轮询完成签名缓存初始化（更早落地的外部变化会被并入初始签名，之后不再触发）再写入
+    await page.waitForTimeout(1200)
+
+    // 外部写入新文件 → 轮询检测根层签名变化 → 外科修补（mock 定时注入已被前置用例触发过，用 API 写保证时序可控）
+    const resp = await request.post('/api/v1/workspaces/ws_001/files', {
+      data: { path: 'e2e注入.md', content: '# e2e 注入\n' },
+    })
+    expect(resp.ok()).toBeTruthy()
+    await expect(tree.locator('.el-tree-node__content', { hasText: 'e2e注入.md' })).toBeVisible({ timeout: 5000 })
+
+    // 刷新期间 docs 子树从未收起、无 loading（未变化目录未被重建 = 不闪烁）
+    await page.waitForTimeout(300)
+    const flash = await page.evaluate(
+      () => (window as unknown as Record<string, unknown>).__treeFlash as { hidden: number; loading: number },
+    )
+    expect(flash.hidden).toBe(0)
+    expect(flash.loading).toBe(0)
+
+    // 已展开目录保持展开（子项仍在，无需重新点击）
+    await expect(tree.locator('.el-tree-node__content', { hasText: '入门指南.md' })).toBeVisible()
   })
 
   test('详情页：打开本地文件夹按钮（mock 成功路径）', async ({ page }) => {
