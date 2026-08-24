@@ -44,7 +44,11 @@ def _text(content: Any) -> str:
 async def _run_subagent(
     spec: SubagentSpec, task: str, context: str | None, ctx: dict[str, Any] | None
 ) -> dict[str, Any]:
-    """嵌套 LLM 循环：子 agent 独立 prompt+tools，工具结果回填，直至无 tool_calls 或达 max_steps。"""
+    """嵌套 LLM 循环：子 agent 独立 prompt+tools，工具结果回填，直至无 tool_calls 或达 max_steps。
+
+    收口（2026-08-24）：max_steps 耗尽仍要工具 → 追加强制收口轮（直接给结论）；
+    仍不收敛 → 回退历史最近有文本的 AIMessage；全无 → 兜底可行动文案（绝不返回空 output）。
+    """
     model_builder = (ctx or {}).get("model_builder") or LLMService.build_model
     model = model_builder(spec.model)
     acis = subagent_acis(spec)
@@ -75,9 +79,29 @@ async def _run_subagent(
             tool_msgs.append(ToolMessage(content=content, tool_call_id=tc.get("id", "")))
         messages.append(resp)
         messages.extend(tool_msgs)
+        # 收口轮：预算耗尽仍要工具 → 强制要求直接给结论（不再执行工具）
+        if step == spec.max_steps:
+            forced = await bound.ainvoke(
+                messages + [HumanMessage(content="已到步数上限：请直接给出最终结论（≤300 字），不要再调用工具。")]
+            )
+            resp = forced
+            break
 
-    output = _text(resp.content) if resp is not None else "(无输出)"
-    return {"output": output, "subagent": spec.name, "steps": steps, "tool_calls": tool_calls_total}
+    output = _text(resp.content) if resp is not None else ""
+    if not output.strip():
+        # 回退历史最近有文本的 AIMessage
+        for m in reversed(messages):
+            if getattr(m, "type", "") == "ai":
+                t = _text(m.content)
+                if t.strip():
+                    output = t
+                    break
+    if not output.strip():
+        output = "（subagent 未在步数内给出结论，主 agent 请自行总结或重试）"
+    result: dict[str, Any] = {"output": output, "subagent": spec.name, "steps": steps, "tool_calls": tool_calls_total}
+    if output.startswith("（subagent"):
+        result["note"] = "subagent 未产出有效结论——主 agent 可基于已有信息自行总结，或调整任务描述后重试一次。"
+    return result
 
 
 async def dispatch_subagent_handler(subagent: str, task: str, context: str | None = None) -> dict[str, Any]:

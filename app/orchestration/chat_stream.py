@@ -214,7 +214,11 @@ async def chat_stream_events(
         await db.commit()
         # 主动记忆：流结束 spawn 后台提取分支（独立 LLM 推理，不阻塞 SSE；resume 续流不触发防重复评估）
         _spawn_memory_extract(final_state, user, trace_id, conversation.id, workspace)
-        return _done_payload(assistant_msg_id, fm.get("token_usage") or totals, serialize_message(final_row))
+        payload = _done_payload(assistant_msg_id, fm.get("token_usage") or totals, serialize_message(final_row))
+        # 收口兜底标记（2026-08-24）：步数守卫强制退出 → 前端可提示答复可能不完整
+        if (final_state.get("flags") or {}).get("max_steps_exceeded"):
+            payload["note"] = "已达步数上限，答复可能不完整"
+        return payload
 
     async for frame in stream_graph_events(
         graph=graph,

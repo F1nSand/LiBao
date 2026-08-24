@@ -491,6 +491,30 @@ def register_builtin_tools() -> None:
     )
     _register(
         ToolSpec(
+            id="tl_undo_file",
+            name="undo_file",
+            description=(
+                "撤销对工作区内文件的上一次修改：从自动备份中恢复（write_file/edit_file 写前自动备份到 "
+                ".agent/.undo/，最多保留 20 份）。改坏文件需要回滚时使用；恢复前也会备份当前内容（可再撤销）。"
+                "反例：不要用于删除文件（删除请谨慎用 bash rm）。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "相对工作区根的文件路径"}},
+                "required": ["path"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=True,
+            require_confirm=False,  # 可再撤销（恢复前也备份）
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=10000,
+            handler=file_ops.undo_file_handler,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
             id="tl_glob",
             name="glob",
             description=(

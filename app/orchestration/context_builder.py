@@ -53,8 +53,11 @@ def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = No
     return [s.aci() for s in always] + [s.aci() for s in sorted(chosen, key=lambda s: s.id)]
 
 
-def build_context(state: AgentState) -> list[BaseMessage]:
-    """组装进模型的完整消息列表：SystemMessage(静态) + 历史 + 记忆注入块 + 状态栏(尾部动态)。"""
+def build_context(state: AgentState, prompt_note: str | None = None) -> list[BaseMessage]:
+    """组装进模型的完整消息列表：SystemMessage(静态) + 历史 + 记忆注入块 + 状态栏(尾部动态)。
+
+    prompt_note：单轮临时提示（收口轮「已到步数上限」等），消息通道注入，不进 system_prompt（前缀缓存铁律）。
+    """
     agent = state.get("agent_config", {})
     system_prompt = agent.get("system_prompt", "")
 
@@ -82,5 +85,9 @@ def build_context(state: AgentState) -> list[BaseMessage]:
     status_bar = state.get("flags", {}).get("status_bar")
     if status_bar:
         history.append(SystemMessage(content=status_bar))
+
+    # 收口轮/单轮临时提示（2026-08-24，消息通道，不进 system_prompt）
+    if prompt_note:
+        history.append(SystemMessage(content=prompt_note))
 
     return [system] + history

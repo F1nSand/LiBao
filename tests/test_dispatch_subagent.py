@@ -167,3 +167,76 @@ async def test_handler_context_isolated(dispatch_ctx):
     assert msgs[1] == "human:审查这段代码"
     assert msgs[2] == "human:补充事实/上下文（来自主 Agent）：\n代码文件: src/a.py"
     assert len(msgs) == 3  # 无主 agent 历史泄漏
+
+
+# ---- M8.1 阶段 C：预算耗尽收口（2026-08-24）----
+
+_TOOL_RESP = AIMessage(
+    content="",
+    tool_calls=[{"name": "kb_search", "args": {"query": "X"}, "id": "c1", "type": "tool_call"}],
+)
+
+
+async def test_handler_budget_exhausted_forced_closeout(dispatch_ctx, monkeypatch):
+    """max_steps 耗尽仍要工具 → 强制收口轮拿到结论（不再返回空 output）。"""
+    register_builtin_tools()
+    install, events = dispatch_ctx
+    # 6 步工具调用 + 1 次强制收口（research max_steps=6）
+    fake = FakeChatModel([_TOOL_RESP] * 6 + [AIMessage(content="收口结论：综合评估完成。")])
+    install(fake)
+
+    async def fake_execute(spec, input):
+        return ToolResult(ok=True, output={"count": 1}, summary="检索到 1 条", duration_ms=10)
+
+    monkeypatch.setattr("app.tools.builtin.dispatch_subagent.executor.execute", fake_execute)
+
+    result = await dispatch_subagent_handler(subagent="research", task="检索 X")
+
+    assert result["output"] == "收口结论：综合评估完成。"
+    assert result["steps"] == 6
+    assert result["tool_calls"] == 6
+    assert "note" not in result
+
+
+async def test_handler_budget_exhausted_fallback_placeholder(dispatch_ctx, monkeypatch):
+    """强制收口轮仍不收敛（又要工具）→ 回退历史文本；历史全空 → 兜底文案 + note（绝不空 output）。"""
+    register_builtin_tools()
+    install, events = dispatch_ctx
+    # 6 步工具调用 + 强制收口轮仍返回工具调用（无文本）
+    fake = FakeChatModel([_TOOL_RESP] * 6 + [_TOOL_RESP])
+    install(fake)
+
+    async def fake_execute(spec, input):
+        return ToolResult(ok=True, output={"count": 1}, summary="检索到 1 条", duration_ms=10)
+
+    monkeypatch.setattr("app.tools.builtin.dispatch_subagent.executor.execute", fake_execute)
+
+    result = await dispatch_subagent_handler(subagent="research", task="检索 X")
+
+    assert result["output"].startswith("（subagent")
+    assert "主 agent 请自行总结或重试" in result["output"]
+    assert result["note"]
+    assert result["steps"] == 6 and result["tool_calls"] == 6
+
+
+async def test_handler_budget_exhausted_falls_back_to_last_text(dispatch_ctx, monkeypatch):
+    """强制收口轮无文本 → 回退历史最后一段 AI 文本（不是空串）。"""
+    register_builtin_tools()
+    install, events = dispatch_ctx
+    # 第 3 步「文本+工具」（有文本会继续循环）；6 步后强制收口轮仍返回工具调用（无文本）→ 回退
+    text_with_tools = AIMessage(
+        content="中间小结：已收集部分事实。",
+        tool_calls=[{"name": "kb_search", "args": {"query": "X"}, "id": "c2", "type": "tool_call"}],
+    )
+    fake = FakeChatModel([_TOOL_RESP] * 2 + [text_with_tools] + [_TOOL_RESP] * 3 + [_TOOL_RESP])
+    install(fake)
+
+    async def fake_execute(spec, input):
+        return ToolResult(ok=True, output={"count": 1}, summary="检索到 1 条", duration_ms=10)
+
+    monkeypatch.setattr("app.tools.builtin.dispatch_subagent.executor.execute", fake_execute)
+
+    result = await dispatch_subagent_handler(subagent="research", task="检索 X")
+
+    assert result["output"] == "中间小结：已收集部分事实。"
+    assert result["steps"] == 6

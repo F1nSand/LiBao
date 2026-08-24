@@ -38,8 +38,18 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
 
     model = _resolve_model(state, config).bind_tools(active_tools)
 
+    # 收口轮提示（2026-08-24）：接近/达到步数上限时消息通道告知 LLM 直接作答（不进 system_prompt）
+    flags = dict(state.get("flags", {}))
+    next_step = flags.get("steps", 0) + 1
+    max_steps = int(agent.get("max_steps", 50))
+    prompt_note = (
+        "已到步数上限：本轮请直接给出最终答复，不要再调用工具；如需继续操作请告知用户已到达步数限制。"
+        if next_step >= max_steps
+        else None
+    )
+
     start = time.perf_counter()
-    response = await model.ainvoke(build_context(state))
+    response = await model.ainvoke(build_context(state, prompt_note))
     duration_ms = int((time.perf_counter() - start) * 1000)
 
     # token 统计累计（totals 为 LastValue，读旧值再加）
@@ -52,8 +62,7 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
     cost = estimate_cost(usage, agent.get("model", ""))
     totals["cost"] = totals.get("cost", 0.0) + cost
 
-    flags = dict(state.get("flags", {}))
-    flags["steps"] = flags.get("steps", 0) + 1
+    flags["steps"] = next_step
 
     token_usage = dict(usage or {})
     token_usage["cost"] = cost

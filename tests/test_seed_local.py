@@ -58,3 +58,27 @@ async def test_ensure_seed_tools_upgrades_legacy_env():
     await ensure_seed_tools(store)
     assert len(await store.table("tool_definitions").list()) == 19
     assert len(agent2.tools) == 20
+
+
+async def test_ensure_seed_tools_upgrades_engineering_prompt():
+    """老 seed prompt（缺工程工作流引导，含旧尾部标记）→ ensure_seed_tools 升级为 AGENT_SYSTEM_PROMPT（幂等）。"""
+    from app.seed import AGENT_SYSTEM_PROMPT
+
+    store = get_store()
+    await seed_if_first_run(store)
+    agent = (await store.table("agents").list())[0]
+    # 模拟旧版 prompt：工程引导被移除，其余保持 seed 基线（含旧尾部标记）
+    agent.system_prompt = agent.system_prompt.replace("工程/代码任务工作流", "旧版无工程引导")
+    from app.storage.file.store import FileContext
+
+    await FileContext(store).commit()
+    assert "工程/代码任务工作流" not in agent.system_prompt
+
+    await ensure_seed_tools(store)
+    agent2 = (await store.table("agents").list())[0]
+    assert "工程/代码任务工作流" in agent2.system_prompt
+    assert agent2.system_prompt == AGENT_SYSTEM_PROMPT
+    # 幂等：再跑不重复改写
+    await ensure_seed_tools(store)
+    agent3 = (await store.table("agents").list())[0]
+    assert agent3.system_prompt == AGENT_SYSTEM_PROMPT

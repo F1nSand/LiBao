@@ -60,6 +60,11 @@ AGENT_SYSTEM_PROMPT = (
     "- 用户明确说「记一下/记住 XX」时用 remember_memory 存进记忆；"
     "对话中需要想起用户的偏好/项目决策时用 recall_memory 查记忆；"
     "用户要求忘记某条记忆时用 forget_memory。\n"
+    "- 工程/代码任务工作流（2026-08-24 升级）：先规划再动手，每步验证——写完文件用 read_file 回读、"
+    "命令执行后看 stdout/副作用、git 操作后 git status 确认，收尾总结。工具失败先读错误信息判断原因"
+    "（语法/环境/路径/权限），修正后重试，不要盲目重复同一命令；bash 报错可能是 WSL/cmd 兼容问题，"
+    "只读操作可用 read_file/glob 替代。改坏文件用 undo_file 回滚（write/edit 写前自动备份）；"
+    "工作区是 git 仓库时用 git status/diff 复核、git restore 回滚。\n"
     "工具结果回来后，用栗包的口吻自然呈现给用户，不要生硬复述结果。"
 )
 
@@ -481,10 +486,11 @@ async def ensure_seed_tools(store: FileStore) -> None:
         if missing:
             default_agent.tools = (default_agent.tools or []) + missing
             changed = True
-        # 旧版 seed prompt（含旧种子尾部标记但缺记忆工具提示）→ 升级为 AGENT_SYSTEM_PROMPT
+        # 旧版 seed prompt（含旧种子尾部标记但缺记忆工具提示 或 缺工程工作流引导）→ 升级为 AGENT_SYSTEM_PROMPT
         # （默认 agent 的 prompt 语义上是 seed 管理的基线；用户经 API 自定义的 prompt 不含旧标记，不覆盖）
-        if "remember_memory" not in (default_agent.system_prompt or "") and _OLD_SEED_PROMPT_MARKER in (
-            default_agent.system_prompt or ""
+        seed_prompt = default_agent.system_prompt or ""
+        if _OLD_SEED_PROMPT_MARKER in seed_prompt and (
+            "remember_memory" not in seed_prompt or "工程/代码任务工作流" not in seed_prompt
         ):
             default_agent.system_prompt = AGENT_SYSTEM_PROMPT
             await _sync_default_version_prompt(store, default_agent)

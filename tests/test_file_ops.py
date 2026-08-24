@@ -124,3 +124,143 @@ async def test_bash_multiline_python_c(tmp_path, monkeypatch):
         assert "AAA" in out["stdout"] and "BBB" in out["stdout"], out
     finally:
         set_tool_workspace_root(None)
+
+
+# ---- M8.1 阶段 A：bash 环境修复（2026-08-24）----
+
+
+def test_bash_executable_prefers_git_bash_over_wsl(monkeypatch):
+    """which 命中 System32\\bash.exe（WSL 中继）时必须排除——曾致工作区 bash 全挂。"""
+    file_ops._bash_executable.cache_clear()
+    monkeypatch.setattr(file_ops.shutil, "which", lambda _: r"C:\Windows\System32\bash.exe")
+    got = file_ops._bash_executable()
+    if got is None:  # 本机无 Git Bash（CI 环境）→ 跳过
+        pytest.skip("Git Bash 不可用")
+    assert "System32" not in got and "Program Files" in got
+
+
+def test_bash_executable_fallback_when_no_git_bash(monkeypatch, tmp_path):
+    file_ops._bash_executable.cache_clear()
+    monkeypatch.setattr(file_ops.shutil, "which", lambda _: None)
+    monkeypatch.setattr(file_ops, "_BASH_CANDIDATES", (str(tmp_path / "nonexistent.exe"),))
+    assert file_ops._bash_executable() is None
+
+
+def test_fast_review_rules():
+    assert file_ops._fast_review("ls -la") == "allow"
+    assert file_ops._fast_review("cat notes.md") == "allow"
+    assert file_ops._fast_review("git status") == "allow"
+    assert file_ops._fast_review("git diff HEAD") == "allow"
+    assert file_ops._fast_review("git push origin main") == "block"
+    assert file_ops._fast_review("rm -rf tmp") == "block"
+    assert file_ops._fast_review("printenv HOME") == "block"
+    assert file_ops._fast_review("git reset --hard") == "block"
+    assert file_ops._fast_review("echo hi && ls") is None  # 含元字符 → LLM 审查
+    assert file_ops._fast_review('python -c "print(1)"') is None  # 非只读 → LLM 审查
+    assert file_ops._fast_review("git checkout -- a.py") is None  # git 写操作 → LLM 审查
+
+
+def test_review_command_extracts_blocks_content(monkeypatch):
+    """DeepSeek v4-flash content blocks 列表 → message_text 提取（str() 会取到 repr）。"""
+
+    class _FakeModel:
+        async def ainvoke(self, _msgs):
+            class _Resp:
+                content = [{"type": "thinking", "text": "推理"}, "ALLOW 只读命令"]
+
+            return _Resp()
+
+    monkeypatch.setattr(file_ops.LLMService, "build_model", lambda _m: _FakeModel())
+    import asyncio
+
+    async def _run():
+        return await file_ops._review_command("ls -la")
+
+    r = asyncio.run(_run())
+    assert r["verdict"] == "allow"
+
+
+async def test_bash_wsl_error_hint(tmp_path, monkeypatch):
+    """非零退出 + stderr 含 WSL 错误 → 附 hint（杜绝「环境坏了」误判）。"""
+    set_tool_workspace_root(str(tmp_path))
+    try:
+        async def _allow(_cmd):
+            return {"verdict": "allow", "reason": ""}
+
+        monkeypatch.setattr(file_ops, "_review_command", _allow)
+
+        class _WslFail:
+            stdout = ""
+            stderr = "<3>WSL (9 - Relay) ERROR: execvpe(/bin/bash) failed: No such file or directory\n"
+            returncode = 1
+
+        async def _fake_run(_cmd, _workdir):
+            return _WslFail()
+
+        monkeypatch.setattr(file_ops, "_run_shell", _fake_run)
+        out = await file_ops.bash_handler("ls -la")
+        assert out["returncode"] == 1
+        assert "hint" in out and "WSL" in out["hint"]
+    finally:
+        set_tool_workspace_root(None)
+
+
+# ---- M8.1 阶段 D：回滚备份（2026-08-24）----
+
+
+async def test_write_backup_and_undo(tmp_path):
+    """write 覆盖旧版 → 自动备份 + note 提示；undo_file 恢复最近一份。"""
+    set_tool_workspace_root(str(tmp_path))
+    try:
+        await file_ops.write_file_handler("a.md", "v1")
+        out = await file_ops.write_file_handler("a.md", "v2")
+        assert "note" in out and "undo_file" in out["note"]  # 覆盖旧版 → 提示可撤销
+        undo_dir = tmp_path / ".agent" / ".undo"
+        assert len(list(undo_dir.glob("*.bak"))) == 1
+        r = await file_ops.undo_file_handler("a.md")
+        assert r["restored"] is True
+        content = await file_ops.read_file_handler("a.md")
+        assert content["content"] == "v1"
+        # 恢复本身也可逆（恢复前备份当前 v2）
+        await file_ops.undo_file_handler("a.md")
+        content2 = await file_ops.read_file_handler("a.md")
+        assert content2["content"] == "v2"
+    finally:
+        set_tool_workspace_root(None)
+
+
+async def test_edit_backup_and_undo(tmp_path):
+    set_tool_workspace_root(str(tmp_path))
+    try:
+        await file_ops.write_file_handler("b.md", "hello world")
+        await file_ops.edit_file_handler("b.md", "world", "there")
+        r = await file_ops.undo_file_handler("b.md")
+        assert r["restored"] is True
+        content = await file_ops.read_file_handler("b.md")
+        assert content["content"] == "hello world"
+    finally:
+        set_tool_workspace_root(None)
+
+
+async def test_undo_no_backup(tmp_path):
+    """新建文件无备份 → 明确错误（不静默）。"""
+    set_tool_workspace_root(str(tmp_path))
+    try:
+        await file_ops.write_file_handler("c.md", "v1")  # 新建不备份
+        r = await file_ops.undo_file_handler("c.md")
+        assert "error" in r and "没有可恢复的备份" in r["error"]
+    finally:
+        set_tool_workspace_root(None)
+
+
+async def test_undo_backup_cap(tmp_path):
+    """备份上限 _UNDO_KEEP_MAX：超限清最旧。"""
+    set_tool_workspace_root(str(tmp_path))
+    try:
+        await file_ops.write_file_handler("d.md", "v0")
+        for i in range(file_ops._UNDO_KEEP_MAX + 5):
+            await file_ops.write_file_handler("d.md", f"v{i + 1}")
+        undo_dir = tmp_path / ".agent" / ".undo"
+        assert len(list(undo_dir.glob("*.bak"))) <= file_ops._UNDO_KEEP_MAX
+    finally:
+        set_tool_workspace_root(None)

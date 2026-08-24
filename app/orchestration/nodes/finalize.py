@@ -43,12 +43,24 @@ async def finalize_node(state: AgentState, config: Optional[RunnableConfig] = No
     if claimed and not state.get("tool_results"):
         flags["verifier_warning"] = "模型声称调用工具但无对应执行结果"
 
+    # 收口兜底（2026-08-24）：步数守卫强制退出时末条可能是 ToolMessage（工具结果）——
+    # 不能当最终答复。回退最近有文本的 AIMessage；全无 → 占位 + max_steps_exceeded flag。
+    ai_texts = [
+        message_text(m.content)
+        for m in reversed(state.get("messages", []))
+        if getattr(m, "type", "") == "ai"
+    ]
+    content = next((t for t in ai_texts if t.strip()), "")
+    if not content:
+        content = "（已达步数上限，未生成最终答复）"
+        flags["max_steps_exceeded"] = True
+
     flags["status"] = "done"
     totals["steps"] = flags.get("steps", 0)
 
     final_message: dict[str, Any] = {
         "role": "assistant",
-        "content": message_text(last.content),  # 跳过 thinking 块，推理内容不入持久化消息
+        "content": content,
         "tool_calls": _assemble_tool_calls(state),
         "token_usage": totals,
     }

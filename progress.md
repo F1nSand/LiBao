@@ -1,3 +1,38 @@
+# 进度账本 — Agent 工程能力修复与升级（2026-08-24，L3，plan: docs/plans/2026-08-24-agent-engineering-fix-upgrade.md）
+
+## ⚡ 当前状态快照（2026-08-24 存档）
+
+**A/B/C/D 四阶段全部落地**（**424 passed + 2 skipped + ruff 干净**，+18 测试），用户事故场景真实复现通过。
+
+### 三个实证根因（会话日志定位，非猜测）
+
+1. **Bash「环境坏了」**：`shutil.which("bash")` 在 cmd/PowerShell PATH 命中 **`C:\Windows\System32\bash.exe`（WSL 中继）** → 每次 `execvpe(/bin/bash) failed`（会话 stderr 实锤）；`_BASH_CANDIDATES` 兜底因 which 有返回值永不触发。agent 连续失败 → 误判环境坏了 → 降级 glob/read_file **白白耗步数**。
+2. **「断了」/裸 JSON 收尾**：主 agent `max_steps=10`，bash 失败耗步后 **dispatch 恰为第 10 轮** → `after_tool` 步数守卫强制转 context_update → `finalize` 取 `messages[-1]`=ToolMessage（dispatch 结果 JSON）**当最终答复落库**。
+3. **subagent 空输出**：`_run_subagent` `max_steps=6` 耗尽无收口 → `{"output": "", ...}`，主 agent 无所适从。
+
+### 修复落地
+
+- **A Bash**（file_ops.py）：`_bash_executable` Git Bash 候选优先 + 排除 System32 WSL 中继；失败 stderr 附 `hint` 恢复指引（防「环境坏了」误判）；`_review_command` 改用 `message_text`（审查闸门修复，DeepSeek blocks 兼容）+ 失败降级快速通道；命令白/黑名单快速通道（只读免审查、危险硬拦）。
+- **B 轮次收口**（graph.py/finalize.py/agent_execute.py/context_builder.py/chat_stream.py）：`after_tool` 到顶 → **收口轮**（消息通道提示「已到步数上限请直接作答」，不进 system_prompt）；`after_agent` steps>max 禁新工具轮（防死循环）；`finalize` 兜底（末条 ToolMessage → 回退最近 AI 文本 / 占位 + `max_steps_exceeded` flag）；on_final 透出 note。
+- **C subagent 收口**（dispatch_subagent.py）：max_steps 耗尽追加强制收口轮 → 回退历史最近有文本 AIMessage → 兜底可行动文案 + note。
+- **D 工程能力+回滚**（seed.py/file_ops.py/builtin/__init__.py）：seed 提示词补工程工作流引导（规划→执行→验证→恢复，`ensure_seed_tools` 幂等升级老 prompt）；**write/edit 写前备份 `.agent/.undo/`（上限 20 份）+ 新工具 `tl_undo_file`**（恢复可逆）；git status/diff/restore 引导。
+
+### 验证
+
+- 单测 +18（A 5 / B 5 / C 3 / D 5）：424 passed + 2 skipped + ruff 干净。
+- **真实复现**：用户事故同一条命令 `ls -la && find ...` → returncode 0 + 真实 stdout（无 WSL 错误）；undo 全链（写→覆盖→恢复 v1）通过。
+- 既有 graph 系测试无回归（19 项，含 max_steps=5 场景）。
+
+### ⚠️ 遗留
+
+- **本次改动未提交**（13 文件：编排层 5 + 工具层 3 + seed + 测试 4），存档时提交。
+- `docs/plans/2026-08-24-agent-engineering-fix-upgrade.md` 计划文档保留。
+- :8000 旧代码服务器（用户并行启动）需重启才带全部修复。
+
+**恢复指引**：全量 `uv run pytest tests/`（424 绿）；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`。
+
+---
+
 # 进度账本 — 字段改名 + 真实后端 e2e + docs 同步（2026-08-24，L2+L3）
 
 ## ⚡ 当前状态快照（2026-08-24 收尾存档）
