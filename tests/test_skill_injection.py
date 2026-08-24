@@ -31,11 +31,11 @@ def test_build_initial_state_injects_skills():
         name="通用助手", model="m", system_prompt="base-prompt", tools=[], max_steps=10, org_id=uuid.uuid4()
     )
     st = build_initial_state(agent, "hi", enabled_skills=[{"name": "s1", "description": "d1"}])
-    assert "可用 Skills" in st["agent_config"]["system_prompt"]
-    assert "s1" in st["agent_config"]["system_prompt"]
-    # 无 skills 零回归：system_prompt 不含路由段
+    assert "可用 Skills" in st["project_overlay"]
+    assert "s1" in st["project_overlay"]
+    # 无 skills 零回归：project_overlay 为空，system_prompt 恒定
     st2 = build_initial_state(agent, "hi")
-    assert "可用 Skills" not in st2["agent_config"]["system_prompt"]
+    assert st2["project_overlay"] is None
     assert st2["agent_config"]["system_prompt"] == "base-prompt"
 
 
@@ -49,7 +49,8 @@ def test_build_initial_state_with_workspace():
     ac = st["agent_config"]
     assert ac["workspace_id"] == "ws-1"
     assert ac["workspace_root"] == "/tmp/ws1"
-    assert "项目助手" in ac["system_prompt"]
+    assert ac["system_prompt"] == "base"  # system_prompt 恒定；工作区 fragment 走消息通道
+    assert "项目助手" in st["project_overlay"]
     for tid in ("tl_read_file", "tl_write_file", "tl_edit_file", "tl_glob", "tl_grep", "tl_bash"):
         assert tid in ac["tools"]
     # 无工作区 → 无 workspace_root / 文件工具

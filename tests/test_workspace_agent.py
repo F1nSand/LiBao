@@ -87,7 +87,8 @@ def _agent():
 
 
 def test_build_initial_state_injects_dot_agent():
-    """P3 铁律：项目记忆/知识只进 project_memory_index（消息通道），绝不拼 system_prompt。"""
+    """前缀缓存铁律：system_prompt 恒为 agent.system_prompt；工作区叠加走消息通道 project_overlay。
+    项目记忆/知识只进 project_memory_index（消息通道），绝不拼 system_prompt。"""
     ws = {
         "id": "ws-1",
         "root_path": "/tmp/ws1",
@@ -99,11 +100,18 @@ def test_build_initial_state_injects_dot_agent():
     }
     state = build_initial_state(_agent(), "hi", workspace=ws)
     sp = state["agent_config"]["system_prompt"]
-    assert "[项目约定]" in sp and "项目约定内容" in sp  # 项目约定（规则）保留在 system_prompt
-    assert "项目助手" in sp
-    # 铁律断言：system_prompt 不含任何记忆/知识内容与文件名
-    assert "[项目记忆]" not in sp and "事实 A" not in sp and "facts" not in sp
-    assert "[项目知识]" not in sp and "知识 B" not in sp and "domain" not in sp
+    # system_prompt 逐字节恒定（跨会话前缀缓存共享的前提）
+    assert sp == "base"
+    assert "[项目约定]" not in sp and "项目约定内容" not in sp
+    assert "项目助手" not in sp and "可用 Skills" not in sp
+    # 工作区/项目级叠加走消息通道 project_overlay
+    ov = state["project_overlay"]
+    assert "[工作区]" in ov and "项目助手" in ov
+    assert "[项目约定]" in ov and "项目约定内容" in ov
+    assert "s1: d1" in ov
+    # 铁律断言：project_overlay 不含任何记忆/知识内容与文件名
+    assert "[项目记忆]" not in ov and "事实 A" not in ov and "facts" not in ov
+    assert "[项目知识]" not in ov and "知识 B" not in ov and "domain" not in ov
     # 索引走 state 字段（context_builder 渲染为尾部 SystemMessage）
     idx = state["project_memory_index"]
     assert "[项目记忆]" in idx and "事实: 事实 A" in idx
@@ -131,9 +139,26 @@ def test_build_context_renders_project_index_after_history():
 
 def test_build_initial_state_project_skill_overrides_global():
     ws = {"id": "ws-1", "root_path": "/tmp/ws1", "skills": [{"name": "s1", "description": "项目级描述"}]}
-    sp = build_initial_state(
+    ov = build_initial_state(
         _agent(), "hi", enabled_skills=[{"name": "s1", "description": "全局描述"}], workspace=ws
-    )["agent_config"]["system_prompt"]
-    assert "项目级描述" in sp
-    assert "全局描述" not in sp
-    assert sp.count("s1") == 1  # 同名去重，只出现一次
+    )["project_overlay"]
+    assert "项目级描述" in ov
+    assert "全局描述" not in ov
+    assert ov.count("s1") == 1  # 同名去重，只出现一次
+
+
+def test_build_context_renders_project_overlay_after_history():
+    """project_overlay（工作区/项目约定/skills 路由）渲染为历史后 SystemMessage，system_prompt 原样。"""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from app.orchestration.context_builder import build_context
+
+    state = {
+        "agent_config": {"system_prompt": "base", "tools": []},
+        "messages": [HumanMessage(content="hi")],
+        "project_overlay": "[工作区]\n项目助手\n\n[项目约定]\n规则 X",
+    }
+    msgs = build_context(state)
+    assert msgs[0].content == "base"  # system prompt 原样
+    human_idx = next(i for i, m in enumerate(msgs) if isinstance(m, HumanMessage))
+    assert any(isinstance(m, SystemMessage) and "项目约定" in m.content for m in msgs[human_idx + 1 :])

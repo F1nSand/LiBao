@@ -26,6 +26,10 @@ class AgentState(TypedDict, total=False):
     # P3：项目记忆/知识索引（工作区 .agent/memory|knowledge 文件名+摘要；不进 system_prompt，
     # build_context 渲染为尾部 SystemMessage，agent 细节按需 read_file）
     project_memory_index: str | None
+    # 工作区/项目级叠加（[工作区] system_prompt_fragment + [项目约定] agent.md + skills 路由段）。
+    # 前缀缓存铁律：不进 system_prompt（曾拼入 → 按工作区变化破坏跨会话前缀缓存，2026-08-24 改），
+    # build_context 渲染为历史后 SystemMessage。
+    project_overlay: str | None
     # 工具执行结果（本轮，供 finalize 校验）
     tool_results: list[dict[str, Any]]
     # 跨节点运行标记：steps / max_steps / status / context_metrics

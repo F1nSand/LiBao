@@ -44,15 +44,15 @@ def workspace_root(workspace_id: uuid.UUID, name: str = "") -> Path:
 # `.agent/` 骨架模板（M7-B T7a/T8 重定位：项目级能力文件化，Claude Code `.claude/` 同款）。
 _AGENT_AGENT_MD = (
     "# 项目约定\n\n"
-    "<!-- 在此填写本工作区的项目约定 / agent 行为说明；会被注入 agent 的 system prompt（[项目约定] 段）。 -->\n"
+    "<!-- 在此填写本工作区的项目约定 / agent 行为说明；会被注入 agent 的消息通道（[项目约定] 段，非 system_prompt，保前缀缓存）。 -->\n"
 )
 _AGENT_README = (
     "# .agent 目录\n\n"
-    "本目录是工作区的项目级能力配置，agent 在该工作区工作时自动发现并叠加：\n\n"
+    "本目录是工作区的项目级能力配置，agent 在该工作区工作时自动发现并叠加（全部走消息通道，非 system_prompt，保前缀缓存）：\n\n"
     "- `agent.md`：项目约定（注入 [项目约定] 段）\n"
-    "- `skills/<name>/SKILL.md`：项目级 skills（同名覆盖全局 org skill）\n"
-    "- `memory/*.md`：项目记忆（注入 [项目记忆] 段）\n"
-    "- `knowledge/*.md`：项目知识（注入 [项目知识] 段）\n"
+    "- `skills/<name>/SKILL.md`：项目级 skills（同名覆盖全局 org skill；上下文只列路由，正文 load_skill 取）\n"
+    "- `memory/*.md`：项目记忆（注入 [项目记忆] 索引段）\n"
+    "- `knowledge/*.md`：项目知识（注入 [项目知识] 索引段）\n"
 )
 
 

@@ -105,7 +105,8 @@ def _build_round_message(round_data: dict[str, Any], tool_results: list[dict[str
 
 
 def skills_route_section(skills: list[dict[str, str]] | None) -> str:
-    """enabled skills 路由描述段（M7-A）：name+description 注入静态前缀；正文经 load_skill 按需取回。"""
+    """enabled skills 路由描述段（M7-A）：name+description 渐进披露——只列路由，正文 load_skill 按需取回。
+    走消息通道 project_overlay（前缀缓存铁律：不进 system_prompt）。"""
     if not skills:
         return ""
     lines = ["", "## 可用 Skills（需要某 skill 的完整步骤时，用 load_skill(name) 取正文）"]
@@ -138,10 +139,14 @@ def build_initial_state(
         seed_tools |= set(FILE_TOOL_IDS)  # 工作区 agent 附加文件工具
         workspace_root = workspace.get("root_path")
     system_prompt = agent.system_prompt
+    # 前缀缓存铁律：system_prompt 对所有会话逐字节恒定（= agent.system_prompt）；工作区/项目级变量内容
+    # （[工作区] fragment / [项目约定] agent.md / skills 路由段）一律走消息通道 project_overlay，
+    # 绝不拼进 system_prompt——曾拼入导致按工作区变化破坏跨会话前缀缓存（2026-08-24 改）。
+    overlay_blocks: list[str] = []
     if workspace and workspace.get("system_prompt_fragment"):
-        system_prompt = f"{system_prompt}\n\n[工作区]\n{workspace['system_prompt_fragment']}"
+        overlay_blocks.append(f"[工作区]\n{workspace['system_prompt_fragment']}")
     if workspace and workspace.get("agent_md"):
-        system_prompt = f"{system_prompt}\n\n[项目约定]\n{workspace['agent_md']}"
+        overlay_blocks.append(f"[项目约定]\n{workspace['agent_md']}")
     # skills 路由描述：org enabled skills ∪ 工作区 filesystem skills；同名工作区（项目级）覆盖全局
     skills_by_name: dict[str, dict[str, str]] = {s["name"]: s for s in (enabled_skills or [])}
     if workspace and workspace.get("skills"):
@@ -149,7 +154,8 @@ def build_initial_state(
             skills_by_name[s["name"]] = s  # 项目级覆盖全局同名
     route = skills_route_section(list(skills_by_name.values()))
     if route:
-        system_prompt = f"{system_prompt}\n{route}"
+        overlay_blocks.append(route)
+    project_overlay = "\n\n".join(overlay_blocks) if overlay_blocks else None
     # 项目记忆 / 项目知识（P3 铁律）：只生成索引字段（走消息通道渲染），**绝不进 system_prompt**
     project_memory_index: str | None = None
     index_blocks: list[str] = []
@@ -173,6 +179,8 @@ def build_initial_state(
             "workspace_root": workspace_root,
         },
         "user_id": user_id,
+        # 工作区/项目级叠加（build_context 渲染为历史后 SystemMessage；随 checkpoint 保留）
+        "project_overlay": project_overlay,
         # P3：项目记忆/知识索引（build_context 渲染为尾部 SystemMessage；随 checkpoint 保留）
         "project_memory_index": project_memory_index,
         # LastValue 通道需每轮显式重置，否则跨轮 checkpoint 残留上轮 tool_results/run_logs

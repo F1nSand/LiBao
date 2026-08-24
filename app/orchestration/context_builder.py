@@ -61,6 +61,12 @@ def build_context(state: AgentState) -> list[BaseMessage]:
     system = SystemMessage(content=system_prompt)
     history: list[BaseMessage] = list(state.get("messages", []))
 
+    # 工作区/项目级叠加（[工作区]/[项目约定]/skills 路由段）：消息通道渲染，绝不进 system_prompt
+    # （前缀缓存铁律 2026-08-24；skills 渐进披露——只列路由，正文 load_skill 按需取回）
+    overlay = state.get("project_overlay")
+    if overlay:
+        history.append(SystemMessage(content=overlay))
+
     # M3 记忆注入（docs 01 §8.2）：历史之后、状态栏之前（动态内容永远追加尾部）
     refs = state.get("memory_refs") or []
     if refs:
