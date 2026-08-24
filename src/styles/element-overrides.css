@@ -21,3 +21,12 @@
 .el-button:not(.is-disabled):active {
   transform: scale(0.97);
 }
+
+/* 模态入场升级（emil-design-eng）：scale 0.96 + 轻微上移，从中心缩放（modal 用 center 非 trigger）。
+   同名列覆盖 Element 原 dialog-fade-in（仅 translateY(-20px) 无 scale），to 帧 = 元素自然态。 */
+@keyframes dialog-fade-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.96) translateY(-8px);
+  }
+}

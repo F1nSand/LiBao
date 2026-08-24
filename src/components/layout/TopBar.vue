@@ -25,6 +25,7 @@ import ThemeSwitcher from './ThemeSwitcher.vue'
   height: var(--app-topbar-height);
   background: var(--app-content-bg);
   border-bottom: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow-card);
   display: flex;
   align-items: center;
   justify-content: space-between;

@@ -231,6 +231,11 @@ const settingsChildren = computed(() => {
 .settings-popover {
   padding: 4px;
 }
+/* origin 微调（emil-design-eng）：popover 从触发点缩放而非中心——right-start 触发点在左侧，origin=left top */
+.settings-popover.el-zoom-in-top-enter-active,
+.settings-popover.el-zoom-in-top-leave-active {
+  transform-origin: left top;
+}
 .settings-popover-title {
   font-size: 11px;
   color: var(--app-text-muted);
