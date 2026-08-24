@@ -5,10 +5,11 @@ import { listProviders, createProvider, updateProvider, deleteProvider } from '@
 import { FEATURE, isUnavailable } from '@/api/availability'
 import { swallowNotImplemented } from '@/utils/http-envelope'
 import EmptyState from '@/components/common/EmptyState.vue'
+import NotificationBell from '@/components/layout/NotificationBell.vue'
+import ThemeSwitcher from '@/components/layout/ThemeSwitcher.vue'
 import type { ProviderConfig } from '@/types'
 
 /** 设置（docs/02 §4 / docs/03 §5.1）：单用户本地模式 → Provider 配置 */
-const tab = ref('provider')
 
 /* ---------- Provider 配置（契约见 api/provider.ts，后端未实现走降级） ---------- */
 const providers = ref<ProviderConfig[]>([])
@@ -76,35 +77,38 @@ async function onDeleteProvider(id: string) {
       </div>
     </div>
 
-    <el-tabs v-model="tab" class="settings-tabs">
-      <!-- Provider 配置（契约见 api/provider.ts，后端未实现走降级） -->
-      <el-tab-pane label="Provider 配置" name="provider">
-        <template v-if="!providersUnavailable">
-          <div class="users-toolbar">
-            <el-button type="primary" :icon="'Plus'" @click="openAddProvider">添加 Provider</el-button>
-          </div>
-          <el-table :data="providers" v-loading="providerLoading" size="small">
-            <el-table-column prop="name" label="Provider" width="120" />
-            <el-table-column prop="base_url" label="Base URL" min-width="200" show-overflow-tooltip />
-            <el-table-column prop="model" label="模型" width="140" />
-            <el-table-column label="API Key" width="90">
-              <template #default="{ row }">{{ row.has_key ? '已配置' : '未配置' }}</template>
-            </el-table-column>
-            <el-table-column label="启用" width="80">
-              <template #default="{ row }">
-                <el-switch :model-value="row.enabled" size="small" @change="(v: boolean) => onToggleProvider(row, v)" />
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="80">
-              <template #default="{ row }">
-                <el-button size="small" text type="danger" @click="onDeleteProvider(row.id)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </template>
-        <EmptyState v-else text="后端暂未实现 Provider 配置接口（契约已发交接板）" />
-      </el-tab-pane>
-    </el-tabs>
+    <div class="settings-tabs">
+      <div class="settings-tag-row">
+        <span class="settings-tag active">Provider 配置</span>
+        <NotificationBell />
+        <ThemeSwitcher />
+      </div>
+
+      <template v-if="!providersUnavailable">
+        <div class="users-toolbar">
+          <el-button type="primary" :icon="'Plus'" @click="openAddProvider">添加 Provider</el-button>
+        </div>
+        <el-table :data="providers" v-loading="providerLoading" size="small">
+          <el-table-column prop="name" label="Provider" width="120" />
+          <el-table-column prop="base_url" label="Base URL" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="model" label="模型" width="140" />
+          <el-table-column label="API Key" width="90">
+            <template #default="{ row }">{{ row.has_key ? '已配置' : '未配置' }}</template>
+          </el-table-column>
+          <el-table-column label="启用" width="80">
+            <template #default="{ row }">
+              <el-switch :model-value="row.enabled" size="small" @change="(v: boolean) => onToggleProvider(row, v)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="80">
+            <template #default="{ row }">
+              <el-button size="small" text type="danger" @click="onDeleteProvider(row.id)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
+      <EmptyState v-else text="后端暂未实现 Provider 配置接口（契约已发交接板）" />
+    </div>
 
     <!-- 添加 Provider -->
     <el-dialog :model-value="providerDialog" title="添加 Provider" width="460px" @close="providerDialog = false">
@@ -139,6 +143,29 @@ async function onDeleteProvider(id: string) {
   border: 1px solid var(--app-border-light);
   border-radius: var(--app-radius-lg);
   box-shadow: var(--app-shadow-card);
-  padding: 8px 16px;
+  padding: 4px 16px 16px;
+}
+.settings-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--app-border-light);
+  margin-bottom: 16px;
+}
+.settings-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: var(--app-radius);
+  border: 1px solid var(--app-border-light);
+  background: var(--app-content-bg);
+  font-size: var(--app-font-size-sm);
+  color: var(--app-text-secondary);
+}
+.settings-tag.active {
+  border-color: var(--app-primary);
+  color: var(--app-primary);
+  background: var(--app-bg);
 }
 </style>

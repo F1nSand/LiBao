@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { THEMES, applyTheme, getStoredTheme, setStoredTheme } from '@/theme/themes'
 
-/** 主题配色切换器（docs/02 §7）：TopBar 短袖图标按钮 → 气泡预设 9 套主题 */
+/** 主题配色切换器（docs/02 §7）：设置页「主题」tag → 气泡预设 9 套主题 */
 const current = ref(getStoredTheme())
 const active = ref(false)
+const currentPrimary = computed(() => THEMES.find((t) => t.id === current.value)?.preview.primary ?? '')
 
 function select(id: string) {
   applyTheme(id)
@@ -17,12 +18,9 @@ function select(id: string) {
 <template>
   <el-popover v-model:visible="active" trigger="click" placement="bottom-end" width="auto" :show-arrow="false" popper-class="theme-popover">
     <template #reference>
-      <button class="theme-btn" type="button" title="主题配色" :class="{ active: active }">
-        <!-- 小短袖图标（currentColor 与页面统一） -->
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 7.5 6.5 4.5h11L20 7.5l-3 2v10H7v-10z" />
-          <path d="M9.5 9v3.5a2.5 2.5 0 0 0 5 0V9" />
-        </svg>
+      <button class="theme-tag" type="button" title="主题配色" :class="{ active: active }">
+        <span class="theme-tag-dot" :style="{ background: currentPrimary }" />
+        <span>主题</span>
       </button>
     </template>
 
@@ -46,23 +44,30 @@ function select(id: string) {
 </template>
 
 <style scoped>
-.theme-btn {
-  width: 30px;
-  height: 30px;
-  display: flex;
+.theme-tag {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
+  gap: 6px;
+  padding: 4px 12px;
   border-radius: var(--app-radius);
+  border: 1px solid var(--app-border-light);
+  background: var(--app-content-bg);
+  font-size: var(--app-font-size-sm);
   color: var(--app-text-secondary);
   cursor: pointer;
+  transition: border-color 0.2s var(--ease-out), color 0.2s var(--ease-out);
 }
-.theme-btn:hover,
-.theme-btn.active {
-  border-color: var(--app-border);
-  background: var(--app-bg);
-  color: var(--app-text-main);
+.theme-tag:hover,
+.theme-tag.active {
+  border-color: var(--app-primary);
+  color: var(--app-primary);
+}
+.theme-tag-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--app-border-light);
+  flex-shrink: 0;
 }
 </style>
 

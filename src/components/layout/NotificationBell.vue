@@ -67,11 +67,11 @@ onMounted(() => {
 <template>
   <el-popover v-if="!unavailable" placement="bottom" :width="340" trigger="click">
     <template #reference>
-      <div class="bell" role="button" aria-label="通知">
-        <el-badge :value="unread" :hidden="unread === 0" :max="99">
-          <el-icon :size="18"><Bell /></el-icon>
-        </el-badge>
-      </div>
+      <button class="notif-tag" type="button" aria-label="通知">
+        <el-icon :size="14"><Bell /></el-icon>
+        <span>通知</span>
+        <span v-if="unread > 0" class="notif-tag-badge">{{ unread > 99 ? '99+' : unread }}</span>
+      </button>
     </template>
 
     <div class="notif-panel">
@@ -101,14 +101,33 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.bell {
-  cursor: pointer;
-  display: flex;
+.notif-tag {
+  display: inline-flex;
   align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--app-radius);
+  border: 1px solid var(--app-border-light);
+  background: var(--app-content-bg);
+  font-size: var(--app-font-size-sm);
   color: var(--app-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.2s var(--ease-out), color 0.2s var(--ease-out);
 }
-.bell:hover {
+.notif-tag:hover {
+  border-color: var(--app-primary);
   color: var(--app-primary);
+}
+.notif-tag-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
 }
 .notif-panel {
   max-height: 420px;
