@@ -186,7 +186,7 @@ const settingsChildren = computed(() => {
   color: var(--app-sidebar-text-active);
   font-weight: 500;
 }
-.nav-item.active::before {
+.nav-item::before {
   content: '';
   position: absolute;
   left: 0;
@@ -195,6 +195,12 @@ const settingsChildren = computed(() => {
   width: 3px;
   border-radius: 2px;
   background: var(--app-primary);
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform 180ms var(--ease-out);
+}
+.nav-item.active::before {
+  transform: scaleY(1);
 }
 .nav-item-btn {
   width: 100%;

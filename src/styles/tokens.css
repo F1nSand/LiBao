@@ -29,6 +29,10 @@
   /* 布局 */
   --app-topbar-height: 56px;
 
+  /* 缓动曲线（emil-design-eng：内置 ease 太弱，用强 ease-out 起手快更跟手） */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
   /* 圆角 / 阴影 */
   --app-radius-sm: 4px;
   --app-radius: 6px;

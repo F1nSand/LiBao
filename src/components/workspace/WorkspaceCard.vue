@@ -88,6 +88,12 @@ function enter() {
 .ws-card {
   border-radius: var(--app-radius-lg);
   box-shadow: var(--app-shadow-card);
+  transition: transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .ws-card:hover {
+    transform: translateY(-2px);
+  }
 }
 .ws-card-head {
   display: flex;

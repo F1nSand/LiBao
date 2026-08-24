@@ -69,3 +69,30 @@ body {
   color: var(--app-text-secondary);
   margin: 2px 0 0;
 }
+
+/* 路由切换过渡（Tier1 打磨）：fade + 轻微上移，160ms ease-out */
+.page-enter-active {
+  transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+.page-leave-active {
+  transition: opacity 100ms ease;
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-leave-to {
+  opacity: 0;
+}
+
+/* 无障碍：偏好减弱动效时关闭位移动效（保留透明度过渡） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

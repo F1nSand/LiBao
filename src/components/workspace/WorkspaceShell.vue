@@ -197,8 +197,9 @@ async function onInterruptConfirm(approved: boolean) {
   <div class="ws-shell">
     <!-- 左列：文件树（上） + 会话（下），整体一个折叠态 -->
     <aside class="ws-left" :class="{ collapsed: leftCollapsed }">
-      <ResourceManager :workspace-id="workspaceId" :collapsed="leftCollapsed" @toggle="toggleLeft" />
+      <ResourceManager v-show="!leftCollapsed" :workspace-id="workspaceId" :collapsed="leftCollapsed" @toggle="toggleLeft" />
       <WorkspaceConvList
+        v-show="!leftCollapsed"
         :items="conversations"
         :active-id="currentId"
         :loading="convLoading"

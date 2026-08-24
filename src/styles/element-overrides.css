@@ -8,4 +8,16 @@
   --el-color-primary-light-9: #f4f4fe;
   --el-color-primary-dark-2: #4f52c4;
   --el-border-radius-base: 6px;
+
+  /* 动效时长收紧：Element 默认 .3s/.2s 偏慢，管理台更紧凑跟手 */
+  --el-transition-duration: 0.2s;
+  --el-transition-duration-fast: 0.15s;
+}
+
+/* 按钮按压反馈（emil-design-eng：可按压元素要回应按压，scale 0.95-0.98） */
+.el-button:not(.is-disabled) {
+  transition: all 0.1s, transform 160ms var(--ease-out);
+}
+.el-button:not(.is-disabled):active {
+  transform: scale(0.97);
 }

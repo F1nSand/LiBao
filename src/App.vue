@@ -9,7 +9,11 @@ import TopBar from '@/components/layout/TopBar.vue'
     <div class="app-body">
       <TopBar />
       <main class="app-main">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <transition name="page" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
       </main>
     </div>
   </div>
