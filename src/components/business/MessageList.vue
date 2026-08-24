@@ -39,11 +39,22 @@ const conversationId = computed(() => props.messages[0]?.conversation_id ?? prop
 let scrollRun = 0
 /** 当前活跃追帧 run；-1 = 无（追帧期间不记账中间 scrollTop，防初始未渲染态把位置记成 0 污染历史恢复） */
 let activeRun = -1
+/** 追帧动画最后程序化设置的 scrollTop；用户滚动偏离它 → 视为用户意图，作废跑批 + 取消贴底 */
+let lastSetTop = -1
 
 function updatePinned(): void {
   const el = containerRef.value
   if (!el) return
-  pinned.value = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_TOLERANCE
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_TOLERANCE
+  // 追帧进行中且用户滚动偏离动画目标：作废跑批 + 取消贴底——否则流式期每个 token 批次的
+  // scrollToStable 会把用户滚走的顶部拉回底部（finalize 又把 pinned 重置 true），无法脱离底部
+  if (activeRun !== -1 && lastSetTop >= 0 && Math.abs(el.scrollTop - lastSetTop) > 1) {
+    scrollRun++
+    activeRun = -1
+    pinned.value = false
+  } else {
+    pinned.value = atBottom
+  }
   // 滚动即记账：切走再回时恢复原位（追帧期间跳过，最终位置由 finalize 记）
   if (activeRun === -1 && conversationId.value) scrollPositions.set(conversationId.value, el.scrollTop)
 }
@@ -62,6 +73,7 @@ function scrollToStable(target: 'bottom' | number): void {
   const finalize = () => {
     if (run === activeRun) {
       activeRun = -1
+      lastSetTop = -1
       updatePinned() // 最新追帧结束：记最终位置 + 重算 pinned
     }
   }
@@ -71,8 +83,17 @@ function scrollToStable(target: 'bottom' | number): void {
     const maxTop = Math.max(0, el.scrollHeight - el.clientHeight)
     const top = target === 'bottom' ? maxTop : Math.min(target, maxTop)
     el.scrollTop = top
+    lastSetTop = top
     requestAnimationFrame(() => {
       if (run !== scrollRun) return
+      // 用户滚走（明显偏离目标，>32px 非 paint 微调）→ 中止追帧，不拉回
+      if (Math.abs(el.scrollTop - top) > 32) {
+        scrollRun++
+        activeRun = -1
+        lastSetTop = -1
+        updatePinned() // 按用户当前位置重算 pinned（滚走=取消贴底）
+        return
+      }
       const still = Math.abs(el.scrollTop - top) <= 1
       if (still) stable++
       else stable = 0
