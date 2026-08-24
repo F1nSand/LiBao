@@ -270,7 +270,7 @@ export const mockServer = {
         org_id: user.org_id ?? 'org_1',
         name: b.name ?? '未命名工作区',
         description: b.description ?? '',
-        system_prompt_fragment: b.system_prompt_fragment ?? '',
+        project_instructions: b.project_instructions ?? '',
         status: 'active',
         created_by: user.id,
         created_at: isoDate(0),

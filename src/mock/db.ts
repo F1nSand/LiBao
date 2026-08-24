@@ -254,7 +254,7 @@ export const workspaceFileContents: Record<string, string> = {
   'ws_001|docs/入门指南.md': '# 入门指南\n\n1. 安装依赖\n2. 初始化配置\n3. 启动服务\n',
   'ws_001|docs/API 参考.md': '# API 参考\n\n`GET /api/v1/workspaces` 列出工作区。\n',
   'ws_001|src/main.py': 'def main():\n    print("hello workspace")\n\nif __name__ == "__main__":\n    main()\n',
-  'ws_001|.agent/README.md': '# .agent — 项目级能力目录\n\n本项目级能力（skills / 记忆 / 知识库）随工作区自动发现，agent 工作时优先读取并叠加到全局能力。\n\n- `skills/` 项目级技能\n- `memory/` 项目级长期记忆\n- `knowledge/` 项目级知识库\n- `agent.md` 项目约定 / system_prompt 片段\n',
+  'ws_001|.agent/README.md': '# .agent — 项目级能力目录\n\n本项目级能力（skills / 记忆 / 知识库）随工作区自动发现，agent 工作时优先读取并叠加到全局能力。\n\n- `skills/` 项目级技能\n- `memory/` 项目级长期记忆\n- `knowledge/` 项目级知识库\n- `agent.md` 项目约定（经消息通道注入，非 system_prompt）\n',
   'ws_001|.agent/agent.md': '# 项目约定\n\n- 文档写作遵循「面向用户」原则\n- 代码风格：PEP8 + 类型注解\n',
   'ws_001|.agent/skills/project-lint/SKILL.md': '---\nname: project-lint\ndescription: 项目代码风格检查（PEP8 + 类型注解）\n---\n\n对工作区代码执行风格检查，输出不合规项与修改建议。\n',
   'ws_001|.agent/memory/项目约定.md': '# 项目约定\n\n团队采用中文文档、英文代码注释；架构评审须附时序图。\n',

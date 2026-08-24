@@ -41,8 +41,8 @@ describe('api/workspace（M7-B 契约，交接板 2026-08-20）', () => {
   })
 
   it('createWorkspace POST body', () => {
-    createWorkspace({ name: 'n', description: 'd', system_prompt_fragment: 'f' })
-    expect(mockedPost).toHaveBeenCalledWith('/workspaces', { name: 'n', description: 'd', system_prompt_fragment: 'f' })
+    createWorkspace({ name: 'n', description: 'd', project_instructions: 'f' })
+    expect(mockedPost).toHaveBeenCalledWith('/workspaces', { name: 'n', description: 'd', project_instructions: 'f' })
   })
 
   it('updateWorkspace PATCH /:id', () => {

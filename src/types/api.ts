@@ -148,8 +148,8 @@ export interface Workspace {
   description?: string
   /** 本地文件夹绝对路径（后端托管，前端不可指定） */
   root_path?: string
-  /** 项目级 agent 附加 prompt 片段（追加在主 agent system_prompt 后） */
-  system_prompt_fragment?: string
+  /** 工作区级指令（经消息通道 [工作区] 块注入 project_overlay，绝不进 system_prompt） */
+  project_instructions?: string
   status: 'active' | 'archived'
   created_by?: string
   created_at: string
@@ -166,13 +166,13 @@ export interface WorkspaceFile {
 export interface CreateWorkspaceRequest {
   name: string
   description?: string
-  system_prompt_fragment?: string
+  project_instructions?: string
 }
 
 export interface UpdateWorkspaceRequest {
   name?: string
   description?: string
-  system_prompt_fragment?: string
+  project_instructions?: string
 }
 
 /** ---------- 任务 ---------- */
