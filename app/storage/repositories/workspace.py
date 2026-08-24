@@ -49,7 +49,7 @@ class WorkspaceRepository:
         name: str,
         description: str,
         root_path: str,
-        system_prompt_fragment: str = "",
+        project_instructions: str = "",
         created_by: uuid.UUID | None = None,
     ) -> Workspace:
         ws = Workspace(
@@ -57,7 +57,7 @@ class WorkspaceRepository:
             name=name,
             description=description,
             root_path=root_path,
-            system_prompt_fragment=system_prompt_fragment,
+            project_instructions=project_instructions,
             status="active",
             created_by=created_by,
         )

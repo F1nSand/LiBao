@@ -92,7 +92,7 @@ def test_build_initial_state_injects_dot_agent():
     ws = {
         "id": "ws-1",
         "root_path": "/tmp/ws1",
-        "system_prompt_fragment": "项目助手",
+        "project_instructions": "项目助手",
         "skills": [{"name": "s1", "description": "d1"}],
         "agent_md": "# 项目约定内容",
         "memory": [{"name": "facts", "title": "事实", "summary": "事实 A"}],

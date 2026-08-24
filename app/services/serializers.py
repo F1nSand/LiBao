@@ -138,7 +138,7 @@ def serialize_workspace(w: Workspace) -> dict[str, Any]:
         "name": w.name,
         "description": w.description,
         "root_path": w.root_path,
-        "system_prompt_fragment": w.system_prompt_fragment,
+        "project_instructions": w.project_instructions,
         "status": w.status,
         "created_by": str(w.created_by) if w.created_by else None,
         "created_at": _dt(w.created_at),

@@ -44,11 +44,13 @@ def workspace_root(workspace_id: uuid.UUID, name: str = "") -> Path:
 # `.agent/` 骨架模板（M7-B T7a/T8 重定位：项目级能力文件化，Claude Code `.claude/` 同款）。
 _AGENT_AGENT_MD = (
     "# 项目约定\n\n"
-    "<!-- 在此填写本工作区的项目约定 / agent 行为说明；会被注入 agent 的消息通道（[项目约定] 段，非 system_prompt，保前缀缓存）。 -->\n"
+    "<!-- 在此填写本工作区的项目约定 / agent 行为说明；"
+    "会被注入 agent 的消息通道（[项目约定] 段，非 system_prompt，保前缀缓存）。 -->\n"
 )
 _AGENT_README = (
     "# .agent 目录\n\n"
-    "本目录是工作区的项目级能力配置，agent 在该工作区工作时自动发现并叠加（全部走消息通道，非 system_prompt，保前缀缓存）：\n\n"
+    "本目录是工作区的项目级能力配置，agent 在该工作区工作时自动发现并叠加"
+    "（全部走消息通道，非 system_prompt，保前缀缓存）：\n\n"
     "- `agent.md`：项目约定（注入 [项目约定] 段）\n"
     "- `skills/<name>/SKILL.md`：项目级 skills（同名覆盖全局 org skill；上下文只列路由，正文 load_skill 取）\n"
     "- `memory/*.md`：项目记忆（注入 [项目记忆] 索引段）\n"
@@ -188,7 +190,7 @@ class WorkspaceService:
             name=req.name,
             description=req.description or "",
             root_path="",  # 先占位，flush 拿到 id 后派生 root_path
-            system_prompt_fragment=req.system_prompt_fragment or "",
+            project_instructions=req.project_instructions or "",
             created_by=user.id,
         )
         await db.flush()
@@ -209,8 +211,8 @@ class WorkspaceService:
             row.name = req.name
         if req.description is not None:
             row.description = req.description
-        if req.system_prompt_fragment is not None:
-            row.system_prompt_fragment = req.system_prompt_fragment
+        if req.project_instructions is not None:
+            row.project_instructions = req.project_instructions
         await db.commit()
         await db.refresh(row)
         return row

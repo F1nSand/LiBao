@@ -44,7 +44,7 @@ def test_build_initial_state_with_workspace():
     agent = SimpleNamespace(
         name="通用助手", model="m", system_prompt="base", tools=["tl_time_now"], max_steps=10, org_id=uuid.uuid4()
     )
-    ws = {"id": "ws-1", "root_path": "/tmp/ws1", "system_prompt_fragment": "你是项目助手"}
+    ws = {"id": "ws-1", "root_path": "/tmp/ws1", "project_instructions": "你是项目助手"}
     st = build_initial_state(agent, "hi", workspace=ws)
     ac = st["agent_config"]
     assert ac["workspace_id"] == "ws-1"

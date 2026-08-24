@@ -74,10 +74,10 @@ async def test_update_workspace(workspace_fixture):
     async with get_store().session() as session:
         row = await WorkspaceService().create(session, user, CreateWorkspaceRequest(name="a"))
         updated = await WorkspaceService().update(
-            session, user, str(row.id), UpdateWorkspaceRequest(description="new", system_prompt_fragment="你是项目助手")
+            session, user, str(row.id), UpdateWorkspaceRequest(description="new", project_instructions="你是项目助手")
         )
         assert updated.description == "new"
-        assert updated.system_prompt_fragment == "你是项目助手"
+        assert updated.project_instructions == "你是项目助手"
 
 
 async def test_hard_delete_cascades_all_workspace_rows(workspace_fixture, tmp_path):

@@ -1,3 +1,28 @@
+# 进度账本 — 字段改名 + 真实后端 e2e + docs 同步（2026-08-24，L2+L3）
+
+## ⚡ 当前状态快照（2026-08-24 收尾存档）
+
+**后端 HEAD `e432ac2` + 前端 HEAD `362a4dd`，双仓库有未提交改动（改名）**，406 passed + ruff 干净 + 前端 typecheck/169 单测全绿 + **真实后端 e2e 3 passed**。
+
+### 本轮完成链
+
+1. **前缀缓存修复**（`e432ac2`，上轮）——工作区 agent.md/fragment/skills 路由移出 system_prompt → `project_overlay` 消息通道。
+2. **docs 全量同步**（`Desktop/Agent/docs/`，非 git）：8 篇（00-05/07/08）加「变更记录（当前实现为准）」头部 + 正文过时段落标注单机化/前缀缓存铁律；06/09 未动；备份 `docs_backup_20260824/`。
+3. **字段改名** `system_prompt_fragment` → **`project_instructions`**（用户拍板）：后端 10 文件（model/repo/schema/serializer/service/chat/stream_core/state_schema/3 测试）+ 前端 3 文件（types/api.ts 注释同步修正/mock/测试）+ 数据迁移（`.agent/workspaces.json` 2 工作区键改名，全空字段无损失）+ docs 同步。验证：后端 406 passed + ruff、前端 typecheck + 169 单测。
+4. **真实后端 e2e**（新基建）：`FrontEnd/playwright.real.config.ts`（webServer 数组：uvicorn 后端 + vite dev `--mode real`）+ `.env.real`（VITE_USE_MOCK=false）+ `e2e-real/backend.spec.ts`（3 用例：health + workspace API 契约含 project_instructions roundtrip / UI 工作区全流程含 .agent 骨架+文件操作 / 真实 LLM 流式）+ npm script `test:e2e:real`。**3 passed (9.7s)**——真实 LLM 聊天 2.4s。
+5. **记忆索引修复**：github-hotspot-channel-design.md description 改「完整垂直包未做」。
+
+### ⚠️ 遗留（下次继续）
+
+- **改名 + e2e 基建未提交**（双仓库 dirty）：后端改名 10 文件 + 前端改名 3 文件 + playwright.real.config.ts/.env.real/e2e-real/run-real-e2e.cmd（脚本可删）。待用户拍板提交。
+- `run-real-e2e.cmd` 临时脚本：已用（e2e 通过），可删；保留 `test:e2e:real` npm script 即可。
+- 后端(:8000) + 前端 dev(:5173) 后台仍在跑（本轮 e2e 起的）——下次继续前可复用或停掉。
+- M8 热点垂直化完整包（前端展示页/关键词订阅/清洗）待做；`system_prompt_fragment` 文档残留已清零。
+
+**恢复指引**：全量 `uv run pytest tests/`（406 绿）；前端 `npm run typecheck` + `npm run test:unit`（169 绿）；真实后端 e2e `npm run test:e2e:real`（3 绿，需后端 .env 配 LLM key）。
+
+---
+
 # 进度账本 — 前缀缓存修复 + frontend_dist 同步（2026-08-24，L2）
 
 ## ⚡ 当前状态快照（2026-08-24）

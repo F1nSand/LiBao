@@ -8,13 +8,13 @@ from pydantic import BaseModel
 class CreateWorkspaceRequest(BaseModel):
     name: str
     description: str = ""
-    system_prompt_fragment: str = ""
+    project_instructions: str = ""
 
 
 class UpdateWorkspaceRequest(BaseModel):
     name: str | None = None
     description: str | None = None
-    system_prompt_fragment: str | None = None
+    project_instructions: str | None = None
 
 
 class WriteFileRequest(BaseModel):

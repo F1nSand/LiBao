@@ -143,8 +143,8 @@ def build_initial_state(
     # （[工作区] fragment / [项目约定] agent.md / skills 路由段）一律走消息通道 project_overlay，
     # 绝不拼进 system_prompt——曾拼入导致按工作区变化破坏跨会话前缀缓存（2026-08-24 改）。
     overlay_blocks: list[str] = []
-    if workspace and workspace.get("system_prompt_fragment"):
-        overlay_blocks.append(f"[工作区]\n{workspace['system_prompt_fragment']}")
+    if workspace and workspace.get("project_instructions"):
+        overlay_blocks.append(f"[工作区]\n{workspace['project_instructions']}")
     if workspace and workspace.get("agent_md"):
         overlay_blocks.append(f"[项目约定]\n{workspace['agent_md']}")
     # skills 路由描述：org enabled skills ∪ 工作区 filesystem skills；同名工作区（项目级）覆盖全局

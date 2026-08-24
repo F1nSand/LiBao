@@ -45,7 +45,7 @@ async def chat_stream(
         workspace = {
             "id": str(ws.id),
             "root_path": ws.root_path,
-            "system_prompt_fragment": ws.system_prompt_fragment,
+            "project_instructions": ws.project_instructions,
             "skills": overlay["skills"],
             "agent_md": overlay["agent_md"],
             "memory": overlay["memory"],
