@@ -1,3 +1,25 @@
+# 进度账本 — 前缀缓存修复 + frontend_dist 同步（2026-08-24，L2）
+
+## ⚡ 当前状态快照（2026-08-24）
+
+**后端 HEAD `e432ac2` + 前端 HEAD `362a4dd`，双仓库 clean + 406 passed + 2 skipped + ruff 干净 + 前端 vue-tsc/169 单测/33 e2e 全绿。**
+
+### 本轮完成链
+
+1. **存档点核查**（开工）：发现 frontend_dist 落后——停在 45b6ca7 时代构建，缺 c111bfa（文件树图标）的最终修复（用户 00:10 提交源码但未重建 dist）。已重建 + 同步 + 提交 `0b1812b`。
+2. **前缀缓存修复**（`e432ac2`，用户反馈 agent.md 塞 system_prompt 破坏前缀缓存）：`[项目约定]`(agent.md) + `[工作区]`(system_prompt_fragment) + skills 路由段**全部移出 system_prompt**，合并进新 state 字段 `project_overlay`，build_context 历史后渲染 SystemMessage。**铁律：system_prompt 对所有会话逐字节恒定**（= agent.system_prompt），工作区/项目级变量内容一律消息通道。
+3. 用户强调并记入记忆：**skill/工具用渐进披露**（上下文只放路由/ACI，正文按需取回）。
+
+### ⚠️ 遗留（下次继续）
+
+- **docs 同步**（父目录 `Desktop/Agent/docs/`）：9 篇架构文档仍停 SQL/Redis 架构；本次前缀缓存改动涉及 01 §4.1/§8.2（context_builder 三段式）、工作区注入段（.agent 机制文档）需同步「消息通道非 system_prompt」
+- `system_prompt_fragment` 字段名名不副实（已走消息通道）——改名涉 API/迁移/前端，未动
+- Docker 旧数据卷：用户已拍板保留
+
+**恢复指引**：全量 `uv run pytest tests/`（406 绿）；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`；前端 build 产物复制 `../FrontEnd/dist` → `frontend_dist/`。已停服务。
+
+---
+
 # 进度账本 — 今日收尾存档（2026-08-23 晚，上下文压缩）
 
 ## ⚡ 当前状态快照（2026-08-23，压缩前）
