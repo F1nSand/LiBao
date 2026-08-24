@@ -4,9 +4,13 @@
 > 本会话开始先读本节 → 处理 → 划掉。格式：[状态] 日期 · 方向 | 事项 | 期望/实际。
 > 方向：→ 后端（前端发现的契约缺口/后端 bug/需后端配合）；← 后端（后端给前端的事项）。
 
+> [open] 2026-08-24 · →后端 | **Workspace 契约字段改名 `system_prompt_fragment` → `project_instructions`（注入语义变更：经消息通道 `[工作区]` 块注入 project_overlay，绝不进 system_prompt）** | 前端已联动收口（types `Workspace`/`CreateWorkspaceRequest`/`UpdateWorkspaceRequest` + mock server 序列化 + `workspace.spec` + `.agent/README` 措辞），UI 表单本就不暴露该字段（纯契约层），全库 grep 无残留；真实后端 e2e（`e2e-real/backend.spec.ts`）roundtrip 断言依赖该字段。请后端同步：`serialize_workspace` 输出 `project_instructions`、创建/更新请求收 `project_instructions`、注入语义落实（工作区指令/`.agent/agent.md` 经消息通道 project_overlay 注入，不进 system_prompt）。后端未实现前真实后端 e2e 该断言失败（前端 mock 已就绪，无回归）。
+
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。
 > 建议下一步：① 先联调收口（后端 :8000 当前未运行，需拉起）→ ② M4 同步推进（后端任务队列 Redis 化 + 多 Agent 子图；前端 agent_switch 事件渲染 + 多 Agent UI）。
 
+> **2026-08-24 存档（工作区字段改名 project_instructions + 真实后端 e2e 搭建，工作区未提交）**：工作区契约字段 `system_prompt_fragment` → `project_instructions`（语义：经消息通道 `[工作区]` 块注入 project_overlay，绝不进 system_prompt）——types/mock server/mock db（`.agent/README` 措辞）/workspace.spec 联动收口，UI 表单本就不暴露该字段（纯契约层），全库 grep 无残留；新增真实后端 e2e 脚手架：`.env.real`（VITE_USE_MOCK=false）+ `playwright.real.config.ts`（双 webServer：uvicorn :8000 + `npm run dev -- --mode real`，reuseExistingServer）+ `run-real-e2e.cmd` + package.json `test:e2e:real` + `e2e-real/backend.spec.ts`（3 用例：健康+workspace API roundtrip / UI 工作区全流程：建→.agent 骨架→文件操作→删清理 / 真实 LLM 聊天流式）。门禁：typecheck ✓ / lint 0err(3 既有 any) / **169 单测** / build 待跑 / **真实后端 e2e 未跑**（后端 :8000 当前未运行，需后端 `.env` 配 LLM key）。交接板补 `[open] →后端`：后端同步 `project_instructions` 字段 + 注入语义。
+>
 > **2026-08-24 存档（界面动效 Tier2 + MessageList 流式滚走修复，commit 47fb421 / 0669691）**：
 > - **Tier2 打磨**（emil-design-eng）：① 模态入场升级——覆盖 `@keyframes dialog-fade-in` 为 `scale(0.96)+translateY(-8px)` 从中心缩放（同名列后者胜出，CSSOM 确认 2 条同名规则；抽屉保持方向 slide 本就正确）；② **TopBar 抬升**——布局诊断发现 **`.app-main` 实际从不滚动**（所有页 height:100% 内部各自滚动，聊天在 `.msg-list` 内），滚动阴影/毛玻璃在此布局不成立，改**常驻轻抬升** `--app-shadow-card` 并移除无效滚动监听死代码；③ 设置气泡 `el-zoom-in-top` 改 `transform-origin: left top`（right-start 贴触发点）。
 > - **修流式期滚走被拉回**（用户反馈「agent 流式输出时往上滚页面无法脱离底部」）：根因 = 流式期每个 token 批次触发 contentVersion watch → `scrollToStable('bottom')` 追帧动画把 scrollTop 反复拉回底部，且 finalize 把 pinned 重置 true；08-20 滚动重构（`20b6dba`）丢了 08-19（`f3d3752`）的「用户偏离作废跑批」逻辑。修复 = `updatePinned` 检测用户滚动偏离动画目标（`lastSetTop`）→ `scrollRun++` 作废 + `pinned=false`；`scrollToStable` rAF 读回 `|scrollTop-top|>32px` 亦中止（补动画侧竞态，动画 rAF 会先于用户 scroll 事件把 scrollTop 重新设回目标）。实测：贴底跟随保持（sh 增长 scrollTop 跟踪 maxTop）、滚走停留 0（同条件旧代码 creep 到 98）。
