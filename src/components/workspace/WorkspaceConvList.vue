@@ -93,6 +93,7 @@ const emit = defineEmits<{
   margin-bottom: 2px;
   font-size: 13px;
   color: var(--app-text-main);
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
 }
 .ws-conv-item:hover {
   background: var(--app-bg);
@@ -113,9 +114,11 @@ const emit = defineEmits<{
   color: var(--app-text-muted);
   display: flex;
   opacity: 0.6;
+  transition: opacity 0.15s var(--ease-out), color 0.15s var(--ease-out);
 }
 .ws-conv-item:hover .ws-conv-item-more {
   opacity: 1;
+  color: var(--app-primary);
 }
 .ws-conv-empty {
   text-align: center;

@@ -37,8 +37,10 @@ async function onCreate() {
     </div>
 
     <template v-if="!store.unavailable">
-      <div v-loading="store.loading" class="ws-grid">
-        <WorkspaceCard v-for="w in store.workspaces" :key="w.id" :workspace="w" />
+      <div v-loading="store.loading">
+        <TransitionGroup name="ws-card" tag="div" class="ws-grid">
+          <WorkspaceCard v-for="w in store.workspaces" :key="w.id" :workspace="w" />
+        </TransitionGroup>
       </div>
       <el-empty
         v-if="!store.loading && store.workspaces.length === 0"
@@ -75,5 +77,23 @@ async function onCreate() {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
   align-content: start;
+}
+/* 卡片增删过渡（emil：enter scale+fade 0.18s ease-out，leave 快 0.15s；频繁增删用 transition 可中断） */
+.ws-card-enter-active {
+  transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out);
+}
+.ws-card-enter-from {
+  opacity: 0;
+  transform: scale(0.96) translateY(4px);
+}
+.ws-card-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.ws-card-leave-to {
+  opacity: 0;
+  transform: scale(0.96);
+}
+.ws-card-move {
+  transition: transform 0.18s var(--ease-out);
 }
 </style>

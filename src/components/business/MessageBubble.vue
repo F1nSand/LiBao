@@ -237,8 +237,8 @@ const usageText = computed(() => {
   align-items: center;
   gap: 4px;
   padding: 1px 8px;
-  background: rgba(99, 102, 241, 0.12);
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: color-mix(in srgb, var(--app-primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-primary) 30%, transparent);
   border-radius: var(--app-radius-lg);
   font-size: 12px;
   color: var(--app-primary);

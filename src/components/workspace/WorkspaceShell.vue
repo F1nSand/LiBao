@@ -197,21 +197,27 @@ async function onInterruptConfirm(approved: boolean) {
   <div class="ws-shell">
     <!-- 左列：文件树（上） + 会话（下），整体一个折叠态 -->
     <aside class="ws-left" :class="{ collapsed: leftCollapsed }">
-      <ResourceManager v-show="!leftCollapsed" :workspace-id="workspaceId" :collapsed="leftCollapsed" @toggle="toggleLeft" />
-      <WorkspaceConvList
-        v-show="!leftCollapsed"
-        :items="conversations"
-        :active-id="currentId"
-        :loading="convLoading"
-        :collapsed="leftCollapsed"
-        @toggle="toggleLeft"
-        @select="selectConversation"
-        @create="createConv"
-        @delete="deleteConv"
-      />
-      <button v-show="leftCollapsed" class="ws-left-strip" type="button" title="展开侧边栏" @click="toggleLeft">
-        <el-icon :size="18"><PanelLeftOpen /></el-icon>
-      </button>
+      <Transition name="ws-fade">
+        <ResourceManager v-show="!leftCollapsed" :workspace-id="workspaceId" :collapsed="leftCollapsed" @toggle="toggleLeft" />
+      </Transition>
+      <Transition name="ws-fade">
+        <WorkspaceConvList
+          v-show="!leftCollapsed"
+          :items="conversations"
+          :active-id="currentId"
+          :loading="convLoading"
+          :collapsed="leftCollapsed"
+          @toggle="toggleLeft"
+          @select="selectConversation"
+          @create="createConv"
+          @delete="deleteConv"
+        />
+      </Transition>
+      <Transition name="ws-fade">
+        <button v-show="leftCollapsed" class="ws-left-strip" type="button" title="展开侧边栏" @click="toggleLeft">
+          <el-icon :size="18"><PanelLeftOpen /></el-icon>
+        </button>
+      </Transition>
     </aside>
 
     <!-- 右侧：对话区 -->
@@ -250,13 +256,13 @@ async function onInterruptConfirm(approved: boolean) {
             发送
           </el-button>
         </div>
-        <div v-if="fileRefs.length" class="composer-refs">
+        <TransitionGroup v-if="fileRefs.length" tag="div" name="chip" class="composer-refs">
           <span v-for="r in fileRefs" :key="r.path" class="composer-ref-chip" :title="r.path">
             <el-icon :size="12"><Document /></el-icon>
             <span class="mono">{{ r.path }}</span>
             <el-icon :size="12" class="chip-close" @click="removeFileRef(r.path)"><Close /></el-icon>
           </span>
-        </div>
+        </TransitionGroup>
         <div class="composer-foot">
           <span class="char-count" :class="{ over: charCount > TOKEN_LIMIT }">{{ charCount }} / {{ TOKEN_LIMIT }}</span>
         </div>
@@ -297,11 +303,20 @@ async function onInterruptConfirm(approved: boolean) {
   flex-direction: column;
   border-right: 1px solid var(--app-border);
   background: var(--app-content-bg);
-  transition: width 0.2s ease;
+  transition: width 0.2s var(--ease-out);
   overflow: hidden;
 }
 .ws-left.collapsed {
   width: 28px;
+}
+/* 左列内容折叠/展开淡入淡出（v-show 由 Transition 接管；宽度过渡并行，内容收窄后期已透明） */
+.ws-fade-enter-active,
+.ws-fade-leave-active {
+  transition: opacity 0.15s var(--ease-out);
+}
+.ws-fade-enter-from,
+.ws-fade-leave-to {
+  opacity: 0;
 }
 .ws-left :deep(.rm-root) {
   flex: 1;
@@ -323,10 +338,15 @@ async function onInterruptConfirm(approved: boolean) {
   background: transparent;
   cursor: pointer;
   color: var(--app-text-muted);
+  transition: color 0.2s var(--ease-out), background 0.2s var(--ease-out), opacity 0.15s var(--ease-out),
+    transform 160ms var(--ease-out);
 }
 .ws-left-strip:hover {
   color: var(--app-primary);
   background: var(--app-bg);
+}
+.ws-left-strip:active {
+  transform: scale(0.97);
 }
 .ws-main {
   flex: 1;
@@ -383,8 +403,8 @@ async function onInterruptConfirm(approved: boolean) {
   align-items: center;
   gap: 4px;
   padding: 1px 6px;
-  background: rgba(99, 102, 241, 0.1);
-  border: 1px solid rgba(99, 102, 241, 0.28);
+  background: color-mix(in srgb, var(--app-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-primary) 28%, transparent);
   border-radius: var(--app-radius-lg);
   font-size: 12px;
   color: var(--app-primary);
@@ -395,12 +415,28 @@ async function onInterruptConfirm(approved: boolean) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 引用 chip 增删过渡（emil：0.15s ease-out，可中断） */
+.chip-enter-active,
+.chip-leave-active {
+  transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out);
+}
+.chip-enter-from {
+  opacity: 0;
+  transform: translateY(4px) scale(0.95);
+}
+.chip-leave-to {
+  opacity: 0;
+  transform: scale(0.9);
+}
+.chip-move {
+  transition: transform 0.15s var(--ease-out);
+}
 .chip-close {
   cursor: pointer;
   flex-shrink: 0;
 }
 .chip-close:hover {
-  color: #ef4444;
+  color: var(--app-danger);
 }
 .composer-foot {
   display: flex;
@@ -413,7 +449,7 @@ async function onInterruptConfirm(approved: boolean) {
   opacity: 0.7;
 }
 .char-count.over {
-  color: #ef4444;
+  color: var(--app-danger);
 }
 .mono {
   font-family: var(--app-font-mono);

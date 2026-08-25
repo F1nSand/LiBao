@@ -14,6 +14,7 @@ import {
 import { isNotImplementedError } from '@/utils/http-envelope'
 import { useTaskPoll } from '@/composables/useTaskPoll'
 import { collectLoadedPaths, patchLayerChildren, preloadVisibleFolders, signatureOf } from '@/utils/workspace-tree'
+import CodeEditor from './CodeEditor.vue'
 import type { WorkspaceFile } from '@/types'
 
 /**
@@ -112,6 +113,41 @@ async function loadNode(node: { level: number; data?: WorkspaceFile }, resolve: 
 /** 文件夹图标：空文件夹（已加载且无子节点）→ 空文件夹图标；有内容（或未加载）→ FolderDot */
 function folderIcon(node: { loaded: boolean; childNodes: unknown[] }): string {
   return node.loaded && node.childNodes.length === 0 ? 'Folder' : 'FolderDot'
+}
+
+/** 扩展名 → hljs 语言 id（CodeEditor 高亮；未知返回空串走 auto 检测） */
+const LANG_BY_EXT: Record<string, string> = {
+  md: 'markdown',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  ts: 'typescript',
+  tsx: 'tsx',
+  jsx: 'jsx',
+  json: 'json',
+  py: 'python',
+  css: 'css',
+  scss: 'scss',
+  html: 'xml',
+  vue: 'xml',
+  xml: 'xml',
+  yaml: 'yaml',
+  yml: 'yaml',
+  sh: 'bash',
+  bash: 'bash',
+  go: 'go',
+  rs: 'rust',
+  java: 'java',
+  c: 'c',
+  cpp: 'cpp',
+  sql: 'sql',
+  ini: 'ini',
+  toml: 'ini',
+  diff: 'diff',
+}
+function previewLanguage(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  return LANG_BY_EXT[ext] ?? ''
 }
 
 async function onFileClick(data: WorkspaceFile) {
@@ -310,6 +346,7 @@ async function onDelete(data: WorkspaceFile) {
         :props="{ label: 'name', isLeaf: (d: WorkspaceFile) => !d.is_dir }"
         :load="loadNode"
         :expand-on-click-node="true"
+        highlight-current
         @node-click="onFileClick"
       >
         <template #default="{ data, node }">
@@ -332,21 +369,24 @@ async function onDelete(data: WorkspaceFile) {
       </el-tree>
     </div>
 
-    <!-- 文件预览/编辑 -->
-    <el-dialog :model-value="previewVisible" :title="`预览 / 编辑：${previewPath}`" width="560px" @close="previewVisible = false; previewDirty = false">
-      <el-input
+    <!-- 文件预览/编辑（CodeEditor：语法高亮 + 行号 + dirty 指示） -->
+    <el-dialog :model-value="previewVisible" :title="`预览 / 编辑：${previewPath}`" width="680px" @close="previewVisible = false; previewDirty = false">
+      <div class="preview-head">
+        <span class="preview-head-dot" :class="{ dirty: previewDirty }" />
+        <span class="preview-head-hint">{{ previewDirty ? '有未保存修改' : '已是最新' }}</span>
+      </div>
+      <CodeEditor
         v-model="previewContent"
-        type="textarea"
-        :rows="12"
-        class="mono"
+        :language="previewLanguage(previewPath)"
         placeholder="文件内容"
-        @input="previewDirty = true"
+        @update:model-value="previewDirty = true"
         @focus="previewFocused = true"
         @blur="previewFocused = false"
+        @save="saveFile"
       />
       <template #footer>
         <el-button @click="previewVisible = false; previewDirty = false">关闭</el-button>
-        <el-button type="primary" @click="saveFile">保存</el-button>
+        <el-button type="primary" :disabled="!previewDirty" @click="saveFile">保存</el-button>
       </template>
     </el-dialog>
 
@@ -435,6 +475,15 @@ async function onDelete(data: WorkspaceFile) {
   overflow-y: auto;
   padding: 0 8px 12px;
 }
+/* 节点行 hover 过渡 + 当前选中高亮（emil：0.15s ease-out） */
+.rm-tree-wrap :deep(.el-tree-node__content) {
+  border-radius: var(--app-radius);
+  transition: background 0.15s var(--ease-out);
+}
+.rm-tree-wrap :deep(.el-tree-node.is-current > .el-tree-node__content) {
+  background: var(--el-color-primary-light-9);
+  color: var(--app-primary);
+}
 .rm-node {
   display: inline-flex;
   align-items: center;
@@ -455,12 +504,32 @@ async function onDelete(data: WorkspaceFile) {
   display: inline-flex;
   color: var(--app-text-muted);
   cursor: pointer;
+  transition: opacity 0.15s var(--ease-out), color 0.15s var(--ease-out);
 }
 .rm-node:hover .rm-more {
   opacity: 1;
+  color: var(--app-primary);
 }
 .mono {
   font-family: var(--app-font-mono);
   font-size: 12px;
+}
+.preview-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+.preview-head-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--app-border);
+  transition: background 0.15s;
+}
+.preview-head-dot.dirty {
+  background: var(--app-danger);
 }
 </style>
