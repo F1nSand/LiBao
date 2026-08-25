@@ -12,7 +12,6 @@ from app.storage.models.message import Message
 from app.storage.models.notification import Notification
 from app.storage.models.provider import ProviderConfig
 from app.storage.models.run_log import RunLog
-from app.storage.models.skill import Skill
 from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
@@ -33,7 +32,6 @@ __all__ = [
     "Notification",
     "ProviderConfig",
     "RunLog",
-    "Skill",
     "Task",
     "ToolDefinition",
     "User",

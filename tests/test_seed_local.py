@@ -57,7 +57,7 @@ async def test_ensure_seed_tools_upgrades_legacy_env():
     # 幂等：再跑一遍不重复
     await ensure_seed_tools(store)
     assert len(await store.table("tool_definitions").list()) == 19
-    assert len(agent2.tools) == 20
+    assert len(agent2.tools) == 21  # AGENT_TOOLS 精选工具总数（含 2026-08-25 新增 tl_install_skill）
 
 
 async def test_ensure_seed_tools_upgrades_engineering_prompt():

@@ -14,6 +14,7 @@ from app.tools.builtin import (
     file_ops,
     github_hotspot,
     initiate_demo,
+    install_skill,
     kb_search,
     load_skill,
     memory_tool,
@@ -160,6 +161,34 @@ def register_builtin_tools() -> None:
             timeout_ms=5000,
             handler=load_skill.load_skill_handler,
             meta=True,  # 平台元工具：skill 正文加载始终对 LLM 可见（渐进式披露，docs 01 §4.2.1）
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
+            id="tl_install_skill",
+            name="install_skill",
+            description=(
+                "从 URL 下载第三方 skill（SKILL.md）到 skills 目录：默认全局 ~/.LiBao/skills，"
+                "target='workspace' 时装到当前工作区 .agent/skills。URL 可为 git 仓库或裸 SKILL.md 链接。"
+                "反例：不要用它下载非 skill 的代码/脚本到别处。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "git 仓库地址或 SKILL.md 直链"},
+                    "target": {"type": "string", "enum": ["global", "workspace"],
+                               "description": "安装目标（默认 global）"},
+                },
+                "required": ["url"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=True,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.NONE,
+            timeout_ms=120000,
+            handler=install_skill.install_skill_handler,
             builtin=True,
         )
     )

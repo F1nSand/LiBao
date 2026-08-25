@@ -12,7 +12,6 @@ from app.storage.models.memory import LongTermMemory, LongTermMemoryVersion
 from app.storage.models.message import Message
 from app.storage.models.notification import Notification
 from app.storage.models.run_log import RunLog
-from app.storage.models.skill import Skill
 from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.user import User
@@ -113,20 +112,6 @@ def serialize_tool_definition(t: ToolDefinition) -> dict[str, Any]:
         "idempotent": t.idempotent,
         "meta": spec.meta if spec else False,  # 元工具标记（前端工具页区分元工具/常规工具，docs 03 §5.5）
         "created_at": _dt(t.created_at),
-    }
-
-
-def serialize_skill(s: Skill) -> dict[str, Any]:
-    """skill 序列化（M7-A，docs 03 §5.14 / FrontEnd Skill）。body 全量返回（skill 通常较小）。"""
-    return {
-        "id": str(s.id),
-        "org_id": str(s.org_id),
-        "name": s.name,
-        "description": s.description,
-        "body": s.body,
-        "source": s.source,
-        "enabled": s.enabled,
-        "created_at": _dt(s.created_at),
     }
 
 

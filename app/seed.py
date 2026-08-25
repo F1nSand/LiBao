@@ -404,6 +404,7 @@ AGENT_TOOLS = [
     "tl_tool_search",
     "tl_kb_search",
     "tl_load_skill",
+    "tl_install_skill",
     "tl_fetch_url",
     "tl_analyze_image",
     "tl_dispatch_subagent",

@@ -20,6 +20,7 @@ from langchain_core.messages import HumanMessage
 
 from app.core.errors import ERR_LLM_FAILURE
 from app.core.messages import message_text  # 独立模块（memory_extract/memory 共用，防导入环）
+from app.services.skill import discover_global_skills, merge_skill_routes
 from app.tools.builtin.file_ops import FILE_TOOL_IDS
 from app.tools.context import set_dispatch_ctx
 from app.tools.registry import get, get_by_name
@@ -120,7 +121,6 @@ def build_initial_state(
     user_id: str | None = None,
     org_id: str | None = None,
     enabled_tool_ids: list[str] | None = None,
-    enabled_skills: list[dict[str, str]] | None = None,
     workspace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。
@@ -147,12 +147,8 @@ def build_initial_state(
         overlay_blocks.append(f"[工作区]\n{workspace['project_instructions']}")
     if workspace and workspace.get("agent_md"):
         overlay_blocks.append(f"[项目约定]\n{workspace['agent_md']}")
-    # skills 路由描述：org enabled skills ∪ 工作区 filesystem skills；同名工作区（项目级）覆盖全局
-    skills_by_name: dict[str, dict[str, str]] = {s["name"]: s for s in (enabled_skills or [])}
-    if workspace and workspace.get("skills"):
-        for s in workspace["skills"]:
-            skills_by_name[s["name"]] = s  # 项目级覆盖全局同名
-    route = skills_route_section(list(skills_by_name.values()))
+    # skills 路由描述：全局文件 skills ∪ 工作区 filesystem skills（同名工作区覆盖全局，merge_skill_routes）
+    route = skills_route_section(merge_skill_routes((workspace or {}).get("skills") or [], discover_global_skills()))
     if route:
         overlay_blocks.append(route)
     project_overlay = "\n\n".join(overlay_blocks) if overlay_blocks else None

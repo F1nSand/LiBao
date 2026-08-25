@@ -18,7 +18,6 @@ from app.core.events import sse_emitter
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
 from app.services.notification import maybe_notify_from_tool_results
 from app.services.serializers import serialize_message
-from app.services.skill import SkillService
 from app.services.task import TaskService, push_event
 from app.services.tool import ToolService
 from app.storage.models.agent import AgentConfig
@@ -228,7 +227,6 @@ async def chat_stream_events(
             user_id=str(user.id),
             org_id=str(agent.org_id),
             enabled_tool_ids=await ToolService().enabled_tool_ids(db, agent.org_id),
-            enabled_skills=await SkillService().enabled_skill_routes(db, agent.org_id),
             workspace=workspace,
         ),
         graph_config=graph_config,
@@ -456,7 +454,6 @@ async def agent_invoke_events(
             user_id=str(user.id),
             org_id=str(agent.org_id),
             enabled_tool_ids=await ToolService().enabled_tool_ids(db, agent.org_id),
-            enabled_skills=await SkillService().enabled_skill_routes(db, agent.org_id),
         ),
         graph_config=graph_config,
         emit=emit,

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from app.services.skill import discover_workspace_skills
 from app.tools.builtin.load_skill import load_skill_handler
-from app.tools.context import set_tool_org, set_tool_workspace_root
+from app.tools.context import set_tool_workspace_root
 
 VALID_SKILL = """---
 name: kb_strategy
@@ -28,7 +28,6 @@ def test_discover_workspace_skills(tmp_path):
 async def test_load_skill_workspace_fallback(tmp_path):
     (tmp_path / "skills" / "kb_strategy").mkdir(parents=True)
     (tmp_path / "skills" / "kb_strategy" / "SKILL.md").write_text(VALID_SKILL, encoding="utf-8")
-    set_tool_org(None)  # 无 org → 走工作区回退
     set_tool_workspace_root(str(tmp_path))
     try:
         out = await load_skill_handler("kb_strategy")
@@ -37,4 +36,3 @@ async def test_load_skill_workspace_fallback(tmp_path):
         assert "error" in await load_skill_handler("nope")
     finally:
         set_tool_workspace_root(None)
-        set_tool_org(None)

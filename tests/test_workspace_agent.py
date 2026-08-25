@@ -5,6 +5,7 @@ import uuid
 from types import SimpleNamespace
 
 from app.orchestration.stream_core import build_initial_state
+from app.services import skill as skill_mod
 from app.services.skill import discover_workspace_agent, discover_workspace_skills
 from app.services.workspace import init_agent_skeleton
 
@@ -137,11 +138,15 @@ def test_build_context_renders_project_index_after_history():
     assert any(isinstance(m, SystemMessage) and "项目记忆" in m.content for m in msgs[human_idx + 1 :])
 
 
-def test_build_initial_state_project_skill_overrides_global():
+def test_build_initial_state_project_skill_overrides_global(tmp_path, monkeypatch):
+    """同名 skill：工作区覆盖全局（注入去重，只出现一次）。"""
+    (tmp_path / "s1" / "SKILL.md").parent.mkdir(parents=True)
+    (tmp_path / "s1" / "SKILL.md").write_text(
+        "---\nname: s1\ndescription: 全局描述\n---\n# g\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(skill_mod, "get_settings", lambda: SimpleNamespace(skills_root=str(tmp_path)))
     ws = {"id": "ws-1", "root_path": "/tmp/ws1", "skills": [{"name": "s1", "description": "项目级描述"}]}
-    ov = build_initial_state(
-        _agent(), "hi", enabled_skills=[{"name": "s1", "description": "全局描述"}], workspace=ws
-    )["project_overlay"]
+    ov = build_initial_state(_agent(), "hi", workspace=ws)["project_overlay"]
     assert "项目级描述" in ov
     assert "全局描述" not in ov
     assert ov.count("s1") == 1  # 同名去重，只出现一次

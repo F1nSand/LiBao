@@ -52,7 +52,7 @@ _AGENT_README = (
     "本目录是工作区的项目级能力配置，agent 在该工作区工作时自动发现并叠加"
     "（全部走消息通道，非 system_prompt，保前缀缓存）：\n\n"
     "- `agent.md`：项目约定（注入 [项目约定] 段）\n"
-    "- `skills/<name>/SKILL.md`：项目级 skills（同名覆盖全局 org skill；上下文只列路由，正文 load_skill 取）\n"
+    "- `skills/<name>/SKILL.md`：项目级 skills（同名覆盖全局 ~/.LiBao/skills；上下文只列路由，正文 load_skill 取）\n"
     "- `memory/*.md`：项目记忆（注入 [项目记忆] 索引段）\n"
     "- `knowledge/*.md`：项目知识（注入 [项目知识] 索引段）\n"
 )

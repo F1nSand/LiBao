@@ -27,7 +27,6 @@ from app.storage.models.mcp_server import McpServer
 from app.storage.models.memory import LongTermMemory
 from app.storage.models.notification import Notification
 from app.storage.models.provider import ProviderConfig
-from app.storage.models.skill import Skill
 from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.workspace import Workspace
@@ -45,7 +44,6 @@ TABLE_SPECS: dict[str, tuple[str, type]] = {
     "notifications": ("notifications.json", Notification),
     "providers": ("providers.json", ProviderConfig),
     "mcp_servers": ("mcp_servers.json", McpServer),
-    "skills": ("skills.json", Skill),
     "tool_definitions": ("tool_definitions.json", ToolDefinition),
     "workspaces": ("workspaces.json", Workspace),
     "kb_collections": ("kb_collections.json", KbCollection),
