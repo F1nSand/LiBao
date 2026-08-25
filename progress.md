@@ -1,3 +1,119 @@
+# 进度账本 — ~/.LiBao 用户全局数据目录迁移（A+B 阶段，2026-08-25，L3+L2，plan: docs/plans/2026-08-25-libao-user-data-dir.md）
+
+## ⚡ 当前状态快照（2026-08-25 存档）
+
+**466 passed + 2 skipped + ruff 干净**（+4 migrate 测试）。数据目录从项目根迁到 `~/.LiBao`（对齐 Claude Code `~/.claude` 按需子集）+ settings.json 配置层。会话按项目哈希（阶段 C）与打包（阶段 D）后置。
+
+### 完成链（A+B）
+
+- **A1 路径配置**：`config.py` 四个路径默认值改 `~/.LiBao`（`agent_data_dir`/`kb_root`/`workspaces_root`/`upload_dir`，`_LIB = Path.home()/".LiBao"` 绝对路径）。
+- **A2 迁移模块** `app/core/migrate.py`：`migrate_to_libao(settings)`——项目根 `.agent`/`data/workspaces`/`kb`/`uploads` → `~/.LiBao`（copy 不删旧数据可回滚）；workspaces root_path 重写（旧 `data/workspaces/xxx` → `~/.LiBao/workspaces/xxx`）；`.env` → `settings.json`（非路径 key 转 snake_case，路径字段显式绝对化覆盖 `.env` 相对 UPLOAD_DIR）；幂等（`.migrated` 标记）；无旧数据不迁移。
+- **A3 挂载**：`init_runtime` 首启调用 `migrate_to_libao(settings)`（仅 `settings is get_settings()` 默认部署路径触发，测试传参跳过）。
+- **B1 settings.json 读取**：`config.py` `settings_customise_sources` 优先 `~/.LiBao/settings.json`（JSON，字段名 snake_case），`.env` 后备，默认值兜底。
+- **B2 .env → settings.json 迁移**：随 migrate 首启自动（幂等）；`UPLOAD_DIR=uploads` 等相对路径被 settings.json 绝对路径覆盖。
+- **测试** `tests/test_migrate.py` +4：迁移复制/root_path 重写/settings.json 生成/幂等/无旧数据跳过/settings.json 优先/absent 回退默认。**坑**：conftest autouse `_filestore` 在 tmp_path 建 `.agent` 骨架 → 无旧数据测试用 tmp_path 子目录空 root 避开。
+
+### ⚠️ 遗留（下次继续）
+
+- **阶段 C（会话按项目哈希 `projects/<hash>/`）**：独立 L3 下轮。
+- **阶段 D（打包：源码只读 + setup）**：后置专项。
+- **真实 `~/.LiBao` 尚未迁移**：用户启动 uvicorn 时 `init_runtime` 首启自动触发（幂等 copy）；或手动 `uv run python -m app.core.migrate`。迁移后旧 `.agent/data/kb/uploads` 保留（确认后手动删）。
+- 前端 skills 页仍指向 `~/.LiBao/skills`（一致）；`skills.json` 旧 org 数据已随上轮丢弃。
+- 未提交（后端 6 文件 + 测试 + docs + progress），存档时提交。
+
+**恢复指引**：`uv run pytest tests/`（466 绿）；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`（首启自动迁移数据到 ~/.LiBao）；配置改 `~/.LiBao/settings.json`（无则 .env 后备）。
+
+---
+
+# 进度账本 — Skill 体系简化 + .LiBao 全局目录 + install_skill（2026-08-25，L3，plan: docs/plans/2026-08-25-skill-system-simplify.md）
+
+## ⚡ 当前状态快照（2026-08-25 存档）
+
+**459 passed + 2 skipped + ruff 干净 + 前端 typecheck 通过 + 单测 170 passed**。删 org skills 层与 git 导入，全局 skills 定 `~/.LiBao/skills`（打包后安装根，类似 `~/.claude`），新增 `tl_install_skill` 下载工具。
+
+### 完成链（按 T）
+
+1. **T1 配置**：`Settings.skills_root = "~/.LiBao/skills"`（expanduser 解析，打包后每用户 home 不同）；`.env.example` 更新。
+2. **T2 删 org 后端链**：`models/skill.py`/`repositories/skill.py`/`schemas/skill.py` 删文件；`serialize_skill`、`SkillService`、`ERR_SKILL_IMPORT_FAILED/NOT_FOUND/NAME_CONFLICT`、`store.py` skills 表、`models/__init__` 全清；`services/skill.py` 重写为纯文件发现（`global_skills_dir`/`discover_skills_dir`/`discover_global_skills`/`discover_workspace_skills`）。
+3. **T3 /skills 只读**：`GET /skills`（全局列表 + 可选 `workspace_id`），删 CRUD/import。
+4. **T4 两级注入与取回**：`build_initial_state` 删 `enabled_skills`（org）参数，全局 ∪ 工作区（工作区覆盖）；`load_skill` 两级（工作区 → 全局）；`chat_stream`/`task_run` 删 `enabled_skill_routes`。
+5. **T5 `tl_install_skill`**：git clone/http 下载 → 扫 SKILL.md → frontmatter 校验 → 落盘全局/工作区；注册 builtin + seed。
+6. **T6 前端**：`Skill` 类型改目录条目（name/description/path）；`api/skill.ts` 只读；`stores/skill.ts` 全局+工作区；`SkillsView.vue` 两级目录展示；`mock` 同步；`api/skill.spec.ts` 重写。
+7. **T7 测试**：`test_install_skill.py` 新增 6 项；`test_skill_injection.py` 重写两级；`test_workspace_skill.py`/`test_workspace_agent.py` 去 org；删 `test_skill_service.py`；`test_seed_local` 工具数 20→21。
+8. **T8 收尾**：ruff 干净 + 全量 459 绿 + 前端 typecheck/单测 + frontend_dist 重建 + docs 01 §4.2.1 / 04 §3.11 同步 + 旧 `.agent/skills.json` 丢弃。
+
+### Review gate（code-reviewer）
+
+发现 **2 Important + 4 Minor** 全处理（+4 测试）：
+- **R1 Important `tl_install_skill` 网络写工具无 scheme 校验**：git clone 接受本地路径/file:// 读任意本地仓库；.md URL 可 SSRF；无大小限制 → 修：仅 http/https、复用 `fetch_url_denylist`、`_MAX_DOWNLOAD_BYTES=1MB`
+- **R2 Important `load_skill` name 未校验路径穿越**：meta 工具始终可用，`load_skill("../../x")` 读 skills_root 外 SKILL.md → 修：`validate_skill_name`（skill.py 统一 helper，防 `/` `\\` `..` 与 `.` 开头，允许 Unicode 中文名）
+- **R3 Minor /skills workspace path 硬编码**：legacy `skills/` 位置的 skill 显示 `.agent/skills/` 错 → discover_* 返回实际 path，API 直接用
+- **R4 Minor `.agent` README 引 org skill** → 改「全局 ~/.LiBao/skills」
+- **R5 Minor agent models skills 死字段**（org 残留，仅版本快照复制）→ **保守保留**（`from_dict` 对旧数据多余字段兼容风险，标注记录待后续清理）
+- **R6 Minor `~` 展开未测** → 补 `test_global_skills_dir_expanduser`
+
+自查另修 1 个安全漏洞（review 前）：install_skill frontmatter name 路径穿越 → validate_skill_name。
+
+**最终：ruff 干净 + 全量 462 passed + 2 skipped（+7）→ 三 gate 全过。**
+
+### Simplify gate（code-simplifier，4 应用 / 3 跳过）
+
+- 应用：`read_skill_file` 提取（discover/load_skill 收敛「name==目录名」不变量单点，删 ~10 行重复）、`workspace_skills_dirs`（工作区位置/优先级 3 处硬编码收口）、`merge_skill_routes`（两级优先级规则显式化，build_initial_state 内联合并删）、`_download_text` 大小检查移出 try（删 RuntimeError 透传分支）
+- 跳过（记录理由）：scheme 校验换 urlparse.scheme（行为变更非纯重构，现形式已保守）、discover_skills_dir/_read_md_dir 抽共享 walker（glob 模式/解析/输出全不同，过度抽象）、`_clone_skill_md` 补 git 缺失 FileNotFoundError（bug 修复非本任务）
+
+### 真实冒烟
+
+- `tl_install_skill` 从本地 git 仓库 clone → 校验 → 落盘全局 ✓（单测 mock + 真实 git 双路径）
+- 前端 build 8s + frontend_dist 同步 ✓
+
+### ⚠️ 遗留（下次继续）
+
+- **前端 2 个既有单测失败**（与 skills 无关，疑为既有/环境）：`CodeEditor.spec.ts`（gutter 断言期望 `'1\n2\n'` 实际 `'1\n2'`）、`useNotifications.spec.ts`（模块级单例）。
+- `.LiBao/project`（项目/会话/记忆迁移）**仅规划，本轮未动**——打包专项时做。
+- 本次改动未提交（后端 11 文件 + 前端 7 文件 + docs），存档时提交。
+
+**恢复指引**：后端 `uv run pytest tests/`（459 绿）；前端 `npm run typecheck` + `npm run test:unit`（170 过 2 既有失败）；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`。
+
+---
+
+# 进度账本 — 主 Agent 全局 Skills 文件夹（2026-08-25，L2，plan: docs/plans/2026-08-25-global-skills-folder.md）
+
+## ⚡ 当前状态快照（2026-08-25 存档）
+
+**459 passed + 2 skipped + ruff 干净**（+4 测试）。主 agent（非工作区对话）补上「放文件夹即自动识别」的全局 skills 能力（Claude Code `~/.claude/skills/` 式），并统一三级优先级。
+
+### 完成链
+
+1. **T1 配置**：`Settings.skills_root = "data/skills"` + `.env.example` 加 `SKILLS_ROOT`（gitignored 用户资产，示例在 `examples/skills/`）。
+2. **T2 发现**：`skill.py` 抽 `discover_skills_dir()`（单目录 `*/SKILL.md` 扫描 + 非法跳过），`discover_workspace_skills` 复用；新增 `discover_global_skills(root)`。
+3. **T3 注入**：`stream_core.build_initial_state` 从 `get_settings().skills_root` 扫全局 skills，并入 `skills_by_name`（**org → 全局覆盖 → 工作区覆盖**）。
+4. **T4 取回**：`load_skill.py` 三级查找统一为 **工作区 `.agent/skills/` → 全局 `data/skills/` → org DB（enabled）**（注入与取回优先级一致——顺带修复原「注入工作区覆盖但取回 org 优先」的不一致）。
+5. **T5 测试**：+4（discover_global_skills 扫描/非法跳过、build_initial_state 注入全局路由 + system_prompt 恒定回归、load_skill 工作区覆盖全局、全局覆盖 org）。
+6. **T6 收尾**：ruff 干净 + 全量 459 绿 + 真实冒烟（env 设 SKILLS_ROOT → build_initial_state 注入 demo 路由，system_prompt 恒定）+ docs 01 §4.2.1 补「主 Agent 全局 Skills」段 + 变更记录。
+
+### 三级优先级（统一注入 + 取回）
+
+**工作区 `.agent/skills/` > 全局 `data/skills/` > org DB**（同名覆盖）。渐进披露铁律不变：只列路由进消息通道 project_overlay，正文 `tl_load_skill` 取回，不进 system_prompt。
+
+### Review gate（2026-08-25，code-reviewer）
+
+发现 **1 Critical + 1 Important + 备注**（BOM 顺手修）：
+- **R1 Critical 非 UTF-8 SKILL.md 击穿扫描**：`discover_skills_dir`/`_read_skill_file` 只 `except AppError`，GBK/ANSI 文件（Windows 中文常见）抛 `UnicodeDecodeError`/`OSError` 穿透 → build_initial_state 每次 chat 扫全局 → 所有会话失败 → 修 `except (AppError, OSError, UnicodeDecodeError)`（跳过低效输入）
+- **R2 Important 目录名≠frontmatter name 悬空路由**：发现侧用 name 建路由、取回侧要求目录名==name 且按目录名查 → 不一致时「能列取不回」→ 修 `discover_skills_dir` 加 `parsed["name"] != md.parent.name: continue`（保证「能列出的必能取回」）
+- **BOM（备注）**：`_FRONTMATTER_RE` `\A` 锚定 + Windows 常见 utf-8-sig BOM → 静默不识别 → 全部 md 读取改 `utf-8-sig`（discover/load_skill/git 导入/_read_md_dir/agent_md 统一）
+- 测试补 2 项（非 UTF-8 跳过、目录名不一致跳过、BOM 识别）；优先级统一结论正确（注入早先工作区优先，取回对齐，行为自洽）
+
+**最终：ruff 干净 + 全量 pytest 461 passed + 2 skipped（+6 测试）→ 三 gate 全过。**
+
+### ⚠️ 遗留
+
+- 本次改动未提交（config.py + skill.py + stream_core.py + load_skill.py + .env.example + tests/test_skill_injection.py + docs 01 + 计划文档），存档时提交。
+- 全局 skills 每次 build_initial_state 扫目录（读 frontmatter，代价小）；skills 数量大时可后续加缓存（本次不做）。
+
+**恢复指引**：全量 `uv run pytest tests/`（459 绿）；`uv run ruff check .`；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`。
+
+---
+
 # 进度账本 — Bash 审查独立 curl LLM 通道（2026-08-25，L2，plan: docs/plans/2026-08-25-bash-review-curl-channel.md）
 
 ## ⚡ 当前状态快照（2026-08-25 存档）

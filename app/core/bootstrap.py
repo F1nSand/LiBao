@@ -21,6 +21,13 @@ async def init_runtime(settings: Settings | None = None) -> Runtime:
     settings = settings or get_settings()
     register_builtin_tools()
 
+    # 首启自动迁移：项目根旧数据（.agent/data/kb/uploads）→ ~/.LiBao（幂等）。
+    # 仅默认部署路径（settings 未显式传参）触发；测试传自定义 settings 时跳过。
+    if settings is get_settings():
+        from app.core.migrate import migrate_to_libao
+
+        migrate_to_libao(settings)
+
     store = FileStore(settings)
     await store.init()
     set_store(store)

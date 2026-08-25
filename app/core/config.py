@@ -1,16 +1,44 @@
 """应用配置（docs 01 §2 core/config.py）。
 
-Pydantic Settings 从 .env 读取；get_settings() 为进程内单例。
-本地单机化：.env 只放 API key / 模型项（无 DB/Redis/JWT 配置）。
+Pydantic Settings 从 settings.json（~/.LiBao，主）与 .env（后备）读取；get_settings() 进程内单例。
+2026-08-25：数据目录从项目根迁到用户全局 ~/.LiBao（对齐 Claude Code ~/.claude；打包后源码只读、数据全在用户目录）。
 """
 
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    JsonConfigSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
+
+# 用户全局数据根（2026-08-25：会话/记忆/配置/工作区/知识库/附件全在此，源码只读后数据不随代码更新丢失）
+_LIB = str(Path.home() / ".LiBao")
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """配置优先级（2026-08-25）：~/.LiBao/settings.json（用户全局，主）> .env（后备）> 默认值。
+
+        settings.json 用字段名（snake_case，如 llm_api_key）；.env 用大写 env 名（LLM_API_KEY）。
+        源码只读后 .env 不可写，用户改 ~/.LiBao/settings.json。
+        """
+        lib_json = Path(_LIB) / "settings.json"
+        if lib_json.is_file():
+            return (JsonConfigSettingsSource(settings_cls, json_file=lib_json), dotenv_settings, init_settings)
+        return (dotenv_settings, init_settings)
 
     # ---- 通用 ----
     app_env: str = "dev"
@@ -29,10 +57,10 @@ class Settings(BaseSettings):
     # 两段式 ACI 门控（docs 01 §7.1.1 A2）：启用工具数 ≤ 阈值 → 全量 ACI；超过 → tool_search + 选中注入
     aci_full_limit: int = 30
 
-    # ---- 本地单机化（文件存储）----
-    agent_data_dir: str = ".agent"  # 会话 JSONL / 记忆 md / 配置 json 根目录
-    kb_root: str = "kb"  # KB 集合目录（index.json + documents/ + vectors.lance）
-    frontend_dist: str = "frontend_dist"  # 前端构建产物（FastAPI 静态托管）
+    # ---- 用户全局数据目录（~/.LiBao，对齐 ~/.claude）----
+    agent_data_dir: str = _LIB  # 会话 JSONL / 记忆 md / 配置 json 根目录
+    kb_root: str = f"{_LIB}/kb"  # KB 集合目录（index.json + documents/ + vectors.lance）
+    frontend_dist: str = "frontend_dist"  # 前端构建产物（FastAPI 静态托管，源码目录）
 
     # ---- LLM（LiteLLM）----
     llm_provider: str = "deepseek"
@@ -62,8 +90,8 @@ class Settings(BaseSettings):
     # ---- M3 知识库 ----
     kb_max_chunks: int = 2000  # 单文档分块上限（防 20MB 文本爆 embedding 预算）
 
-    # ---- M3 附件（本地磁盘）----
-    upload_dir: str = "uploads"
+    # ---- M3 附件（本地磁盘，~/.LiBao/uploads）----
+    upload_dir: str = f"{_LIB}/uploads"
     max_upload_mb: int = 20
 
     # ---- fetch_url 内置工具（docs 07 RM-8）----
@@ -74,8 +102,10 @@ class Settings(BaseSettings):
     # dict/list 输出 json 化后截断到此上限；str 输出原样透传不截断
     tool_result_max_chars: int = 8000
 
-    # ---- M7-B 工作区 ----
-    workspaces_root: str = "data/workspaces"  # 本地文件夹根（root_path 托管于此）
+    # ---- M7-B 工作区（~/.LiBao/workspaces）----
+    workspaces_root: str = f"{_LIB}/workspaces"  # 本地文件夹根（root_path 托管于此）
+    # 全局 skills 根目录（<root>/<name>/SKILL.md 自动发现；expanduser 解析——打包后为 ~/.LiBao/skills）
+    skills_root: str = "~/.LiBao/skills"
     command_review_model: str = ""  # [deprecated 2026-08-25] 旧 litellm 审查通道已废弃，改用 BASH_REVIEW_* curl 通道
 
     # ---- Bash 语义审查（2026-08-25 独立 curl LLM 通道，docs 01 §7.8）----
