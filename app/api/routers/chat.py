@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -9,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user, get_db
 from app.api.schemas.chat import ChatRequest
+from app.core.config import get_settings
 from app.core.logging import get_trace_id
 from app.orchestration.chat_stream import chat_stream_events
 from app.services.agent import AgentService
@@ -19,6 +21,25 @@ from app.services.workspace import WorkspaceService
 from app.storage.models.user import User
 
 router = APIRouter()
+
+
+def _session_workspace(conv_id: str) -> dict[str, Any]:
+    """非工作区对话 → 临时会话工作区（~/.LiBao/cache/sessions/<conv_id>/，2026-08-25 方案 A）。
+
+    让普通对话的 agent 也能落地生成文件（docx 等）；root_path 指向可 TTL 清理的缓存目录。
+    overlay 字段留空（不注入 [工作区]/[项目约定]/skills），只提供文件工具 + 落地根。
+    """
+    root = Path(get_settings().cache_dir) / "sessions" / conv_id
+    root.mkdir(parents=True, exist_ok=True)
+    return {
+        "id": None,
+        "root_path": str(root),
+        "project_instructions": "",
+        "skills": [],
+        "agent_md": "",
+        "memory": [],
+        "knowledge": [],
+    }
 
 
 @router.post("/chat/stream")
@@ -36,7 +57,8 @@ async def chat_stream(
     else:
         conversation = await conv_service.get_owned(db, req.conversation_id, user.id)
 
-    # M7-B：解析工作区（会话优先，其次请求）→ 项目级 agent + 文件工具
+    # M7-B：解析工作区（会话优先，其次请求）→ 项目级 agent + 文件工具；
+    # 非工作区对话 → 隐式临时会话工作区（方案 A：普通对话也能生成文件，落地 cache/sessions/<conv_id>/）
     workspace = None
     ws_id = conversation.workspace_id or req.workspace_id
     if ws_id is not None:
@@ -51,6 +73,8 @@ async def chat_stream(
             "memory": overlay["memory"],
             "knowledge": overlay["knowledge"],
         }
+    else:
+        workspace = _session_workspace(str(conversation.id))
 
     graph = request.app.state.graph
     trace_id = get_trace_id()

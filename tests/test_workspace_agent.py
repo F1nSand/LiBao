@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.orchestration.stream_core import build_initial_state
@@ -167,3 +168,27 @@ def test_build_context_renders_project_overlay_after_history():
     assert msgs[0].content == "base"  # system prompt 原样
     human_idx = next(i for i, m in enumerate(msgs) if isinstance(m, HumanMessage))
     assert any(isinstance(m, SystemMessage) and "项目约定" in m.content for m in msgs[human_idx + 1 :])
+
+
+def test_session_workspace_injects_file_tools(tmp_path, monkeypatch):
+    """方案 A（2026-08-25）：非工作区对话 → 隐式临时工作区（文件工具注入 + root 指向 cache/sessions/<conv_id>）。"""
+    from app.api.routers.chat import _session_workspace
+
+    monkeypatch.setattr(
+        "app.api.routers.chat.get_settings", lambda: SimpleNamespace(cache_dir=str(tmp_path / "cache"))
+    )
+    monkeypatch.setattr(skill_mod, "get_settings", lambda: SimpleNamespace(skills_root=str(tmp_path / "no_skills")))
+    ws = _session_workspace("conv-1")
+    assert ws["id"] is None
+    assert ws["root_path"] == str(tmp_path / "cache" / "sessions" / "conv-1")
+    assert Path(ws["root_path"]).is_dir()  # 临时目录已建
+    assert ws["project_instructions"] == ""  # 不注入 [工作区] overlay
+    st = build_initial_state(
+        _agent(), "hi", workspace=ws
+    )
+    ac = st["agent_config"]
+    assert ac["workspace_root"] == ws["root_path"]
+    for tid in ("tl_bash", "tl_read_file", "tl_write_file"):
+        assert tid in ac["tools"]
+    # 无 skills/项目 overlay（隐式工作区不叠加）
+    assert "可用 Skills" not in (st["project_overlay"] or "")

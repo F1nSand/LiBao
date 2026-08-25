@@ -25,6 +25,24 @@
 
 ---
 
+## 后续修复（2026-08-25 同日，L2 快修）
+
+### F1 Bash 审查拦截工作区正常操作（用户实证：docx 生成被拦）
+
+- **根因**：未配置 `BASH_REVIEW_ENDPOINT` → 旧降级「未配置时 high 档 fail-close」；而 `_RISK_HIGH_PATTERNS` 把工作区正常操作（`python -c`/`npm install`/`rm`/写文件）全归 high → 全被拦。
+- **修复**：① 未配置/未启用审查 = 规则通道（致命黑名单硬拦，其余放行 + note，不 fail-close）；② 风险分级细化——`python -c`/`npm/pip install`/`rm`/`mv`/`cp`/写文件/`bash -c` 降 medium（审查不可用放行），high 只留外传/下载执行/工作区外/凭据/git 写/权限/系统级。
+- **连带**：`settings_customise_sources` 源顺序改 `(init, json, dotenv)`——settings.json 存在后曾覆盖 `Settings(workspaces_root=tmp)` 显式传参（测试失效）；改后显式传参 > settings.json > .env。
+- 验证：`python -c`/`npm install docx` 放行 + note，`cat /etc/shadow` 仍拦；全量 467 绿。
+
+### F2 方案 A：非工作区对话临时工作区（用户拍板）
+
+- 对话区（非工作区）agent 无法生成文件（无文件工具）→ 新增**隐式临时工作区**：非工作区对话 `chat.py` 构造 `workspace = _session_workspace(conv_id)`，root 指向 `~/.LiBao/cache/sessions/<conv_id>/`（config 加 `cache_dir`）。
+- 效果：普通对话 agent 也有 `bash/read_file/write_file`（root = 临时目录），可生成 docx 等；overlay 空（不注入 [工作区]/skills）。resume 经 checkpoint 保留 workspace_root。
+- **清理后置**：临时目录当前保留（用户取文件）；TTL 后台清理（删 N 天前 cache/sessions/*）后续做。
+- 已知副作用：非工作区对话有 workspace_root → memory_tool 的 project scope 写临时目录（随清理丢，global 记忆不受影响）。
+
+---
+
 # 进度账本 — Skill 体系简化 + .LiBao 全局目录 + install_skill（2026-08-25，L3，plan: docs/plans/2026-08-25-skill-system-simplify.md）
 
 ## ⚡ 当前状态快照（2026-08-25 存档）

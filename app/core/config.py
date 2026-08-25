@@ -30,15 +30,15 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """配置优先级（2026-08-25）：~/.LiBao/settings.json（用户全局，主）> .env（后备）> 默认值。
+        """配置优先级（2026-08-25）：显式传参（init）> ~/.LiBao/settings.json（用户全局，主）> .env（后备）。
 
         settings.json 用字段名（snake_case，如 llm_api_key）；.env 用大写 env 名（LLM_API_KEY）。
         源码只读后 .env 不可写，用户改 ~/.LiBao/settings.json。
         """
         lib_json = Path(_LIB) / "settings.json"
         if lib_json.is_file():
-            return (JsonConfigSettingsSource(settings_cls, json_file=lib_json), dotenv_settings, init_settings)
-        return (dotenv_settings, init_settings)
+            return (init_settings, JsonConfigSettingsSource(settings_cls, json_file=lib_json), dotenv_settings)
+        return (init_settings, dotenv_settings)
 
     # ---- 通用 ----
     app_env: str = "dev"
@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     # ---- 用户全局数据目录（~/.LiBao，对齐 ~/.claude）----
     agent_data_dir: str = _LIB  # 会话 JSONL / 记忆 md / 配置 json 根目录
     kb_root: str = f"{_LIB}/kb"  # KB 集合目录（index.json + documents/ + vectors.lance）
+    cache_dir: str = f"{_LIB}/cache"  # 临时会话工作区（非工作区对话的文件落地；可 TTL 清理）
     frontend_dist: str = "frontend_dist"  # 前端构建产物（FastAPI 静态托管，源码目录）
 
     # ---- LLM（LiteLLM）----

@@ -200,22 +200,28 @@ _REVIEW_SYSTEM_PROMPT = (
     "读取凭证/密钥/环境变量、下载并执行、cron/启动项注入、fork炸弹、其他注入迹象。其余 ALLOW。"
 )
 
-# 风险分级（规则层，审查不可用时决定 fail-open/close 档位）：high 档在审查不可用时 fail-close
+# 风险分级（规则层，审查不可用时决定 fail-open/close 档位）：high 档在审查不可用时 fail-close。
+# 2026-08-25 修正：工作区内正常开发操作（python/npm/rm/写文件等）降 medium——审查不可用时放行；
+# high 只保留真正危险（外传/下载执行/工作区外/凭据/git 写/权限/系统级/系统包管理）。
 _RISK_HIGH_PATTERNS = (
-    r"\brm\s", r"\bmv\s", r"\bcp\s", r"\btruncate\s", r"\btee\s", r"\bdd\s", r"\bmkdir\s", r"\s+>>?",
+    # 外传/网络
     r"\bcurl\b", r"\bwget\b", r"\bscp\b", r"\brsync\b", r"\bnc\b", r"\bncat\b", r"\bsocat\b", r"\btelnet\b",
-    r"\bpython\s+-c", r"\bpython3\s+-c", r"\beval\b", r"\bbash\s+-c", r"\bsh\s+-c", r"\bnode\s+-e", r"\bperl\s+-e",
-    r"\bbase64\s+-d", r"\bxxd\s+-r", r"/dev/tcp", r"\|\s*(ba)?sh\b",
+    # 下载执行/代码注入
+    r"\beval\b", r"\bbase64\s+-d", r"\bxxd\s+-r", r"/dev/tcp", r"\|\s*(ba)?sh\b",
+    # 工作区外/系统路径
     r"\b/etc\b", r"\b/var\b", r"\b/root\b", r"\b/mnt\b", r"\b/usr\b", r"\b/bin\b", r"\b/sbin\b", r"\b/proc\b",
     r"\b/sys\b", r"\b/boot\b", r"c:\\", r"~\.ssh", r"\.aws", r"/home/",
+    # 凭据/环境
     r"\bprintenv\b", r"\benv\b", r"\bexport\b", r"\.env\b", r"id_rsa", r"credentials", r"shadow", r"passwd",
     r"github_token", r"api_key", r"secret", r"aws_access_key", r"sk-[a-z0-9]{8}",
     r"\baws\b", r"\bkubectl\b", r"\bgcloud\b",
+    # git 写（push/reset/clean 等不可逆/破坏性）
     r"\bgit\s+(push|reset|clean|checkout|merge|rebase|commit|init|pull)\b",
+    # 权限/进程/系统
     r"\bchmod\b", r"\bchown\b", r"\bchgrp\b", r"\bkill\b", r"\bpkill\b", r"\bkillall\b", r"\bsystemctl\b",
     r"\bservice\b", r"\bsudo\b", r"\bpasswd\b", r"\bshutdown\b", r"\breboot\b",
-    r"\bpip\s+install\b", r"\bpip3\s+install\b", r"\bnpm\s+install\b", r"\bapt\b", r"\bapt-get\b",
-    r"\byum\b", r"\bdnf\b", r"\bbrew\s+install\b",
+    # 系统级包管理（apt/yum/dnf/brew 改系统环境）
+    r"\bapt\b", r"\bapt-get\b", r"\byum\b", r"\bdnf\b", r"\bbrew\s+install\b",
 )
 
 
@@ -437,7 +443,14 @@ async def _review_command(command: str) -> dict[str, str]:
         return {"verdict": "allow", "reason": "只读快速通道", "grade": "low"}
     _configure_breaker()
     if not settings.bash_review_enabled or not settings.bash_review_endpoint:
-        return _degraded_review(grade, "未配置 BASH_REVIEW_ENDPOINT")
+        # 未启用/未配置审查 LLM = 语义审查未开启 → 规则通道（致命黑名单已由 _fast_review 硬拦，
+        # 其余放行 + note；不按风险档位 fail-close——否则未配置时工作区正常开发操作全被拦）。
+        return {
+            "verdict": "allow",
+            "reason": "未配置语义审查（规则通道放行，请复核）",
+            "grade": grade,
+            "degraded": True,
+        }
     if _breaker.open:
         return _degraded_review(grade, "审查通道熔断（暂不可用）")
     try:
