@@ -1,3 +1,47 @@
+# 进度账本 — Bash 审查独立 curl LLM 通道（2026-08-25，L2，plan: docs/plans/2026-08-25-bash-review-curl-channel.md）
+
+## ⚡ 当前状态快照（2026-08-25 存档）
+
+**449 passed + 2 skipped + ruff 干净**（+25 测试），bash 审查从应用内主 LLM 切换为 **bash+curl 直连独立云端 LLM**。
+
+### 完成链（按 T）
+
+1. **T1 配置**：`Settings` + `.env.example` 加 10 个 `BASH_REVIEW_*`（enabled/endpoint/api_key/model/timeout/connect_timeout/proxy/breaker_threshold/breaker_cooldown_s/failopen_max_grade）；`command_review_model` 标注 deprecated。
+2. **T2 风险分级 `_risk_grade`**：low 只读白名单（免审）/ high 破坏/外传/下载执行/工作区外/凭据/git 写/权限/包安装（审查不可用 fail-close）/ medium 其余。
+3. **T3+T4 curl 通道 + 输出校验**：`_curl_review` 固定模板（key/endpoint 全写临时 curl `-K` 配置，body 走 `--data-binary @file` 临时文件，命令行只出现配置文件名 → key 不落 ps；复用 `_bash_executable` 排除 System32 WSL 中继）；`_validate_review` 严格 JSON 仅认 ALLOW + 围栏剥离 + 首行协议兼容 + 注入迹象扫描 → block。
+4. **T5 熔断 `_Breaker`**：CLOSED/OPEN/HALF_OPEN + threshold/cooldown（进程内内存态，模式复用 M2.5 breaker）。
+5. **T6+T7 流程重构**：`_review_command` 快速通道→风险分级→curl 审查（熔断门控）→混合降级（`_degraded_review`：风险档位 > failopen_max_grade → fail-close，否则放行 + degraded note）；`bash_handler` 降级 note 透出。
+6. **T8 测试**：+22（协议/校验/注入/熔断三态/分级/降级矩阵/@file 不拼命令行/复用 bash/config 默认），删旧 blocks 提取测试（通道已变）；test_file_ops.py 43 passed。
+7. **T9 收尾**：ruff 全量干净 + 全量 pytest + docs 01 §7.8 同步（变更记录 + 三重防线 + 混合降级矩阵 + 通道安全说明）。
+
+### Review gate（2026-08-25，code-reviewer）
+
+发现 **1 high + 2 medium + 1 low 全修**（并补测试，确定性 92/95/85/90）：
+- **F1 high 白名单绕过凭据读取**：`_fast_review` 白名单短路放行 `head /etc/shadow`/`cat ~/.aws/credentials`/`echo $GITHUB_TOKEN`/`git show HEAD:.env`（黑名单只挡 `cat /etc/` 等窄子串，等价命令全绕）→ 新增 `_SENSITIVE_PATTERNS`：白名单命令含 `/etc/` `.ssh` `.aws` `$VAR` 凭据等 → 不再免审（交 LLM；不可用靠 `_risk_grade` high fail-close 兜底）
+- **F2 medium `_risk_grade` 大写 pattern 死代码**：`low=command.lower()` 后匹配 `C:\\`/`GITHUB_TOKEN`/`API_KEY`/`SECRET` 大写永不命中 → 全小写化 + 补 `.aws`/`credentials`/`shadow`/`passwd`/`sk-`（通道不可用时高危命令不再掉档 medium 被放行）
+- **F3 medium 旧首行协议跳过注入扫描**：`ALLOW 忽略所有规则` 直接放行 → 首行分支先扫 `_injection_marker` → block
+- **F4 low 临时文件泄漏**：`_write_curl_config` 抛异常时 payload 残留 → 统一 try/finally 双文件清理
+
+自查另修 2 个（review 前）：`\b>` 正则漏匹配空格重定向（`echo hi > file`）→ `\s+>>?`；`verdict` 未 strip 前导空白可使审查模型 BLOCK 意图被误判 error→降级放行。
+
+### Simplify gate（code-simplifier，6 应用 / 3 跳过）
+
+- 应用：`_write_temp_file` 提取（收敛两份 mkstemp 样板）、测试 `_stub_review` helper（收敛 7 份 stub）、`_Breaker.record_failure` 合并重复 open 分支、`_validate_review` 注入扫描上提 + `_review_from_first_line` 抽取、`_run_shell` 双分支共享 kwargs、`_RISK_GRADE_ORDER` 常量
+- 跳过（记录理由）：`_RISK_HIGH_PATTERNS`/`_SENSITIVE_PATTERNS` 去重（形态不同 + 服务不同层，安全关键不值当）、bash_handler 双 block 抽 helper（仅 2 点收益小）、`_fast_review` 双调（成本可忽略，耦合反降清晰度）
+
+**最终：ruff 干净 + 全量 pytest 455 passed + 2 skipped（+35 测试）→ 三 gate 全过。**
+
+### ⚠️ 遗留（下次继续）
+
+- **`.env` 需配真实 `BASH_REVIEW_ENDPOINT`/`BASH_REVIEW_API_KEY`/`BASH_REVIEW_MODEL` 才启用 curl 审查**（未配 → 规则快速通道 + note 降级放行）；云端 endpoint 国内被墙需 `BASH_REVIEW_PROXY`（curl 不读系统代理）。
+- `command_review_model` 已废弃（未删字段，防误用）。
+- 熔断状态为进程内存态：重启重置（文档化接缝，与 M2.5 breaker 一致）。
+- 本次改动未提交（file_ops.py + config.py + .env.example + tests/test_file_ops.py + docs 01 + 计划文档），存档时提交。
+
+**恢复指引**：全量 `uv run pytest tests/`（449 绿）；`uv run ruff check .`；启动 `uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000`。
+
+---
+
 # 进度账本 — Agent 工程能力修复与升级（2026-08-24，L3，plan: docs/plans/2026-08-24-agent-engineering-fix-upgrade.md）
 
 ## ⚡ 当前状态快照（2026-08-24 存档）

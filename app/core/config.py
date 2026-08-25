@@ -76,7 +76,21 @@ class Settings(BaseSettings):
 
     # ---- M7-B 工作区 ----
     workspaces_root: str = "data/workspaces"  # 本地文件夹根（root_path 托管于此）
-    command_review_model: str = ""  # Bash 命令语义审查模型（缺省复用主 LLM）
+    command_review_model: str = ""  # [deprecated 2026-08-25] 旧 litellm 审查通道已废弃，改用 BASH_REVIEW_* curl 通道
+
+    # ---- Bash 语义审查（2026-08-25 独立 curl LLM 通道，docs 01 §7.8）----
+    # 云端独立 key 直连（bash+curl 执行，与应用内主 LLM 通道解耦）；未配置 endpoint → 降级规则快速通道
+    bash_review_enabled: bool = True  # 总开关（false = 完全走规则快速通道，不做 curl）
+    bash_review_endpoint: str = ""  # 审查 LLM OpenAI 兼容 endpoint（必配才启用 curl 审查）
+    bash_review_api_key: str = ""  # 独立 key（只进 .env；命令内容会外发到此 LLM）
+    bash_review_model: str = ""  # 模型名（传入请求 body，多数 endpoint 需填）
+    bash_review_timeout: int = 15  # curl --max-time（秒）
+    bash_review_connect_timeout: int = 5  # curl --connect-timeout（秒）
+    bash_review_proxy: str = ""  # 显式 HTTP 代理（curl 不读 Windows 系统代理，云端 endpoint 需配）
+    bash_review_breaker_threshold: int = 3  # 熔断阈值：审查通道连续失败次数
+    bash_review_breaker_cooldown_s: int = 60  # 熔断冷却期（秒），过后 HALF_OPEN 试水
+    # 审查不可用时允许放行的最高风险档（low/medium/high；high 档默认 fail-close）
+    bash_review_failopen_max_grade: str = "medium"
 
     # ---- M8 热点收集（GitHub）----
     github_token: str | None = None  # GitHub API token（.env GITHUB_TOKEN，缺省匿名 60 req/h 配额受限）
