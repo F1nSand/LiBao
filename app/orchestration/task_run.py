@@ -194,6 +194,7 @@ async def run_task_graph(
             graph=graph,
             sessionmaker=sessionmaker,
             task_id=task_id,
+            # task 路径暂不接收附件；接法同 chat_stream_events（读盘+b64 → _graph_config configurable + image_refs）
             initial=build_initial_state(
                 agent,
                 _task_input_text(task.input),

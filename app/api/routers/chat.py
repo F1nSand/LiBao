@@ -82,9 +82,11 @@ async def chat_stream(
     # M3：附件校验（每个必须是当前用户有效附件，否则 40403）→ 透传编排落库
     att_service = AttachmentService()
     attachments: list[str] = []
+    attachment_mimes: dict[str, str] = {}
     for aid in req.message.attachments or []:  # aid 已由 schema 校验为 uuid.UUID
         att = await att_service.get_attachment(db, user, aid)
         attachments.append(str(att.id))
+        attachment_mimes[str(att.id)] = att.content_type
 
     return StreamingResponse(
         chat_stream_events(
@@ -97,6 +99,7 @@ async def chat_stream(
             attachments=attachments,
             workspace=workspace,
             trace_id=trace_id,
+            attachment_mimes=attachment_mimes,
         ),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache", "Connection": "keep-alive"},

@@ -1,4 +1,45 @@
-# 进度账本 — ~/.LiBao 用户全局数据目录迁移（A+B 阶段，2026-08-25，L3+L2，plan: docs/plans/2026-08-25-libao-user-data-dir.md）
+# 进度账本 — plan: docs/plans/2026-08-27-provider-think-switch-fix.md
+
+- Task 1: complete (commits none—目标文件含用户既有未提交改动，tests `.\.venv\Scripts\pytest.exe -p no:cacheprovider tests/test_provider.py tests/test_llm.py tests/test_chat_stream.py -q` → PASS, 23 passed)
+- Task 2: complete (commits none—同上，tests effective-model + reasoning pair → PASS, 2 passed; ruff → PASS)
+- Closing gate: complete (Review Important 已按用户批准修复；组合 PATCH red→green；focused tests 23 passed + ruff PASS。最终全量：509 passed/2 skipped/3 failed，3 个失败均来自并发出现的未提交多模态改动 `attachment.py/chat_stream.py/test_chat_attachments.py`，未越权修改)
+
+---
+
+# 多模态消息适配（2026-08-27，L3，plan: ~/.claude/plans/openai-apikey-url-purring-lampson.md 覆写版）
+
+**512 passed + 2 skipped + ruff 干净**（多模态 +15 测试，并行 agent 的 3 个失败已随本轮收口消失）。B1-B7 全落地；前端 F 系走交接板。
+
+## 核心设计（已实现）
+
+- **b64 与消息分离**（checkpoint 体积硬约束）：HumanMessage 里只放轻量 `image_ref` 引用块（几十字节 dict）；真正 b64 进 `graph_config.configurable.image_payload`（configurable 不落 checkpoint）。JsonFileSaver 每 super-step 全量快照——b64 直进 state 会让每轮写盘膨胀几十 MB 且历史图跨轮永久重放计费。
+- **能力判定两层**（core/vision.py）：provider 显式声明（`ProviderConfig.capabilities`，`["vision"]`=强制视觉/其他非空=强制非视觉/空=回落 pattern）+ 内置高置信 pattern 表（gpt-4o/qwen-vl/glm-4v/gemini/claude-3+…；deepseek-* 不命中）。`sync_active_to_settings` 推 `settings.llm_vision_declared`，activate 热跟随。default-deny：把图发给纯文本模型的 400 比漏判破坏大。
+- **三分支消息构造**（core/multimodal.human_message_with_images）：vision 有图→[ref..., text 块]；非 vision 有图→注记前缀纯文本（ref 丢弃，本轮不做 OCR——用户拍板）；无图→与原行为逐字节相同（零回归锚点）。判定用 effective model（抽 `resolve_effective_model` 单一事实源）。
+- **水合渲染收口**（context_builder.build_context 加 image_ctx 参数）：仅当前轮 ref+vision+payload 齐备 → 标准块 `{type:"image",source_type:"base64",data,mime_type}`（经 langchain-openai 已验证直达 OpenAI payload）；历史轮 ref/payload 缺失/未传 image_ctx（Mock/子代理）→ 文本标记降级（跨轮媒体不回放，token 成本有界）。
+- **chat 层接线**（chat_stream_events）：图片 mime 过滤 → `get_attachment_by_id` 读盘（read_file 是 async！）→ b64 → `fit_budget`（单轮 20MB 预算，超限剔+注记计数）→ `_graph_config` 写 configurable + `build_initial_state(image_refs=…)`；`pending_confirm.input` 附 attachment_ids。resume 续跑图片降级（可接受退化，已记录）。
+- **落库契约零变化**：Message.content 纯 str + attachments 引用；serialize_message 不动；message_text 对 ref 块取空（记忆提取/轨迹/run_log 无泄漏——测试断言）。
+
+## 测试（+15）
+
+- tests/test_multimodal.py +13：pattern 命中/未命中、declared 压制、serialize capabilities、旧 JSON 兼容、sync 推 declared 三态、三分支构造、水合四分支（当前轮/历史/payload 缺/str 直通）、fit_budget 超限剔+计数、no_vision_note。
+- tests/test_chat_attachments.py +2（e2e）：非 vision 带图全链路（注记前缀+落库不变+SSE done）；vision 带图（模型收标准 image 块 b64 与源一致 + **checkpoint JSON 无 b64 泄漏断言**）；_graph_config configurable 键。
+
+## 关键坑
+
+- **AttachmentService.read_file 是 async**（返回 coroutine）——不能包 asyncio.to_thread（探查报告误标为同步，实测发现）。
+- model_override 非 None 时 effective model 仍取 agent（model_override 是测试 mock 对象，str() 是 repr 不命中 pattern）——vision 判定与 build_initial_state 同源取 agent。
+- 并行 agent 同时在改 provider.py（patch enabled→activate 联动）/test_provider.py/progress.md——提交前 git diff 核对，不碰对方文件。
+
+## 遗留 / 交接
+
+- **前端交接板已挂**（FrontEnd/progress.md 顶部 [open] ←后端 多模态条目）：Uploader emit 全量响应/paste 截图/拖拽域/纯图空文守卫/capabilities tooltip；回放 `<img src="/api/v1/attachments/{id}">` 零改动。
+- agent_invoke_events / task_run 接入点注释到位未启用（接法同 chat_stream_events）。
+- 真实 vision 模型端到端实测待用户配 vision provider 后做（结构已由单测+e2e 覆盖）。
+- 未提交（后端 12 文件改 + 3 新文件）。
+
+---
+
+# 历史进度账本 — ~/.LiBao 用户全局数据目录迁移（A+B 阶段，2026-08-25，L3+L2，plan: docs/plans/2026-08-25-libao-user-data-dir.md）
 
 ## 补充（2026-08-27 续）：thinking/tool_calls 回归修复 + 对话页换模型按钮交接
 

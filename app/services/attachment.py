@@ -64,6 +64,10 @@ class AttachmentService:
             raise AppError(ERR_ATTACHMENT_NOT_FOUND, "附件不存在或无权访问")
         return row
 
+    async def get_attachment_by_id(self, db: Any, attachment_id: uuid.UUID) -> Attachment | None:
+        """按 id 直取（不做 owner 校验）——编排层专用：owner 校验已在 chat 路由唯一入口完成（项目既有约定）。"""
+        return await AttachmentRepository(db).get_any_org(attachment_id)
+
     async def read_file(self, att: Attachment) -> bytes:
         try:
             return Path(att.storage_path).read_bytes()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -103,6 +104,64 @@ async def test_provider_activate_unique_and_hot_sync(provider_fixture, monkeypat
         assert settings.llm_model == "m2"  # 热同步
         assert settings.llm_api_key == "k2"
         assert settings.llm_base_url == "https://b.com/v1"  # 完整 URL 剥 /chat/completions
+
+
+async def test_provider_patch_enable_activates_uniquely_and_hot_syncs(provider_fixture, monkeypatch):
+    """前端开关 PATCH enabled=true：等价 activate，切回 DeepSeek 后立即使用其推理模型。"""
+    user = provider_fixture
+    svc = ProviderService()
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_api_key", "glm-key")
+    monkeypatch.setattr(settings, "llm_model", "glm-5.3-flash")
+    monkeypatch.setattr(settings, "llm_base_url", "https://open.bigmodel.cn/api/paas/v4")
+
+    async with get_store().session() as session:
+        glm = await svc.create(
+            session,
+            user,
+            name="glm",
+            base_url="https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            is_full_url=True,
+            model="glm-5.3-flash",
+            api_key="glm-key",
+            enabled=True,
+        )
+        deepseek = await svc.create(
+            session,
+            user,
+            name="deepseek",
+            base_url="https://old.deepseek.example/v1",
+            is_full_url=False,
+            model="deepseek-chat",
+            api_key="old-deepseek-key",
+            enabled=False,
+        )
+
+        patched = await svc.patch(
+            session,
+            user,
+            deepseek.id,
+            enabled=True,
+            base_url="https://api.deepseek.com/v1/chat/completions",
+            is_full_url=True,
+            model="deepseek-v4-flash",
+            api_key="deepseek-key",
+        )
+        listed = await svc.list(session, user)
+
+    enabled_by_id = {p["id"]: p["enabled"] for p in listed}
+    assert patched.id == deepseek.id
+    assert enabled_by_id[str(glm.id)] is False
+    assert enabled_by_id[str(deepseek.id)] is True
+    assert settings.llm_model == "deepseek-v4-flash"
+    assert settings.llm_base_url == "https://api.deepseek.com/v1"
+    assert settings.llm_api_key == "deepseek-key"
+
+    from app.orchestration.stream_core import resolve_effective_model
+
+    assert resolve_effective_model(SimpleNamespace(model="")) == "deepseek-v4-flash"
 
 
 async def test_provider_serialize_new_fields(provider_fixture):

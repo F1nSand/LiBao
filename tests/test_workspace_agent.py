@@ -198,7 +198,9 @@ def test_build_initial_state_model_falls_back_to_settings(monkeypatch):
     """模型切换去固化（2026-08-27）：agent.model 为空 → 回落 settings.llm_model（激活 provider 值）。"""
     from app.orchestration import stream_core
 
-    monkeypatch.setattr(stream_core, "get_settings", lambda: SimpleNamespace(llm_model="deepseek-chat"))
+    monkeypatch.setattr(
+        stream_core, "get_settings", lambda: SimpleNamespace(llm_model="deepseek-chat", llm_vision_declared=None)
+    )
     agent = SimpleNamespace(
         name="通用助手", model="", system_prompt="base", tools=[], max_steps=10, org_id=uuid.uuid4()
     )

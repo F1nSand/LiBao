@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     llm_model: str = "deepseek-chat"
     llm_api_key: str = ""
     llm_base_url: str = ""
+    # 视觉能力声明（多模态适配 2026-08-27）：激活 provider 的 capabilities 推导——
+    # ["vision"]→True、其他非空→False、空/无激活 provider→None（回落 core/vision.py pattern 判定）
+    llm_vision_declared: bool | None = None
+    # 单轮图片总预算（原始字节 MB；b64 后请求体 ≈ ×1.33）：超限自动跳过并在消息注记声明被剔张数
+    image_total_budget_mb: int = 20
 
     # ---- M3 Embedding（SiliconFlow，OpenAI 兼容）----
     # Qwen/Qwen3-Embedding-0.6B，维度 1024（与 LanceDB schema 一致，见 models/kb.py EMBED_DIM）

@@ -28,6 +28,7 @@ class ProviderWriteRequest(BaseModel):
     api_key: str | None = None
     model: str | None = None  # 模型名（裸名）
     enabled: bool | None = None
+    capabilities: list[str] | None = None  # 模型能力声明（如 ["vision"]；空/缺省=按模型名 pattern 兜底）
 
 
 class ProviderPatchRequest(BaseModel):
@@ -38,6 +39,7 @@ class ProviderPatchRequest(BaseModel):
     model: str | None = None
     enabled: bool | None = None
     api_key: str | None = None
+    capabilities: list[str] | None = None
 
 
 @router.get("/settings/providers")
@@ -66,7 +68,7 @@ async def create_provider(
     row = await ProviderService().create(
         db, user, name=req.name, website=req.website, base_url=req.base_url,
         is_full_url=req.is_full_url, model=req.model, api_key=req.api_key,
-        enabled=req.enabled if req.enabled is not None else True,
+        enabled=req.enabled if req.enabled is not None else True, capabilities=req.capabilities,
     )
     return ok(serialize_provider(row))
 

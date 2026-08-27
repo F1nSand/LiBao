@@ -4,7 +4,7 @@ api_key 只写不读：API 响应仅 has_key 布尔；明文仅存文件（供�
 """
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.storage.file.rows import Row
 
@@ -19,3 +19,6 @@ class ProviderConfig(Row):
     model: str | None = None  # 模型名（裸名，无厂商前缀，如 gpt-4o / deepseek-chat）
     api_key: str | None = None  # 明文存储，仅服务端用，不 API 回传
     enabled: bool = True  # 是否当前激活（唯一激活：activate 保证至多一条 true）
+    # 模型能力声明（2026-08-27 多模态适配）：[] 未声明→按模型名 pattern 兜底；["vision"]=强制视觉；
+    # 其他非空（不含 vision）=强制非视觉。序列化随 GET /settings/providers(/active) 返回。
+    capabilities: list[str] = field(default_factory=list)

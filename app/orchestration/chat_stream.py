@@ -16,6 +16,7 @@ from langgraph.types import Command
 
 from app.core.events import sse_emitter
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
+from app.services.attachment import AttachmentService
 from app.services.notification import maybe_notify_from_tool_results
 from app.services.serializers import serialize_message
 from app.services.task import TaskService, push_event
@@ -75,7 +76,14 @@ def _title_from(content: str, max_chars: int = 20) -> str:
 
 
 def _graph_config(
-    *, thread_id: str, trace_id: str, assistant_msg_id: uuid.UUID, model_override: Any = None
+    *,
+    thread_id: str,
+    trace_id: str,
+    assistant_msg_id: uuid.UUID,
+    model_override: Any = None,
+    image_payload: dict[str, Any] | None = None,
+    current_image_ids: set[str] | None = None,
+    vision: bool = False,
 ) -> dict[str, Any]:
     cfg: dict[str, Any] = {
         "configurable": {
@@ -86,6 +94,11 @@ def _graph_config(
     }
     if model_override is not None:
         cfg["configurable"]["model"] = model_override
+    # 多模态（2026-08-27）：图片 b64 载荷只进 configurable（不落 checkpoint），见 core/multimodal
+    if image_payload:
+        cfg["configurable"]["image_payload"] = image_payload
+        cfg["configurable"]["current_image_ids"] = set(current_image_ids or [])
+        cfg["configurable"]["vision"] = vision
     return cfg
 
 
@@ -110,11 +123,49 @@ async def chat_stream_events(
     workspace: dict[str, Any] | None = None,
     trace_id: str,
     model_override: Any = None,
+    attachment_mimes: dict[str, str] | None = None,
 ) -> AsyncIterator[str]:
     emit = sse_emitter()
     msg_repo = MessageRepository(db)
     # 逐轮消息收集（docs 03 §3 多消息扩展）：stream_core 每轮工具结果齐后 append + 即时落库
     round_sink: list[dict[str, Any]] = []
+
+    # ---- ⓪ 多模态图片载荷准备（2026-08-27）：读盘+b64 进 configurable（不进 state/checkpoint）----
+    # 节点保持无 IO 铁律：读盘在此层包 to_thread；vision 判定在 build_initial_state 内；mime 白名单 core/multimodal
+    from app.core.config import get_settings
+    from app.core.multimodal import ImagePayload, encode_image, fit_budget, is_image_mime, make_ref_block
+
+    image_payload: dict[str, ImagePayload] = {}
+    current_image_ids: set[str] = set()
+    image_refs: list[dict[str, str]] = []
+    img_candidates: list[tuple[str, str]] = []  # (att_id, mime)，仅图片 mime 入候选，保序
+    for aid in attachments or []:
+        mime = (attachment_mimes or {}).get(aid, "")
+        if is_image_mime(mime):
+            img_candidates.append((aid, mime))
+    if img_candidates:
+        att_service_img = AttachmentService()
+        payloads: list[ImagePayload] = []
+        for aid, mime in img_candidates:
+            try:
+                att_row = await att_service_img.get_attachment_by_id(db, uuid.UUID(aid))
+                if att_row is None:
+                    raise ValueError("附件不存在")
+                data = await att_service_img.read_file(att_row)  # async（内部本地小读）
+                payloads.append(ImagePayload(att_id=aid, mime=mime, data_b64=encode_image(data)))
+            except Exception as exc:  # noqa: BLE001  单张读盘失败不阻断后续图
+                logger.warning("图片载荷读取失败 %s: %s", aid, exc)
+        kept, dropped_by_budget = fit_budget(payloads, get_settings().image_total_budget_mb)
+        image_payload = {p.att_id: p for p in kept}
+        current_image_ids = {p.att_id for p in kept}
+        ref_mimes = dict(img_candidates)
+        image_refs = [make_ref_block(p.att_id, ref_mimes.get(p.att_id, "image/png")) for p in kept]
+    # vision 判定与 build_initial_state 同源：effective model（agent 钉死优先）+ settings 声明
+    from app.core.vision import supports_vision
+    from app.orchestration.stream_core import resolve_effective_model
+
+    _effective_model = resolve_effective_model(agent)
+    is_vision = supports_vision(_effective_model, get_settings().llm_vision_declared)
 
     async def _persist_round(round_msg: dict[str, Any]) -> None:
         """即时落库（docs 03 §3）：每轮工具结果齐后同步写该轮 Message（任务中 DB 已有已完成轮次）。"""
@@ -162,6 +213,9 @@ async def chat_stream_events(
         trace_id=trace_id,
         assistant_msg_id=assistant_msg_id,
         model_override=model_override,
+        image_payload=image_payload,
+        current_image_ids=current_image_ids,
+        vision=is_vision,
     )
 
     async def on_interrupt(value: dict[str, Any]) -> str:
@@ -169,7 +223,7 @@ async def chat_stream_events(
             db,
             user=user,
             agent_id=agent.id,
-            input={"message": content},
+            input={"message": content, "attachment_ids": list(current_image_ids)},
             value=value,
             conversation_id=conversation.id,
             thread_id=str(conversation.id),
@@ -228,6 +282,7 @@ async def chat_stream_events(
             org_id=str(agent.org_id),
             enabled_tool_ids=await ToolService().enabled_tool_ids(db, agent.org_id),
             workspace=workspace,
+            image_refs=image_refs or None,
         ),
         graph_config=graph_config,
         emit=emit,
@@ -290,6 +345,8 @@ async def resume_stream_events(
         trace_id=trace_id,
         assistant_msg_id=assistant_msg_id,
         model_override=model_override,
+        # resume 续跑：中断轮的图片 b64 载荷已不在进程（configurable 不落盘）→ 不传 payload，
+        # 历史 ref 自然降级文本标记；中断轮图片不参与续跑属可接受退化（计划文档记录）
     )
 
     async def on_interrupt(value: dict[str, Any]) -> str:
@@ -448,6 +505,8 @@ async def agent_invoke_events(
 
     async for frame in stream_graph_events(
         graph=graph,
+        # agent_invoke（AgentTestRunner 轻量路径）暂不接收附件入参；
+        # 接法同 chat_stream_events：attachment_mimes → 读盘+b64 → _graph_config(image_payload=…) + image_refs
         initial=build_initial_state(
             agent,
             content,

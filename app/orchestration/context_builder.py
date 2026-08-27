@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from langchain_core.messages import BaseMessage, SystemMessage
 
 from app.core.config import get_settings
@@ -53,16 +55,37 @@ def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = No
     return [s.aci() for s in always] + [s.aci() for s in sorted(chosen, key=lambda s: s.id)]
 
 
-def build_context(state: AgentState, prompt_note: str | None = None) -> list[BaseMessage]:
+def build_context(
+    state: AgentState, prompt_note: str | None = None, image_ctx: dict[str, Any] | None = None
+) -> list[BaseMessage]:
     """组装进模型的完整消息列表：SystemMessage(静态) + 历史 + 记忆注入块 + 状态栏(尾部动态)。
 
     prompt_note：单轮临时提示（收口轮「已到步数上限」等），消息通道注入，不进 system_prompt（前缀缓存铁律）。
+    image_ctx（2026-08-27 多模态）：{"index": {att_id: ImagePayload}, "current_ids": set[str], "vision": bool}——
+    历史 HumanMessage 里的 image_ref 引用块在此水合为标准图像块（仅当前轮+vision+payload 齐备）；
+    其余 ref 降级文本标记。None（Mock/子代理/无图路径）→ 幂等直通零回归。
     """
     agent = state.get("agent_config", {})
     system_prompt = agent.get("system_prompt", "")
 
     system = SystemMessage(content=system_prompt)
-    history: list[BaseMessage] = list(state.get("messages", []))
+    if image_ctx is not None:
+        from app.core.multimodal import render_message_content
+
+        history: list[BaseMessage] = []
+        for m in state.get("messages", []):
+            rendered = render_message_content(
+                m.content,
+                index=image_ctx.get("index") or {},
+                current_ids=image_ctx.get("current_ids") or set(),
+                vision=bool(image_ctx.get("vision")),
+            )
+            if rendered is m.content:
+                history.append(m)
+            else:
+                history.append(m.model_copy(update={"content": rendered}))
+    else:
+        history = list(state.get("messages", []))
 
     # 工作区/项目级叠加（[工作区]/[项目约定]/skills 路由段）：消息通道渲染，绝不进 system_prompt
     # （前缀缓存铁律 2026-08-24；skills 渐进披露——只列路由，正文 load_skill 按需取回）

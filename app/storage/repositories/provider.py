@@ -32,11 +32,12 @@ class ProviderRepository:
 
     async def create(
         self, *, org_id: uuid.UUID, name: str, website: str | None = None, base_url: str | None = None,
-        is_full_url: bool = False, model: str | None = None, api_key: str | None = None, enabled: bool = True,
+        is_full_url: bool = False, model: str | None = None, api_key: str | None = None,
+        enabled: bool = True, capabilities: list[str] | None = None,
     ) -> ProviderConfig:
         row = ProviderConfig(
             org_id=org_id, name=name, website=website, base_url=base_url, is_full_url=is_full_url,
-            model=model, api_key=api_key, enabled=enabled,
+            model=model, api_key=api_key, enabled=enabled, capabilities=list(capabilities or []),
         )
         self.table.register(row)
         return row

@@ -16,11 +16,11 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from langchain_core.messages import HumanMessage
-
 from app.core.config import get_settings
 from app.core.errors import ERR_LLM_FAILURE
 from app.core.messages import message_text  # 独立模块（memory_extract/memory 共用，防导入环）
+from app.core.multimodal import human_message_with_images
+from app.core.vision import supports_vision
 from app.services.skill import discover_global_skills, merge_skill_routes
 from app.tools.builtin.file_ops import FILE_TOOL_IDS
 from app.tools.context import set_dispatch_ctx
@@ -116,6 +116,14 @@ def skills_route_section(skills: list[dict[str, str]] | None) -> str:
     return "\n".join(lines)
 
 
+def resolve_effective_model(agent: Any) -> str:
+    """有效模型名（单一事实源）：agent.model 非空优先（钉死），空 → 激活 provider / settings.llm_model。
+
+    agent_config.model 与 vision 判定共用——保证两者对「当前实际用哪个模型」结论一致。
+    """
+    return agent.model or get_settings().llm_model
+
+
 def build_initial_state(
     agent: Any,
     content: str,
@@ -123,6 +131,8 @@ def build_initial_state(
     org_id: str | None = None,
     enabled_tool_ids: list[str] | None = None,
     workspace: dict[str, Any] | None = None,
+    *,
+    image_refs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。
 
@@ -131,6 +141,10 @@ def build_initial_state(
 
     单通用 Agent 有效工具集 = seed 精选（agent.tools）∪ 本组织已启用工具（enabled_tool_ids）——
     MCP/自定义工具启用后即对通用助手开放（约束优先：仍要求 spec.enabled，tool_execute 守卫同源）。
+
+    image_refs（2026-08-27 多模态）：本轮图片引用块列表——vision 判定在此分支：
+    视觉模型 → 文本块+ref 块的 list content（b64 由 graph_config.configurable 载荷水合，见 core/multimodal）；
+    非视觉模型 → 注记前缀纯文本；无图 → 与原行为逐字节相同。
     """
     seed_tools = set(agent.tools or [])
     if enabled_tool_ids:
@@ -163,12 +177,17 @@ def build_initial_state(
             index_blocks.append(f"[{label}]\n" + "\n".join(lines))
     if index_blocks:
         project_memory_index = "\n\n".join(index_blocks)
+    # 多模态（2026-08-27）：vision 判定 + 三分支消息构造（core/multimodal 唯一收口）
+    effective_model = resolve_effective_model(agent)
+    refs = list(image_refs or [])
+    vision = supports_vision(effective_model, get_settings().llm_vision_declared)
+    first_message = human_message_with_images(content, refs, vision, model=effective_model)
     return {
-        "messages": [HumanMessage(content=content)],
+        "messages": [first_message],
         "agent_config": {
             "name": agent.name,
             # 模型切换（2026-08-27）：agent.model 为空 → 回落激活 provider / settings.llm_model
-            "model": agent.model or get_settings().llm_model,
+            "model": effective_model,
             "system_prompt": system_prompt,
             "tools": sorted(seed_tools),  # 确定性排序（前缀稳定；启停实时生效）
             "max_steps": agent.max_steps,

@@ -27,6 +27,18 @@ def _resolve_model(state: AgentState, config: Optional[RunnableConfig]) -> Any: 
     return LLMService.build_model(agent.get("model"))
 
 
+def _image_ctx(config: Optional[RunnableConfig]) -> Optional[dict[str, Any]]:  # noqa: UP045
+    """从 graph_config.configurable 取图片水合上下文（chat 层写入；测试/Mock 路径无 → None → ref 降级直通）。"""
+    if config is None:
+        return None
+    cfg = config.get("configurable", {}) or {}
+    payload = cfg.get("image_payload")
+    current_ids = cfg.get("current_image_ids")
+    if not payload and not current_ids:
+        return None
+    return {"index": payload or {}, "current_ids": set(current_ids or []), "vision": bool(cfg.get("vision"))}
+
+
 async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig] = None) -> dict[str, Any]:  # noqa: UP045  LangGraph 需 Optional 形式
     agent = state.get("agent_config", {})
     trace_id = (config or {}).get("configurable", {}).get("trace_id")
@@ -49,7 +61,7 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
     )
 
     start = time.perf_counter()
-    response = await model.ainvoke(build_context(state, prompt_note))
+    response = await model.ainvoke(build_context(state, prompt_note, image_ctx=_image_ctx(config)))
     duration_ms = int((time.perf_counter() - start) * 1000)
 
     # token 统计累计（totals 为 LastValue，读旧值再加）
