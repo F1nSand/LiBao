@@ -118,6 +118,30 @@ def migrate_to_libao(settings: Any = None) -> bool:
     return True
 
 
+def normalize_legacy_model_prefix(settings: Any = None) -> bool:
+    """去 liteLLM 前缀（2026-08-27 纯 OpenAI 协议迁移）：llm_model 含 `provider/` 前缀 → 剥成裸名（幂等）。
+
+    ChatOpenAI 用裸模型名（gpt-4o / deepseek-chat），旧 settings.json/.env 的 `deepseek/deepseek-v4-flash`
+    含前缀会被 DeepSeek 400。内存改 + 写回 settings.json（若值匹配）保持重启后一致。
+    """
+    settings = settings or get_settings()
+    model = getattr(settings, "llm_model", "") or ""
+    if "/" not in model:
+        return False
+    bare = model.split("/", 1)[1]
+    settings.llm_model = bare
+    sj = Path(getattr(settings, "agent_data_dir", "")) / "settings.json"
+    if sj.is_file():
+        try:
+            data = json.loads(sj.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return True
+        if isinstance(data, dict) and data.get("llm_model") == model:
+            data["llm_model"] = bare
+            sj.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
+
+
 def main() -> None:
     """CLI：uv run python -m app.core.migrate"""
     done = migrate_to_libao()

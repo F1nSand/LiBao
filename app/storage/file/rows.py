@@ -7,6 +7,7 @@
 - `to_dict/from_dict` 供 FileTable 序列化（datetime/uuid → ISO 字符串）。
 """
 
+import dataclasses
 import uuid
 from dataclasses import Field, dataclass, field
 from datetime import UTC, datetime
@@ -95,6 +96,14 @@ class Row:
             f = fields.get(k)
             ftype = f.type if isinstance(f, Field) else f  # Field 对象 → 类型
             object.__setattr__(inst, k, _dejsonify(v, ftype))
+        # 缺省字段补 dataclass 默认值（向后兼容：模型新增字段后旧 JSON 无该 key，否则 __new__ 跳过 __init__ 致属性缺失）
+        for f in dataclasses.fields(cls):
+            if f.name == "_dirty" or f.name in data:
+                continue
+            if f.default is not dataclasses.MISSING:
+                object.__setattr__(inst, f.name, f.default)
+            elif f.default_factory is not dataclasses.MISSING:  # type: ignore[comparison-overlap]
+                object.__setattr__(inst, f.name, f.default_factory())
         object.__setattr__(inst, "_dirty", False)
         return inst
 

@@ -18,6 +18,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
+from app.core.config import get_settings
 from app.core.errors import ERR_LLM_FAILURE
 from app.core.messages import message_text  # 独立模块（memory_extract/memory 共用，防导入环）
 from app.services.skill import discover_global_skills, merge_skill_routes
@@ -166,7 +167,8 @@ def build_initial_state(
         "messages": [HumanMessage(content=content)],
         "agent_config": {
             "name": agent.name,
-            "model": agent.model,
+            # 模型切换（2026-08-27）：agent.model 为空 → 回落激活 provider / settings.llm_model
+            "model": agent.model or get_settings().llm_model,
             "system_prompt": system_prompt,
             "tools": sorted(seed_tools),  # 确定性排序（前缀稳定；启停实时生效）
             "max_steps": agent.max_steps,

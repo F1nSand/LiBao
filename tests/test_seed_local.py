@@ -82,3 +82,21 @@ async def test_ensure_seed_tools_upgrades_engineering_prompt():
     await ensure_seed_tools(store)
     agent3 = (await store.table("agents").list())[0]
     assert agent3.system_prompt == AGENT_SYSTEM_PROMPT
+
+
+async def test_ensure_seed_tools_clears_legacy_model_prefix():
+    """模型切换迁移（2026-08-27）：默认 agent 带 liteLLM 前缀 model → ensure_seed_tools 清空。"""
+    store = get_store()
+    await seed_if_first_run(store)
+    agent = next(a for a in await store.table("agents").list() if a.is_default)
+    agent.model = "deepseek/deepseek-v4-flash"  # 模拟旧数据（带前缀）
+    from app.storage.file.store import FileContext
+
+    await FileContext(store).commit()
+    await ensure_seed_tools(store)
+    assert agent.model == ""
+    version = next(
+        v for v in await store.table("agent_versions").list()
+        if v.agent_id == agent.id and v.version == agent.current_version
+    )
+    assert version.model == ""  # 版本行 model 同步清空

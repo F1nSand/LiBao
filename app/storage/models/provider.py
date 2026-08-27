@@ -12,8 +12,10 @@ from app.storage.file.rows import Row
 @dataclass(kw_only=True)
 class ProviderConfig(Row):
     org_id: uuid.UUID
-    name: str
-    base_url: str | None = None  # LiteLLM api_base
-    model: str | None = None  # LiteLLM model（provider/model 格式）
+    name: str  # 配置别名（自由文本，非厂商名）
+    website: str | None = None  # 官网链接（可选，纯展示，后端不校验不调用）
+    base_url: str | None = None  # OpenAI 兼容请求地址（base 或完整 URL，见 is_full_url）
+    is_full_url: bool = False  # 请求地址是否完整 URL（含 /chat/completions）；false = base，系统自动拼接
+    model: str | None = None  # 模型名（裸名，无厂商前缀，如 gpt-4o / deepseek-chat）
     api_key: str | None = None  # 明文存储，仅服务端用，不 API 回传
-    enabled: bool = True
+    enabled: bool = True  # 是否当前激活（唯一激活：activate 保证至多一条 true）

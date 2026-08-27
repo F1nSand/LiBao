@@ -10,7 +10,6 @@ import asyncio
 import logging
 from typing import Any
 
-from app.core.config import get_settings
 from app.core.prefix import compute_prefix_hash
 from app.storage.constants import DEFAULT_ORG_ID
 from app.storage.file.store import FileContext, FileStore
@@ -431,7 +430,6 @@ async def seed_if_first_run(store: FileStore) -> bool:
     tools_table = store.table("tool_definitions")
     if await tools_table.count() > 0:
         return False
-    settings = get_settings()
 
     for spec in TOOL_SPECS:
         tools_table.register(ToolDefinition(org_id=DEFAULT_ORG_ID, **spec))
@@ -439,7 +437,7 @@ async def seed_if_first_run(store: FileStore) -> bool:
     agent = AgentConfig(
         org_id=DEFAULT_ORG_ID,
         name=AGENT_NAME,
-        model=settings.llm_model,
+        model="",  # 空 = 回落激活 provider / settings.llm_model（2026-08-27 模型切换去固化）
         system_prompt=AGENT_SYSTEM_PROMPT,
         is_default=True,
         tools=AGENT_TOOLS,
@@ -453,9 +451,9 @@ async def seed_if_first_run(store: FileStore) -> bool:
             agent_id=agent.id,
             version=1,
             system_prompt=AGENT_SYSTEM_PROMPT,
-            model=settings.llm_model,
+            model="",
             tools=AGENT_TOOLS,
-            prefix_hash=compute_prefix_hash(settings.llm_model, AGENT_SYSTEM_PROMPT, AGENT_TOOLS),
+            prefix_hash=compute_prefix_hash("", AGENT_SYSTEM_PROMPT, AGENT_TOOLS),
         )
     )
 
@@ -487,6 +485,12 @@ async def ensure_seed_tools(store: FileStore) -> None:
         if missing:
             default_agent.tools = (default_agent.tools or []) + missing
             changed = True
+        # 模型切换去固化迁移（2026-08-27）：默认 agent 的 model 若为旧 liteLLM 前缀格式（含 /）→ 清空
+        # （回落激活 provider / settings.llm_model），同步当前版本行。
+        if "/" in (default_agent.model or ""):
+            default_agent.model = ""
+            await _sync_default_version_prompt(store, default_agent)
+            changed = True
         # 旧版 seed prompt（含旧种子尾部标记但缺记忆工具提示 或 缺工程工作流引导）→ 升级为 AGENT_SYSTEM_PROMPT
         # （默认 agent 的 prompt 语义上是 seed 管理的基线；用户经 API 自定义的 prompt 不含旧标记，不覆盖）
         seed_prompt = default_agent.system_prompt or ""
@@ -503,11 +507,12 @@ async def ensure_seed_tools(store: FileStore) -> None:
 
 
 async def _sync_default_version_prompt(store: FileStore, agent: AgentConfig) -> None:
-    """agent_versions 当前版本行同步新 prompt + prefix_hash（默认 agent 升级 prompt 时）。"""
+    """agent_versions 当前版本行同步新 prompt/model/tools + prefix_hash（默认 agent 升级 prompt 或清空 model 时）。"""
     versions = store.table("agent_versions")
     for v in await versions.list():
         if v.agent_id == agent.id and v.version == agent.current_version:
             v.system_prompt = AGENT_SYSTEM_PROMPT
+            v.model = agent.model
             v.tools = list(agent.tools or [])
             v.prefix_hash = compute_prefix_hash(agent.model, AGENT_SYSTEM_PROMPT, list(agent.tools or []))
 

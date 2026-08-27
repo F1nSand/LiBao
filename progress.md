@@ -1,5 +1,53 @@
 # 进度账本 — ~/.LiBao 用户全局数据目录迁移（A+B 阶段，2026-08-25，L3+L2，plan: docs/plans/2026-08-25-libao-user-data-dir.md）
 
+## 补充（2026-08-27 续）：thinking/tool_calls 回归修复 + 对话页换模型按钮交接
+
+**493 passed + 2 skipped + ruff 干净**。
+
+### F1 思考轨迹/工具调用消失回归（用户报告「不 think 了」）
+
+- **根因**：换 ChatOpenAI 时踩坑——langchain-openai 的 base `ChatOpenAI` **静默丢弃 DeepSeek 推理模型的 `reasoning_content`**（源码注释明说 "not extracted, use provider-specific subclass"）。liteLLM 会保留到 `additional_kwargs`，ChatOpenAI 不 → stream_core 读不到 → thinking 事件恒空。工具调用本身正常（tool_calls 一直在返回）。
+- **修复**：`llm.py` 新增 `ReasoningChatOpenAI(ChatOpenAI)` 子类覆写三处——① `_convert_chunk_to_generation_chunk` 流式 chunk 提取 `delta.reasoning_content`；② `_get_request_payload` 请求透传历史 assistant 消息的 reasoning_content 回 DeepSeek（防多轮 400）；③ `_create_chat_result` 非流式兜底。
+- **探针实测全过**：流式 chunk 2-331 逐段 reasoning、langgraph `stream_mode=["messages"]` 截获 256 chunk 含 reasoning=True、聚合完整（945 字符）、多轮不 400、bind_tools 正常。前端 thinking 消费链路（useChatStream case 'thinking' → MessageBubble 折叠行）无改动即恢复。
+- **教训**：换 LLM 封装不能只验证「不报错 + content 对」，必须验证 **reasoning 提取 + tool_calls + 多轮透传**三个推理模型特有维度。
+- 测试 +2（test_llm.py：_delta_reasoning 单测 + chunk 转换提取单测）→ 全量 493 绿。
+
+### F2 对话页「换模型」按钮 → 已挂前端交接板
+
+- 用户需求：供应商配置后要能在对话页换模型，按钮放发送按钮左边；前端改动挂交接板让前端 agent 做。
+- 后端侧已全部就绪：activate/active/list 端点 + api/provider.ts 封装（listProviders/getActiveProvider/activateProvider）+ types 字段。
+- 交接板已写入 `FrontEnd/progress.md` 顶部 `[open] 2026-08-27 · ←后端`：ChatView.vue 发送按钮左边加换模型按钮（展示当前生效模型名 + 点击弹 provider 选择器 + activate 热切换），契约细节见交接条目。
+- SettingsView Provider tab 表单（手填别名/官网/请求地址/完整 URL 开关/模型名/key + 编辑 + 设为当前）上轮已顺手改完（vue-tsc + mock e2e 34 passed），前端 agent 可自行调整 UI 规划。
+
+---
+
+## 收尾存档（2026-08-27，L3）—— 模型/供应商切换入口（多配置 + 激活 + 纯 OpenAI 协议）
+
+**491 passed + 2 skipped + ruff 干净**（+12 后端测试）；前端 vue-tsc + mock e2e 34 passed。plan: `~/.claude/plans/openai-apikey-url-purring-lampson.md`。
+
+### 后端（B1-B9 全落地）
+
+- **纯 OpenAI 协议**：`llm.py` 从 liteLLM（`deepseek/` 前缀）换成 `langchain-openai` ChatOpenAI（模型名裸写），新增 `resolve_openai_base_url`（is_full_url 剥 `/chat/completions`）；移除 `ReasoningChatLiteLLM`。**实测 ChatOpenAI 1.5.1 对 DeepSeek 推理模型多轮 reasoning_content 原生兼容，无需补丁**。pyproject 加 `langchain-openai`。
+- **provider 多配置 + 唯一激活**：`ProviderConfig` 加 `website`/`is_full_url`；`name` 改别名。`ProviderService` 加 `activate`（停其余启目标 + 热同步）/`get_active`；`patch` 支持显式 null 清空；`sync` 用 URL 归一化。路由加 `POST /settings/providers/{id}/activate` + `GET /settings/providers/active`，PATCH 用 `model_fields_set`。
+- **模型名去固化**：seed 默认 agent.model 存空 + `stream_core.build_initial_state` 回落 `agent.model or settings.llm_model`（热切换对新对话即时生效）；`ensure_seed_tools` 清空带 `/` 前缀的旧 model。
+- **前缀迁移**：`migrate.normalize_legacy_model_prefix` 幂等去 `deepseek/` 前缀（写回 settings.json）；config 默认裸名 `deepseek-chat`；bootstrap 启动调用。
+- **rows.py `from_dict` 补 dataclass 默认值**（新增字段旧 JSON 反序列化向后兼容）。
+- **cost 裸名**：`provider_for` 加 gpt-/o1-/o3-/o4-→openai、claude-→anthropic 映射。
+
+### 前端（F1-F5，`Desktop/Agent/FrontEnd` 非 git 仓库）
+
+- `SettingsView.vue` Provider tab：去厂商下拉改手填（别名+官网链接+请求地址+完整 URL 开关+模型名+API key）；加「设为当前」按钮 + 「当前」徽标 + 顶部「当前生效」展示 + 编辑对话框。
+- `api/provider.ts` 加 activate/active；`types/api.ts` 加 website/is_full_url；`mock/server.ts` 同步 mock + activate/active 路由。
+
+### 遗留 / 注意
+
+- **未提交**（后端 19 文件改 + 1 新文件 test_llm.py + uv.lock；前端独立目录不在 git）。
+- **启动时自动迁移**：下次 `uvicorn` 启动会执行 `normalize_legacy_model_prefix`（settings.json 去前缀）+ `ensure_seed_tools`（清空默认 agent.model）——改真实 `~/.LiBao` 数据，幂等。
+- `llm_provider` 字段死代码未删（避免范围蔓延）；cost 完整方案（base_url 域名推导）列为遗留。
+- 进行中对话随 checkpoint 保留旧模型（热切换只影响新对话，预期行为）。
+
+---
+
 ## 收尾存档（2026-08-27，L2）—— TTL 清理 + curl 审查通道启用实测
 
 **476 passed + 2 skipped + ruff 干净**（+9 测试）。补上方案 A 后置的 TTL 清理，并启用 + 实测 bash 语义审查独立 curl 通道（此前未配 endpoint，从未真跑过）。

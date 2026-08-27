@@ -20,6 +20,16 @@ def test_estimate_cost_fallback_unknown():
 
 
 def test_provider_for():
-    assert provider_for("deepseek/deepseek-v4-flash") == "deepseek"
+    assert provider_for("deepseek/deepseek-v4-flash") == "deepseek"  # 旧 liteLLM 前缀名
     assert provider_for("openai/gpt-4o") == "openai"
     assert provider_for("") == "unknown"
+
+
+def test_provider_for_bare_names():
+    """纯 OpenAI 裸名（2026-08-27）：无厂商前缀，按裸名特征映射。"""
+    assert provider_for("gpt-4o") == "openai"
+    assert provider_for("o1-mini") == "openai"
+    assert provider_for("deepseek-chat") == "deepseek"
+    assert provider_for("qwen-max") == "qwen"
+    assert provider_for("claude-3.5-sonnet") == "anthropic"
+    assert provider_for("some-custom-model") == "unknown"

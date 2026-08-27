@@ -19,9 +19,18 @@ _RATES: dict[str, tuple[float, float]] = {
 _FALLBACK = (1.00, 2.00)
 
 
+# 纯 OpenAI 裸名（2026-08-27）：不带厂商前缀，需显式映射到 provider（deepseek-/qwen- 等已由 _RATES 前缀命中）
+_OPENAI_BARE_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "chatgpt-")
+_ANTHROPIC_BARE_PREFIXES = ("claude-")
+
+
 def provider_for(model: str) -> str:
-    """model 前缀 → provider（未知兜底 "unknown"）。"""
+    """model → provider（未知兜底 "unknown"）。兼容裸名（gpt-4o→openai）与旧前缀名。"""
     model = (model or "").lower()
+    if model.startswith(_OPENAI_BARE_PREFIXES):
+        return "openai"
+    if model.startswith(_ANTHROPIC_BARE_PREFIXES):
+        return "anthropic"
     return next((p for p in _RATES if model.startswith(p)), "unknown")
 
 

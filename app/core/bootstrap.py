@@ -24,9 +24,10 @@ async def init_runtime(settings: Settings | None = None) -> Runtime:
     # 首启自动迁移：项目根旧数据（.agent/data/kb/uploads）→ ~/.LiBao（幂等）。
     # 仅默认部署路径（settings 未显式传参）触发；测试传自定义 settings 时跳过。
     if settings is get_settings():
-        from app.core.migrate import migrate_to_libao
+        from app.core.migrate import migrate_to_libao, normalize_legacy_model_prefix
 
         migrate_to_libao(settings)
+        normalize_legacy_model_prefix(settings)  # 去 liteLLM 模型名前缀（纯 OpenAI 协议迁移）
 
     store = FileStore(settings)
     await store.init()

@@ -1,6 +1,7 @@
 """设置路由（docs 02 /settings Provider tab，前端契约 api/provider.ts）。LLM Provider 配置管理。
 
 api_key 只写不读：请求可带 api_key，响应仅 has_key 布尔（永不回传明文）。
+模型/供应商切换（2026-08-27）：多配置 + 唯一激活（activate 热切换）+ 纯 OpenAI 格式（裸名 + 请求地址/完整 URL 开关）。
 """
 
 from __future__ import annotations
@@ -20,15 +21,20 @@ router = APIRouter()
 
 
 class ProviderWriteRequest(BaseModel):
-    name: str
-    base_url: str | None = None
+    name: str  # 配置别名（自由文本）
+    website: str | None = None  # 官网链接（可选，纯展示）
+    base_url: str | None = None  # 请求地址（base 或完整 URL）
+    is_full_url: bool = False  # 请求地址是否完整 URL（含 /chat/completions）
     api_key: str | None = None
-    model: str | None = None
+    model: str | None = None  # 模型名（裸名）
     enabled: bool | None = None
 
 
 class ProviderPatchRequest(BaseModel):
+    name: str | None = None
+    website: str | None = None
     base_url: str | None = None
+    is_full_url: bool | None = None
     model: str | None = None
     enabled: bool | None = None
     api_key: str | None = None
@@ -42,6 +48,15 @@ async def list_providers(
     return ok(await ProviderService().list(db, user))
 
 
+@router.get("/settings/providers/active")
+async def get_active_provider(
+    user: User = Depends(require_admin),
+    db: Any = Depends(get_db),
+):
+    row = await ProviderService().get_active(db, user)
+    return ok(serialize_provider(row) if row else None)
+
+
 @router.post("/settings/providers")
 async def create_provider(
     req: ProviderWriteRequest,
@@ -49,8 +64,9 @@ async def create_provider(
     db: Any = Depends(get_db),
 ):
     row = await ProviderService().create(
-        db, user, name=req.name, base_url=req.base_url, model=req.model,
-        api_key=req.api_key, enabled=req.enabled if req.enabled is not None else True,
+        db, user, name=req.name, website=req.website, base_url=req.base_url,
+        is_full_url=req.is_full_url, model=req.model, api_key=req.api_key,
+        enabled=req.enabled if req.enabled is not None else True,
     )
     return ok(serialize_provider(row))
 
@@ -62,10 +78,19 @@ async def patch_provider(
     user: User = Depends(require_admin),
     db: Any = Depends(get_db),
 ):
-    row = await ProviderService().patch(
-        db, user, provider_id,
-        base_url=req.base_url, model=req.model, enabled=req.enabled, api_key=req.api_key,
-    )
+    # 只应用显式传入的字段（含显式 null = 清空）；未传字段不动
+    fields = {k: getattr(req, k) for k in req.model_fields_set}
+    row = await ProviderService().patch(db, user, provider_id, **fields)
+    return ok(serialize_provider(row))
+
+
+@router.post("/settings/providers/{provider_id}/activate")
+async def activate_provider(
+    provider_id: uuid.UUID,
+    user: User = Depends(require_admin),
+    db: Any = Depends(get_db),
+):
+    row = await ProviderService().activate(db, user, provider_id)
     return ok(serialize_provider(row))
 
 

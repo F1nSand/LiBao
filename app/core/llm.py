@@ -1,54 +1,101 @@
 """LLM 统一封装（docs 01 §6 core/llm.py）。
 
-LiteLLM 一家接多家：DeepSeek（默认，国内直连）/ Ollama（本地）/ OpenAI 等。
-build_model(model) 返回 streaming 的 ChatLiteLLM；api_key / api_base 从 Settings 注入（凭证只走 env，不入库）。
+纯 OpenAI 协议（2026-08-27）：统一走 langchain-openai 的 ChatOpenAI，模型名裸写（gpt-4o/deepseek-chat），
+base_url 走 OpenAI 兼容端点（provider 同步时已归一化为 base）。api_key / base_url 从 Settings 注入。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from langchain_litellm import ChatLiteLLM
+from langchain_core.messages import AIMessage
+from langchain_openai import ChatOpenAI
 
 from app.core.config import Settings, get_settings
 
+_CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
 
-class ReasoningChatLiteLLM(ChatLiteLLM):
-    """DeepSeek 推理模型兼容（langchain-litellm 0.7.0 上游 bug，类级补丁而非全局 monkeypatch）。
 
-    上游 `_convert_message_to_dict` 丢弃 thinking 块且不输出 reasoning_content →
-    DeepSeek 推理模型（deepseek-v4-flash）多轮/工具调用报 400
-    "reasoning_content must be passed back"。子类在转换后补：
-    additional_kwargs["reasoning_content"]（响应解析时已存）透传 + content 规范化为纯文本字符串
-    （字符串数组 content 也会被 DeepSeek 400）。
+def resolve_openai_base_url(base_url: str | None, is_full_url: bool) -> str | None:
+    """请求地址归一化为 OpenAI base（供 ChatOpenAI(base_url=...) 自动拼 /chat/completions）。
+
+    - base_url 为空 → None
+    - is_full_url=True：用户填完整 URL（含 /chat/completions），剥掉后缀作为 base
+    - is_full_url=False：用户填 base，去尾斜杠直接作为 base
+    """
+    if not base_url:
+        return None
+    if is_full_url and base_url.endswith(_CHAT_COMPLETIONS_SUFFIX):
+        return base_url[: -len(_CHAT_COMPLETIONS_SUFFIX)]
+    return base_url.rstrip("/")
+
+
+class ReasoningChatOpenAI(ChatOpenAI):
+    """DeepSeek 推理模型兼容（langchain-openai base 故意不提取 reasoning_content，见其源码注释）。
+
+    补两处，否则 DeepSeek 推理模型（deepseek-v4-flash）的思考轨迹丢失 + 多轮 400：
+    1. 响应解析（流式 chunk）把 delta.reasoning_content 提取到 additional_kwargs["reasoning_content"]
+       （stream_core 据此发 thinking 事件）。
+    2. 请求序列化透传 additional_kwargs["reasoning_content"] 回 DeepSeek（推理模型多轮
+       "reasoning_content must be passed back"）。
     """
 
-    def _create_message_dicts(
-        self, messages: list[Any], stop: list[str] | None
-    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        message_dicts, params = super()._create_message_dicts(messages, stop)
-        for d, m in zip(message_dicts, messages, strict=True):
-            if d.get("role") != "assistant":
-                continue
-            rc = getattr(m, "additional_kwargs", {}).get("reasoning_content")
+    def _convert_chunk_to_generation_chunk(
+        self, chunk: dict, default_chunk_class: type, base_generation_info: dict | None
+    ) -> Any:
+        gen = super()._convert_chunk_to_generation_chunk(chunk, default_chunk_class, base_generation_info)
+        if gen is not None and gen.message is not None:
+            rc = self._delta_reasoning(chunk)
             if rc:
-                d["reasoning_content"] = rc
-            if isinstance(d.get("content"), list):
-                d["content"] = "".join(
-                    (item.get("text", "") if isinstance(item, dict) else str(item))
-                    for item in d["content"]
-                    if not (isinstance(item, dict) and item.get("type") in ("thinking", "redacted_thinking"))
-                )
-        return message_dicts, params
+                gen.message.additional_kwargs["reasoning_content"] = rc
+        return gen
+
+    @staticmethod
+    def _delta_reasoning(chunk: dict) -> str | None:
+        choices = chunk.get("choices", []) or chunk.get("chunk", {}).get("choices", [])
+        if not choices:
+            return None
+        delta = (choices[0].get("delta") or {})
+        return delta.get("reasoning_content") or None
+
+    def _get_request_payload(self, input_: Any, *, stop: list[str] | None = None, **kwargs: Any) -> dict:
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        msgs = payload.get("messages")
+        if msgs:
+            try:
+                input_msgs = self._convert_input(input_).to_messages()
+            except Exception:  # noqa: BLE001  透传 best-effort，失败不阻断
+                return payload
+            # 逐消息对齐（_get_request_payload 内部也是逐消息 _convert_message_to_dict，数量/顺序不变）
+            for d, m in zip(msgs, input_msgs, strict=False):
+                if d.get("role") == "assistant" and isinstance(m, AIMessage):
+                    rc = m.additional_kwargs.get("reasoning_content")
+                    if rc:
+                        d["reasoning_content"] = rc
+        return payload
+
+    def _create_chat_result(self, response: Any, generation_info: dict | None = None) -> Any:
+        """非流式响应也提取 reasoning_content（build_model 恒 streaming=True，此处为完整性兜底）。"""
+        result = super()._create_chat_result(response, generation_info)
+        rc: str | None = None
+        if isinstance(response, dict):
+            choices = response.get("choices", [])
+            if choices:
+                rc = (choices[0].get("message") or {}).get("reasoning_content")
+        elif getattr(response, "choices", None):
+            rc = getattr(response.choices[0].message, "reasoning_content", None)
+        if rc and result.generations:
+            result.generations[0].message.additional_kwargs["reasoning_content"] = rc
+        return result
 
 
 class LLMService:
     @staticmethod
-    def build_model(model: str | None = None, settings: Settings | None = None) -> ChatLiteLLM:
+    def build_model(model: str | None = None, settings: Settings | None = None) -> ChatOpenAI:
         settings = settings or get_settings()
         kwargs: dict[str, Any] = {"model": model or settings.llm_model, "streaming": True}
         if settings.llm_api_key:
             kwargs["api_key"] = settings.llm_api_key
         if settings.llm_base_url:
-            kwargs["api_base"] = settings.llm_base_url
-        return ReasoningChatLiteLLM(**kwargs)
+            kwargs["base_url"] = settings.llm_base_url  # 已是 base（sync 归一化后）
+        return ReasoningChatOpenAI(**kwargs)

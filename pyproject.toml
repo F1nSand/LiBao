@@ -10,6 +10,7 @@ dependencies = [
     "lancedb>=0.37.1",
     "langchain-core>=1.5.4",
     "langchain-litellm>=0.7.0",
+    "langchain-openai>=0.3.0",
     "langgraph>=1.2.11",
     "litellm>=1.96.2",
     "mcp>=2.0.0",

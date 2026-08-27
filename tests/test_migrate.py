@@ -99,3 +99,22 @@ def test_settings_json_absent_uses_default(monkeypatch, tmp_path):
     finally:
         cfg.get_settings.cache_clear()
         monkeypatch.setattr(cfg, "_LIB", original_lib)
+
+
+def test_normalize_legacy_model_prefix_strips(tmp_path):
+    """llm_model 含 liteLLM 前缀 → 剥成裸名 + 写回 settings.json（幂等迁移）。"""
+    sj = tmp_path / "settings.json"
+    sj.write_text(
+        json.dumps({"llm_model": "deepseek/deepseek-v4-flash", "llm_api_key": "sk-x"}),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(llm_model="deepseek/deepseek-v4-flash", agent_data_dir=str(tmp_path))
+    assert migrate.normalize_legacy_model_prefix(settings) is True
+    assert settings.llm_model == "deepseek-v4-flash"
+    assert json.loads(sj.read_text(encoding="utf-8"))["llm_model"] == "deepseek-v4-flash"
+
+
+def test_normalize_legacy_model_prefix_no_prefix_noop(tmp_path):
+    settings = SimpleNamespace(llm_model="deepseek-chat", agent_data_dir=str(tmp_path))
+    assert migrate.normalize_legacy_model_prefix(settings) is False
+    assert settings.llm_model == "deepseek-chat"

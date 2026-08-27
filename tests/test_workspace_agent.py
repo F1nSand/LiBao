@@ -192,3 +192,15 @@ def test_session_workspace_injects_file_tools(tmp_path, monkeypatch):
         assert tid in ac["tools"]
     # 无 skills/项目 overlay（隐式工作区不叠加）
     assert "可用 Skills" not in (st["project_overlay"] or "")
+
+
+def test_build_initial_state_model_falls_back_to_settings(monkeypatch):
+    """模型切换去固化（2026-08-27）：agent.model 为空 → 回落 settings.llm_model（激活 provider 值）。"""
+    from app.orchestration import stream_core
+
+    monkeypatch.setattr(stream_core, "get_settings", lambda: SimpleNamespace(llm_model="deepseek-chat"))
+    agent = SimpleNamespace(
+        name="通用助手", model="", system_prompt="base", tools=[], max_steps=10, org_id=uuid.uuid4()
+    )
+    st = build_initial_state(agent, "hi", workspace=None)
+    assert st["agent_config"]["model"] == "deepseek-chat"

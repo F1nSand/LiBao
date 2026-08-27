@@ -64,9 +64,10 @@ class Settings(BaseSettings):
     cache_ttl_days: int = 7  # 临时会话工作区保留天数（超过即后台清理，见 core/session_cache.py）
     frontend_dist: str = "frontend_dist"  # 前端构建产物（FastAPI 静态托管，源码目录）
 
-    # ---- LLM（LiteLLM）----
+    # ---- LLM（纯 OpenAI 协议，2026-08-27）----
+    # 模型名裸写（gpt-4o / deepseek-chat），base_url 为 OpenAI 兼容 base（ChatOpenAI 自动拼 /chat/completions）
     llm_provider: str = "deepseek"
-    llm_model: str = "deepseek/deepseek-chat"
+    llm_model: str = "deepseek-chat"
     llm_api_key: str = ""
     llm_base_url: str = ""
 

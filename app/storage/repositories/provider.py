@@ -31,11 +31,12 @@ class ProviderRepository:
         return rows[0] if rows else None
 
     async def create(
-        self, *, org_id: uuid.UUID, name: str, base_url: str | None, model: str | None,
-        api_key: str | None, enabled: bool,
+        self, *, org_id: uuid.UUID, name: str, website: str | None = None, base_url: str | None = None,
+        is_full_url: bool = False, model: str | None = None, api_key: str | None = None, enabled: bool = True,
     ) -> ProviderConfig:
         row = ProviderConfig(
-            org_id=org_id, name=name, base_url=base_url, model=model, api_key=api_key, enabled=enabled
+            org_id=org_id, name=name, website=website, base_url=base_url, is_full_url=is_full_url,
+            model=model, api_key=api_key, enabled=enabled,
         )
         self.table.register(row)
         return row
