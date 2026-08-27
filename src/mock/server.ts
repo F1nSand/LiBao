@@ -32,8 +32,8 @@ interface ParsedBody {
 
 /** mock provider 配置（内存态；provider 契约见 api/provider.ts） */
 const mockProviders: Array<Record<string, unknown>> = [
-  { id: 'pv_001', name: 'openai', base_url: 'https://api.openai.com/v1', model: 'gpt-4o', enabled: true, has_key: true, created_at: isoDate(200) },
-  { id: 'pv_002', name: 'deepseek', base_url: '', model: 'deepseek-chat', enabled: false, has_key: true, created_at: isoDate(100) },
+  { id: 'pv_001', name: 'OpenAI 生产', website: 'https://openai.com', base_url: 'https://api.openai.com/v1', is_full_url: false, model: 'gpt-4o', enabled: true, has_key: true, created_at: isoDate(200) },
+  { id: 'pv_002', name: '我的 DeepSeek', website: 'https://platform.deepseek.com', base_url: 'https://api.deepseek.com', is_full_url: false, model: 'deepseek-chat', enabled: false, has_key: true, created_at: isoDate(100) },
 ]
 
 /** M7-B 演示「外部写文件」：首次拉取 ws_001 文件列表后延迟注入一个新文件（文件树轮询应自动捕获） */
@@ -581,9 +581,18 @@ export const mockServer = {
     }
     /* ===== Provider 配置（前端契约 docs/03 §5.6，后端已实现；mock 演示） ===== */
     if (method === 'GET' && pathname === '/settings/providers') return void json(res, ok(mockProviders))
+    if (method === 'GET' && pathname === '/settings/providers/active') {
+      return void json(res, ok(mockProviders.find((x) => x.enabled) ?? null))
+    }
     if (method === 'POST' && pathname === '/settings/providers') {
       const pv = { id: uid('pv'), ...(body.json ?? {}), has_key: !!body.json?.api_key, enabled: body.json?.enabled ?? true, created_at: isoDate(0) }
       mockProviders.push(pv)
+      return void json(res, ok(pv))
+    }
+    const pm = match(pathname, '/settings/providers/:id/activate')
+    if (method === 'POST' && pm) {
+      const pv = mockProviders.find((x) => x.id === pm.id)
+      if (pv) mockProviders.forEach((x) => { x.enabled = x.id === pm.id })
       return void json(res, ok(pv))
     }
     p = match(pathname, '/settings/providers/:id')

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listProviders, createProvider, updateProvider, deleteProvider } from '@/api/provider'
+import { listProviders, createProvider, updateProvider, deleteProvider, activateProvider, getActiveProvider } from '@/api/provider'
 import { FEATURE, isUnavailable } from '@/api/availability'
 import { swallowNotImplemented } from '@/utils/http-envelope'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -35,12 +35,23 @@ const sse = useSSE(
 /* ---------- Provider 配置（契约见 api/provider.ts，后端未实现走降级） ---------- */
 const providers = ref<ProviderConfig[]>([])
 const providersUnavailable = computed(() => isUnavailable(FEATURE.providers))
+const activeProvider = ref<ProviderConfig | null>(null)
 const providerDialog = ref(false)
-const providerForm = reactive({ name: 'openai', base_url: '', api_key: '', model: '' })
+const providerDialogMode = ref<'create' | 'edit'>('create')
+const providerForm = reactive({
+  id: '',
+  name: '',
+  website: '',
+  base_url: '',
+  is_full_url: false,
+  api_key: '',
+  model: '',
+})
 const providerLoading = ref(false)
 
 onMounted(() => {
   void loadProviders()
+  void loadActiveProvider()
   void loadNotifications()
   if (!isUnavailable(FEATURE.notifications)) sse.connect()
 })
@@ -57,30 +68,61 @@ async function loadProviders() {
   }
 }
 
+async function loadActiveProvider() {
+  const active = await swallowNotImplemented(getActiveProvider())
+  if (active !== undefined) activeProvider.value = active
+}
+
+function resetProviderForm() {
+  Object.assign(providerForm, {
+    id: '', name: '', website: '', base_url: '', is_full_url: false, api_key: '', model: '',
+  })
+}
+
 async function openAddProvider() {
-  Object.assign(providerForm, { name: 'openai', base_url: '', api_key: '', model: '' })
+  resetProviderForm()
+  providerDialogMode.value = 'create'
+  providerDialog.value = true
+}
+
+function openEditProvider(p: ProviderConfig) {
+  Object.assign(providerForm, {
+    id: p.id,
+    name: p.name,
+    website: p.website || '',
+    base_url: p.base_url || '',
+    is_full_url: p.is_full_url || false,
+    api_key: '', // 编辑时留空 = 不修改（后端只写不读，无法回显明文）
+    model: p.model || '',
+  })
+  providerDialogMode.value = 'edit'
   providerDialog.value = true
 }
 
 async function saveProvider() {
-  const created = await swallowNotImplemented(
-    createProvider({
-      name: providerForm.name,
-      base_url: providerForm.base_url || undefined,
-      api_key: providerForm.api_key || undefined,
-      model: providerForm.model || undefined,
-    }),
-  )
-  if (created === undefined) return // 后端未实现 → 打标降级，不弹错
+  const body = {
+    name: providerForm.name,
+    website: providerForm.website || undefined,
+    base_url: providerForm.base_url || undefined,
+    is_full_url: providerForm.is_full_url,
+    model: providerForm.model || undefined,
+    ...(providerForm.api_key ? { api_key: providerForm.api_key } : {}), // 留空 = 不传（编辑不改 key）
+  }
+  const saved = providerDialogMode.value === 'create'
+    ? await swallowNotImplemented(createProvider(body))
+    : await swallowNotImplemented(updateProvider(providerForm.id, body))
+  if (saved === undefined) return // 后端未实现 → 打标降级，不弹错
   providerDialog.value = false
-  ElMessage.success('Provider 已保存')
+  ElMessage.success(providerDialogMode.value === 'create' ? 'Provider 已保存' : 'Provider 已更新')
   await loadProviders()
 }
 
-async function onToggleProvider(p: ProviderConfig, enabled: boolean) {
-  const ok = await swallowNotImplemented(updateProvider(p.id, { enabled }))
-  if (ok === undefined) return
-  p.enabled = enabled
+async function onActivateProvider(p: ProviderConfig) {
+  const activated = await swallowNotImplemented(activateProvider(p.id))
+  if (activated === undefined) return
+  ElMessage.success(`已切换为 ${activated.name}`)
+  await loadProviders()
+  await loadActiveProvider()
 }
 
 async function onDeleteProvider(id: string) {
@@ -89,6 +131,7 @@ async function onDeleteProvider(id: string) {
   if (ok === undefined) return
   ElMessage.success('已删除')
   await loadProviders()
+  await loadActiveProvider()
 }
 </script>
 
@@ -136,22 +179,39 @@ async function onDeleteProvider(id: string) {
         <div v-if="activeTab === 'provider'" key="provider" class="settings-pane">
           <template v-if="!providersUnavailable">
             <div class="users-toolbar">
+              <span v-if="activeProvider" class="active-hint">
+                当前生效：<b>{{ activeProvider.name }}</b> · {{ activeProvider.model }}
+              </span>
               <el-button type="primary" :icon="'Plus'" @click="openAddProvider">添加 Provider</el-button>
             </div>
             <el-table :data="providers" v-loading="providerLoading" size="small">
-              <el-table-column prop="name" label="Provider" width="120" />
-              <el-table-column prop="base_url" label="Base URL" min-width="200" show-overflow-tooltip />
-              <el-table-column prop="model" label="模型" width="140" />
+              <el-table-column label="别名" width="160">
+                <template #default="{ row }">
+                  <span>{{ row.name }}</span>
+                  <el-tag v-if="row.enabled" size="small" type="success" class="active-tag">当前</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="model" label="模型" width="150" show-overflow-tooltip />
+              <el-table-column label="请求地址" min-width="220" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ row.base_url }}{{ row.is_full_url ? '' : ' …/chat/completions' }}
+                </template>
+              </el-table-column>
+              <el-table-column label="官网" width="140" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <a v-if="row.website" :href="row.website" target="_blank" rel="noopener">{{ row.website }}</a>
+                  <span v-else class="muted">—</span>
+                </template>
+              </el-table-column>
               <el-table-column label="API Key" width="90">
                 <template #default="{ row }">{{ row.has_key ? '已配置' : '未配置' }}</template>
               </el-table-column>
-              <el-table-column label="启用" width="80">
+              <el-table-column label="操作" width="170">
                 <template #default="{ row }">
-                  <el-switch :model-value="row.enabled" size="small" @change="(v: boolean) => onToggleProvider(row, v)" />
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="80">
-                <template #default="{ row }">
+                  <el-button v-if="!row.enabled" size="small" text type="primary" @click="onActivateProvider(row)">
+                    设为当前
+                  </el-button>
+                  <el-button size="small" text @click="openEditProvider(row)">编辑</el-button>
                   <el-button size="small" text type="danger" @click="onDeleteProvider(row.id)">删除</el-button>
                 </template>
               </el-table-column>
@@ -164,21 +224,49 @@ async function onDeleteProvider(id: string) {
       </Transition>
     </div>
 
-    <!-- 添加 Provider -->
-    <el-dialog :model-value="providerDialog" title="添加 Provider" width="460px" @close="providerDialog = false">
-      <el-form label-width="80px">
-        <el-form-item label="Provider">
-          <el-select v-model="providerForm.name">
-            <el-option label="OpenAI" value="openai" />
-            <el-option label="DeepSeek" value="deepseek" />
-            <el-option label="Qwen" value="qwen" />
-            <el-option label="Kimi" value="kimi" />
-            <el-option label="Ollama" value="ollama" />
-          </el-select>
+    <!-- 添加/编辑 Provider -->
+    <el-dialog
+      :model-value="providerDialog"
+      :title="providerDialogMode === 'create' ? '添加 Provider' : '编辑 Provider'"
+      width="500px"
+      @close="providerDialog = false"
+    >
+      <el-form label-width="100px">
+        <el-form-item label="名称（别名）" required>
+          <el-input v-model="providerForm.name" placeholder="如：我的 DeepSeek / 公司内网代理" />
         </el-form-item>
-        <el-form-item label="Base URL"><el-input v-model="providerForm.base_url" placeholder="https://api.openai.com/v1" /></el-form-item>
-        <el-form-item label="API Key"><el-input v-model="providerForm.api_key" type="password" show-password placeholder="凭证走密钥管理，不回传" /></el-form-item>
-        <el-form-item label="模型"><el-input v-model="providerForm.model" placeholder="默认模型，如 gpt-4o / deepseek-chat" /></el-form-item>
+        <el-form-item label="官网链接">
+          <el-input v-model="providerForm.website" placeholder="https://platform.deepseek.com（可选，仅展示）" />
+        </el-form-item>
+        <el-form-item label="请求地址">
+          <el-input
+            v-model="providerForm.base_url"
+            placeholder="https://api.deepseek.com 或 https://api.openai.com/v1"
+          />
+        </el-form-item>
+        <el-form-item label="完整 URL">
+          <el-switch v-model="providerForm.is_full_url" />
+          <span class="url-hint">
+            {{
+              providerForm.base_url
+                ? (providerForm.is_full_url
+                  ? '已填写完整请求地址（含 /chat/completions）'
+                  : '自动拼接 → ' + providerForm.base_url.replace(/\/+$/, '') + '/chat/completions')
+                : '关闭 = 自动拼接 /chat/completions'
+            }}
+          </span>
+        </el-form-item>
+        <el-form-item label="模型名">
+          <el-input v-model="providerForm.model" placeholder="裸名，如 gpt-4o / deepseek-chat" />
+        </el-form-item>
+        <el-form-item label="API Key">
+          <el-input
+            v-model="providerForm.api_key"
+            type="password"
+            show-password
+            :placeholder="providerDialogMode === 'edit' ? '留空 = 不修改' : '凭证只写不读，不回传'"
+          />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="providerDialog = false">取消</el-button>
@@ -191,6 +279,24 @@ async function onDeleteProvider(id: string) {
 <style scoped>
 .users-toolbar {
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.active-hint {
+  color: var(--app-text-secondary);
+  font-size: var(--app-font-size-sm);
+}
+.active-tag {
+  margin-left: 6px;
+}
+.muted {
+  color: var(--app-text-disabled, #bbb);
+}
+.url-hint {
+  margin-left: 8px;
+  color: var(--app-text-secondary);
+  font-size: var(--app-font-size-xs, 12px);
 }
 .settings-tabs {
   background: var(--app-content-bg);

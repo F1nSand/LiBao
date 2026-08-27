@@ -10,12 +10,20 @@ export function listProviders() {
   return httpGet<ProviderConfig[]>('/settings/providers')
 }
 
+export function getActiveProvider() {
+  return httpGet<ProviderConfig | null>('/settings/providers/active')
+}
+
 export function createProvider(body: SaveProviderRequest) {
   return httpPost<ProviderConfig>('/settings/providers', body)
 }
 
 export function updateProvider(id: string, body: Partial<SaveProviderRequest>) {
   return httpPatch<ProviderConfig>(`/settings/providers/${id}`, body)
+}
+
+export function activateProvider(id: string) {
+  return httpPost<ProviderConfig>(`/settings/providers/${id}/activate`)
 }
 
 export function deleteProvider(id: string) {

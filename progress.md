@@ -4,6 +4,12 @@
 > 本会话开始先读本节 → 处理 → 划掉。格式：[状态] 日期 · 方向 | 事项 | 期望/实际。
 > 方向：→ 后端（前端发现的契约缺口/后端 bug/需后端配合）；← 后端（后端给前端的事项）。
 
+> [open] 2026-08-27 · ←后端 | **对话页换模型按钮（后端 provider 多配置+唯一激活已就绪，前端补 UI）** | 后端已完成「模型/供应商切换」链路：`ProviderConfig` 字段 = `name`(配置别名，非厂商名) / `website`(官网链接，可选纯展示) / `base_url`(请求地址) / `is_full_url`(是否完整 URL，false 自动拼 `/chat/completions`) / `model`(裸名，如 gpt-4o/deepseek-chat) / `enabled`(唯一激活) / `has_key`。
+>   - 端点已就绪：`GET /settings/providers`（列表）、`POST /settings/providers/{id}/activate`（**设为当前 = 唯一激活 + 即时热切换**，其余自动 `enabled=false`）、`GET /settings/providers/active`（当前生效，无则 `null`）。
+>   - 前端 API 封装已就绪（`src/api/provider.ts` 的 `listProviders`/`getActiveProvider`/`activateProvider` + `types/api.ts` `ProviderConfig`/`SaveProviderRequest` 已含上述字段，**类型层无需改**）。注意 `api_key` 只写不读（响应恒 `has_key`，无明文）。
+>   - **请前端做（ChatView.vue）**：① 发送按钮**左边**加「换模型」按钮——按钮或邻旁展示**当前生效模型名**（数据源 `getActiveProvider()`，取 `model` 或 `name`，空态显示「未配置」）；② 点击弹 provider 列表选择器（复用 `listProviders()`，每项显示别名 + 模型名 +「当前」徽标，enabled 那条高亮），选中调 `activateProvider(id)` → 成功后刷新当前生效名 + 列表。降级沿用 `swallowNotImplemented`。交互参考 SettingsView Provider tab 的「设为当前」。**语义**：切换只影响**新对话**（进行中对话随 checkpoint 保留旧模型，属预期，无需处理）。
+>   - SettingsView Provider tab 后端字段已同步（website/is_full_url），但其表单/表格是**上轮后端 agent 顺手改的**，若与前端 agent 自己规划冲突可自行调整，以本交接契约为准。
+
 > [done] 2026-08-25 · →后端 | **Workspace 契约字段改名 `system_prompt_fragment` → `project_instructions`（注入语义变更：经消息通道 `[工作区]` 块注入 project_overlay，绝不进 system_prompt）** | 前端已联动收口（types `Workspace`/`CreateWorkspaceRequest`/`UpdateWorkspaceRequest` + mock server 序列化 + `workspace.spec` + `.agent/README` 措辞），UI 表单本就不暴露该字段（纯契约层），全库 grep 无残留；真实后端 e2e（`e2e-real/backend.spec.ts`）roundtrip 断言依赖该字段。请后端同步：`serialize_workspace` 输出 `project_instructions`、创建/更新请求收 `project_instructions`、注入语义落实（工作区指令/`.agent/agent.md` 经消息通道 project_overlay 注入，不进 system_prompt）。后端未实现前真实后端 e2e 该断言失败（前端 mock 已就绪，无回归）。**2026-08-25 后端已实现并实测验证**：真实后端 e2e 3/3 全绿（`npm run test:e2e:real`，13.5s）——①roundtrip 断言 `project_instructions` 创建→回读一致、②UI 工作区全流程（建→.agent 骨架→文件操作→删清理）、③真实 LLM 聊天流式+落库；另 probe 实测 serialize_workspace 输出该字段。注入语义（工作区指令经 project_overlay、不进 system_prompt）由后端侧落实，前端无再改动。
 
 > 2026-08-16 进度检查：双方契约已对齐（前端零改动）；后端 M3 收尾（207/207）+ 5 组接口已就绪 + evals 已修。

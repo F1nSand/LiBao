@@ -4,7 +4,10 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useChatStream } from '@/composables/useChatStream'
 import { TOKEN_LIMIT } from '@/types'
-import type { Message } from '@/types'
+import type { Message, ProviderConfig } from '@/types'
+import { listProviders, getActiveProvider, activateProvider } from '@/api/provider'
+import { FEATURE, isUnavailable } from '@/api/availability'
+import { swallowNotImplemented } from '@/utils/http-envelope'
 import { truncate } from '@/utils/format'
 import MessageList from '@/components/business/MessageList.vue'
 import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
@@ -129,6 +132,50 @@ function onKeydown(e: KeyboardEvent) {
     void send()
   }
 }
+
+/* ---------- 换模型（交接板 ←后端 2026-08-27：provider 多配置唯一激活；切换只影响新对话） ---------- */
+const providers = ref<ProviderConfig[]>([])
+const activeProvider = ref<ProviderConfig | null>(null)
+const modelMenuVisible = ref(false)
+const switchingModel = ref(false)
+const providerUnavailable = computed(() => isUnavailable(FEATURE.providers))
+
+/** 按钮文案：当前生效模型名（取 model 或别名），空态「未配置」 */
+const activeModelLabel = computed(() => {
+  if (!activeProvider.value) return '未配置'
+  return activeProvider.value.model || activeProvider.value.name
+})
+
+async function loadActiveModel() {
+  const active = await swallowNotImplemented(getActiveProvider())
+  if (active !== undefined) activeProvider.value = active
+}
+
+/** 首次展开选择器时拉列表（避免每次进聊天页多两个请求） */
+async function onModelMenuShow() {
+  if (providers.value.length) return
+  await reloadProviders()
+}
+
+async function reloadProviders() {
+  const list = await swallowNotImplemented(listProviders())
+  if (list !== undefined) providers.value = list
+  await loadActiveModel()
+}
+
+async function onPickModel(p: ProviderConfig) {
+  if (p.enabled || switchingModel.value) return
+  switchingModel.value = true
+  try {
+    const activated = await swallowNotImplemented(activateProvider(p.id))
+    if (activated === undefined) return
+    ElMessage.success(`已切换模型：${activated.model || activated.name}`)
+    modelMenuVisible.value = false
+    await reloadProviders()
+  } finally {
+    switchingModel.value = false
+  }
+}
 </script>
 
 <template>
@@ -162,7 +209,48 @@ function onKeydown(e: KeyboardEvent) {
             :disabled="composerDisabled"
             @keydown="onKeydown"
           />
-          <el-button v-if="currentStream.streaming" type="danger" :icon="'VideoPause'" @click="stop">
+          <el-popover
+            v-if="!providerUnavailable"
+            v-model:visible="modelMenuVisible"
+            placement="top-start"
+            :width="300"
+            trigger="click"
+            popper-class="model-picker"
+            @show="onModelMenuShow"
+          >
+            <template #reference>
+              <el-button class="model-btn" :icon="'Cpu'">
+                <span class="model-btn-label">{{ activeModelLabel }}</span>
+              </el-button>
+            </template>
+            <div v-loading="switchingModel" class="model-menu">
+              <div v-if="activeProvider" class="model-menu-hint">
+                当前：{{ activeProvider.name }} · {{ activeProvider.model || '（未填模型名）' }}
+              </div>
+              <div v-else class="model-menu-hint">尚未配置 Provider（到 设置 → Provider 配置 添加）</div>
+              <button
+                v-for="p in providers"
+                :key="p.id"
+                class="model-item"
+                :class="{ active: p.enabled }"
+                :disabled="switchingModel"
+                @click="onPickModel(p)"
+              >
+                <span class="model-item-name">{{ p.name }}</span>
+                <span class="model-item-model">{{ p.model }}</span>
+                <el-tag v-if="p.enabled" size="small" type="success">当前</el-tag>
+              </button>
+              <div v-if="!providers.length && !switchingModel" class="model-menu-empty">
+                {{ providerUnavailable ? '' : '暂无 Provider 配置' }}
+              </div>
+            </div>
+          </el-popover>
+          <el-button
+            v-if="currentStream.streaming"
+            type="danger"
+            :icon="'VideoPause'"
+            @click="stop"
+          >
             停止
           </el-button>
           <el-button v-else type="primary" :icon="'Promotion'" :disabled="composerDisabled || !input.trim()" @click="send">
@@ -252,5 +340,67 @@ function onKeydown(e: KeyboardEvent) {
 }
 .char-count.over {
   color: #ef4444;
+}
+/* 换模型按钮：弱化为次要操作（发送是主按钮），当前模型名随按钮展示 */
+.model-btn {
+  color: var(--app-text-secondary);
+}
+.model-btn-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>
+
+<style>
+/* popover teleport 到 body → 非 scoped（对齐 el-tooltip popper-class 先例） */
+.model-picker .model-menu {
+  min-height: 48px;
+}
+.model-picker .model-menu-hint {
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--app-border-light);
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+.model-picker .model-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--app-radius, 6px);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+.model-picker .model-item:hover:not(.active) {
+  background: var(--app-border-light);
+}
+.model-picker .model-item.active {
+  cursor: default;
+  background: color-mix(in srgb, var(--app-primary) 8%, transparent);
+}
+.model-picker .model-item-name {
+  font-weight: 600;
+  color: var(--app-text-main);
+}
+.model-picker .model-item-model {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--app-text-secondary);
+}
+.model-picker .model-menu-empty {
+  padding: 12px 4px;
+  text-align: center;
+  color: var(--app-text-muted);
+  font-size: 12px;
 }
 </style>

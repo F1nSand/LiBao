@@ -413,9 +413,16 @@ export interface Notification {
 /** ---------- Provider 配置（前端定义契约 docs/03 §5.6，后端已实现 08-17） ---------- */
 export interface ProviderConfig {
   id: string
+  /** 配置别名（自由文本，非厂商名） */
   name: string
-  base_url?: string
-  model?: string
+  /** 官网链接（可选，纯展示） */
+  website?: string | null
+  /** 请求地址（base 或完整 URL，见 is_full_url） */
+  base_url?: string | null
+  /** 请求地址是否完整 URL（含 /chat/completions）；false = base，系统自动拼接 */
+  is_full_url?: boolean
+  /** 模型名（裸名，如 gpt-4o / deepseek-chat） */
+  model?: string | null
   enabled: boolean
   /** api_key 是否已配置（后端不回传明文） */
   has_key: boolean
@@ -424,8 +431,10 @@ export interface ProviderConfig {
 
 export interface SaveProviderRequest {
   name: string
-  base_url?: string
+  website?: string | null
+  base_url?: string | null
+  is_full_url?: boolean
   api_key?: string
-  model?: string
+  model?: string | null
   enabled?: boolean
 }
