@@ -6,9 +6,10 @@ Windows 关键：psycopg async 需 SelectorEventLoop，而 Windows 默认 Proact
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -50,8 +51,15 @@ async def lifespan(app: FastAPI):
     saver = build_checkpointer(settings)
     app.state.checkpointer = saver
     app.state.graph = build_graph(saver)
+    # 临时会话工作区 TTL 清理（后台周期任务，删 cache/sessions/* 过期目录）
+    from app.core.session_cache import session_cache_loop
+
+    cleanup_task = asyncio.create_task(session_cache_loop(settings), name="session-cache-ttl")
     logger.info("lifespan ready: graph compiled, checkpointer up")
     yield
+    cleanup_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await cleanup_task
     await cleanup_runtime(runtime)
 
 

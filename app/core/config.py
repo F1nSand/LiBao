@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     agent_data_dir: str = _LIB  # 会话 JSONL / 记忆 md / 配置 json 根目录
     kb_root: str = f"{_LIB}/kb"  # KB 集合目录（index.json + documents/ + vectors.lance）
     cache_dir: str = f"{_LIB}/cache"  # 临时会话工作区（非工作区对话的文件落地；可 TTL 清理）
+    cache_ttl_days: int = 7  # 临时会话工作区保留天数（超过即后台清理，见 core/session_cache.py）
     frontend_dist: str = "frontend_dist"  # 前端构建产物（FastAPI 静态托管，源码目录）
 
     # ---- LLM（LiteLLM）----

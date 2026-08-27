@@ -336,7 +336,7 @@ def test_curl_review_template_no_key_in_argv(monkeypatch):
 
     class _Proc:
         returncode = 0
-        stdout = '{"verdict":"ALLOW"}'
+        stdout = '{"choices":[{"message":{"content":"{\\"verdict\\":\\"ALLOW\\"}"}}]}'
         stderr = ""
 
     def _fake_run(args, **kw):
@@ -347,7 +347,7 @@ def test_curl_review_template_no_key_in_argv(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
     out = asyncio.run(file_ops._curl_review("echo hi"))
-    assert out == '{"verdict":"ALLOW"}'
+    assert out == '{"verdict":"ALLOW"}'  # 已从 OpenAI 信封提取 assistant content
     # 命令模板：bash -c 'curl ... $BASH_REVIEW_CONFIG'
     assert captured["args"][0] == "/usr/bin/bash"
     cmdline = " ".join(captured["args"][2:])
@@ -356,6 +356,33 @@ def test_curl_review_template_no_key_in_argv(monkeypatch):
     assert "sk-super-secret" in captured["cfg"]  # key 在配置文件
     assert 'data-binary = "@' in captured["cfg"]  # body 走 @file（引号内 @路径）
     assert "https://api.example.com" in captured["cfg"]
+
+
+def test_curl_review_extracts_content_from_envelope():
+    """真实 OpenAI 兼容 endpoint 返回信封，必须提取 choices[0].message.content（此前直接当判定 → 恒 error）。"""
+    raw = (
+        '{"id":"x","choices":[{"message":{"role":"assistant",'
+        '"content":"{\\"verdict\\":\\"BLOCK\\",\\"reason\\":\\"删除风险\\"}"}}]}'
+    )
+    assert file_ops._extract_review_content(raw) == '{"verdict":"BLOCK","reason":"删除风险"}'
+
+
+def test_curl_review_extract_content_list_blocks():
+    """content 为文本块列表的 provider → 拼接 text 字段。"""
+    raw = '{"choices":[{"message":{"content":[{"type":"text","text":"{\\"verdict\\":\\"ALLOW\\"}"}]}}]}'
+    assert file_ops._extract_review_content(raw) == '{"verdict":"ALLOW"}'
+
+
+def test_curl_review_extract_api_error_raises():
+    """API 报错信封（无 choices）→ 抛 RuntimeError（熔断降级，绝不误放行）。"""
+    raw = '{"error":{"message":"invalid api key"}}'
+    with pytest.raises(RuntimeError):
+        file_ops._extract_review_content(raw)
+
+
+def test_curl_review_extract_non_json_raises():
+    with pytest.raises(RuntimeError):
+        file_ops._extract_review_content("not json at all")
 
 
 def test_curl_review_failure_raises(monkeypatch):

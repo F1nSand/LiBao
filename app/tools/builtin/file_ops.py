@@ -419,7 +419,34 @@ async def _curl_review(command: str) -> str:
         raise RuntimeError(f"curl 失败(exit {proc.returncode}): {proc.stderr[:160] or '无错误输出'}")
     if not proc.stdout.strip():
         raise RuntimeError("curl 无响应体")
-    return proc.stdout
+    return _extract_review_content(proc.stdout)
+
+
+def _extract_review_content(raw: str) -> str:
+    """从 OpenAI chat completion 响应信封提取 assistant content（审查模型真正的判定文本）。
+
+    真实 OpenAI 兼容 endpoint 返回 {"choices":[{"message":{"content":"..."}}]}，而非判定 JSON 本身；
+    提取失败（含 API 报错 {"error":...}）抛 RuntimeError → 走熔断降级（绝不把信封当判定）。
+    兼容 content 为文本块列表的 provider（拼接 text 字段）。
+    """
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"审查响应非 JSON: {raw[:120]}") from exc
+    try:
+        message = obj["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"审查响应缺 choices[0].message（可能 API 报错）: {raw[:160]}") from exc
+    if not isinstance(message, dict):
+        raise RuntimeError(f"审查响应 message 非对象: {raw[:160]}")
+    content = message.get("content")
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join((item.get("text", "") if isinstance(item, dict) else str(item)) for item in content)
+    return str(content)
 
 
 def _degraded_review(grade: str, why: str) -> dict[str, str]:

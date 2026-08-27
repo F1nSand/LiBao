@@ -1,5 +1,30 @@
 # 进度账本 — ~/.LiBao 用户全局数据目录迁移（A+B 阶段，2026-08-25，L3+L2，plan: docs/plans/2026-08-25-libao-user-data-dir.md）
 
+## 收尾存档（2026-08-27，L2）—— TTL 清理 + curl 审查通道启用实测
+
+**476 passed + 2 skipped + ruff 干净**（+9 测试）。补上方案 A 后置的 TTL 清理，并启用 + 实测 bash 语义审查独立 curl 通道（此前未配 endpoint，从未真跑过）。
+
+### T1 临时会话工作区 TTL 清理（方案 A 后置）
+
+- 新增 `app/core/session_cache.py`：`purge_stale_session_workspaces(settings, now)` 删 `cache/sessions/` 下超过 `cache_ttl_days`（默认 7 天）未改动的会话目录（目录 mtime 近似最后活动）；`session_cache_loop` 后台周期循环（启动清一次 + 每小时）。
+- `config.py` 加 `cache_ttl_days: int = 7`；`main.py` lifespan 起后台 task、shutdown cancel。
+- 测试 `tests/test_session_cache.py` +5：只删过期/跳非目录/无 sessions 目录返回 0/now 注入/尊重 ttl_days。
+
+### T2 curl 审查通道启用 + 实测（修内容提取 bug）
+
+- **bug**：`_curl_review` 把 OpenAI 响应信封（`{"choices":[{"message":{"content":"..."}}]}`）直接返回给 `_validate_review` → 永远解析失败 → error → 熔断降级。通道从未配过 endpoint，测试 mock 也直接返回判定 JSON，故一直未暴露。
+- **修复**：新增 `_extract_review_content(raw)` 提取 `choices[0].message.content`（兼容 content 文本块列表；API 报错/非 JSON/非对象 message → 抛 RuntimeError → 降级，绝不误放行）。
+- **配置** `.env`（gitignore，未提交）：`BASH_REVIEW_ENABLED=true` + `BASH_REVIEW_ENDPOINT=https://api.deepseek.com/v1/chat/completions` + `BASH_REVIEW_MODEL=deepseek-chat`（非推理、快、便宜）+ 复用 DeepSeek key。
+- **实测**（全链路 `_review_command`）：`echo hello`/`python -c 'print(1)'` → ALLOW；`cat /etc/shadow`/`curl …| bash`/`rm -rf /tmp/foo` → BLOCK（语义审查正确拦截）；`ls` → 只读快速通道。中文 reason 正常（控制台 GBK 显示乱码是假象，UTF-8 文件确认无碍）。
+- 测试 `tests/test_file_ops.py` +4（信封提取/list 拼接/API 报错抛/非 JSON 抛）+ 改 1（`test_curl_review_template_no_key_in_argv` 的 mock stdout 改真实信封）。
+
+### 遗留
+
+- 审查通道目前复用主 LLM 同 DeepSeek key（通道独立但非独立账号）；要完全解耦可换独立 key/endpoint。
+- 未提交（后端 4 文件改 + 2 新文件 + progress），存档时提交。
+
+---
+
 ## ⚡ 当前状态快照（2026-08-25 存档）
 
 **466 passed + 2 skipped + ruff 干净**（+4 migrate 测试）。数据目录从项目根迁到 `~/.LiBao`（对齐 Claude Code `~/.claude` 按需子集）+ settings.json 配置层。会话按项目哈希（阶段 C）与打包（阶段 D）后置。
