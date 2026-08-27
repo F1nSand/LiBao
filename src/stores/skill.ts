@@ -1,48 +1,39 @@
 import { defineStore } from 'pinia'
-import { listSkills, createSkill, importSkill, updateSkill, deleteSkill } from '@/api/skill'
+import { listSkills } from '@/api/skill'
 import { FEATURE, isUnavailable } from '@/api/availability'
 import { swallowNotImplemented } from '@/utils/http-envelope'
-import type { CreateSkillRequest, Skill } from '@/types'
+import type { Skill } from '@/types'
 
-/** Skills 管理 store（M7-A 契约，交接板 2026-08-20；与工具同模式、默认关闭、developer+；后端未实现 → FEATURE.skills 降级） */
+/** Skills 目录 store（M7-A 简化 2026-08-25：只读两级目录——全局 ~/.LiBao/skills + 工作区 .agent/skills） */
 export const useSkillStore = defineStore('skill', {
   state: () => ({
-    skills: [] as Skill[],
+    global: [] as Skill[],
+    workspace: [] as Skill[],
     loading: false,
   }),
   getters: {
     unavailable: () => isUnavailable(FEATURE.skills),
   },
   actions: {
-    async list() {
+    async listGlobal() {
       if (this.unavailable) return
       this.loading = true
       try {
-        const res = await swallowNotImplemented(listSkills({ page_size: 100 }))
-        if (res) this.skills = res.items
+        const res = await swallowNotImplemented(listSkills())
+        if (res) this.global = res
       } finally {
         this.loading = false
       }
     },
-    async toggle(id: string, enabled: boolean) {
+    async listWorkspace(workspaceId: string) {
       if (this.unavailable) return
-      await updateSkill(id, { enabled })
-      await this.list()
-    },
-    async create(body: CreateSkillRequest) {
-      if (this.unavailable) return
-      await createSkill(body)
-      await this.list()
-    },
-    async importFromGit(url: string) {
-      if (this.unavailable) return
-      await importSkill({ url })
-      await this.list()
-    },
-    async remove(id: string) {
-      if (this.unavailable) return
-      await deleteSkill(id)
-      await this.list()
+      this.loading = true
+      try {
+        const res = await swallowNotImplemented(listSkills({ workspace_id: workspaceId }))
+        if (res) this.workspace = res
+      } finally {
+        this.loading = false
+      }
     },
   },
 })

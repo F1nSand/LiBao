@@ -1,59 +1,51 @@
 import { test, expect } from '@playwright/test'
 import { gotoChat } from './helpers'
 
-test.describe('Skills 管理页（M7-A 契约，交接板 2026-08-20）', () => {
-  test('设置气泡 → /skills：种子列表 + 来源标签 + 启用开关（含确认）', async ({ page }) => {
+test.describe('Skills 目录页（M7-A 简化：只读两级目录）', () => {
+  test('设置气泡 → /skills：全局种子列表（名称/描述/位置，只读无操作列）', async ({ page }) => {
     await gotoChat(page)
 
-    // 设置气泡 → 技能子项 → 跳转 /skills 且设置按钮高亮
+    // 设置气泡 → 技能子项 → 跳转 /skills
     await page.locator('.settings-toggle').click()
     await page.locator('.settings-popover .sub-item', { hasText: '技能' }).click()
     await expect(page).toHaveURL(/\/skills/)
-    await expect(page.locator('.settings-toggle')).toHaveClass(/active/)
 
-    // 种子 2 条：python-代码审查（手动/启用）、sql-查询优化（git/停用）
-    const table = page.locator('.skill-table')
+    // 全局表种子 2 条，含名称与路径；只读页面不应有创建/导入按钮
+    const table = page.locator('.skill-table').first()
     await expect(table).toBeVisible()
     await expect(table.locator('.el-table__row')).toHaveCount(2)
-    const manualRow = table.locator('.el-table__row', { hasText: 'python-代码审查' })
-    await expect(manualRow).toContainText('手动')
-    const gitRow = table.locator('.el-table__row', { hasText: 'sql-查询优化' })
-    await expect(gitRow).toContainText('git 导入')
-
-    // 启用停用的技能 → 确认弹窗 → 开关置为启用态
-    const sw = gitRow.locator('.el-switch')
-    await expect(sw).not.toHaveClass(/is-checked/)
-    await sw.click()
-    await page.locator('.el-message-box').getByRole('button', { name: '启用' }).click()
-    await expect(sw).toHaveClass(/is-checked/)
+    const pyRow = table.locator('.el-table__row', { hasText: 'python-代码审查' })
+    await expect(pyRow).toContainText('skills/python-代码审查/SKILL.md')
+    const sqlRow = table.locator('.el-table__row', { hasText: 'sql-查询优化' })
+    await expect(sqlRow).toContainText('skills/sql-查询优化/SKILL.md')
+    await expect(page.getByRole('button', { name: '创建技能' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '导入 git 技能' })).toHaveCount(0)
+    await expect(page.locator('.skill-table .el-switch')).toHaveCount(0)
   })
 
-  test('创建 / git 导入 / 删除 技能', async ({ page }) => {
+  test('工作区 Skills：选中 ws_001 显示 project-lint，清空回全局、ws_002 空态', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/skills')
-    await expect(page.locator('.skill-table')).toBeVisible()
+    await expect(page.locator('.skill-table').first()).toBeVisible()
 
-    // 创建：填名称/路由描述/正文 → 列表出现新行（来源=手动）
-    await page.getByRole('button', { name: '创建技能' }).click()
-    await page.getByPlaceholder('如 python-代码审查').fill('my-doc-skill')
-    await page.getByPlaceholder('何时用 / 何时别用（进 system_prompt 前缀，主 Agent 据此路由）').fill('文档总结技能')
-    await page.getByPlaceholder('SKILL.md 正文：步骤 / 示例 / 注意事项').fill('# 文档总结\n- 先读全文\n- 输出要点')
-    await page.locator('.el-dialog').getByRole('button', { name: '创建', exact: true }).click()
-    const createdRow = page.locator('.skill-table .el-table__row', { hasText: 'my-doc-skill' })
-    await expect(createdRow).toBeVisible()
-    await expect(createdRow).toContainText('手动')
+    // 工作区下拉选 ws_001 → 表格出现 .agent/skills/project-lint（frontmatter description 提取）
+    const wsSelect = page.locator('.section-header .el-select')
+    await wsSelect.click()
+    await page.getByRole('option', { name: '产品文档' }).click()
+    const wsTable = page.locator('.skill-table').nth(1)
+    const lintRow = wsTable.locator('.el-table__row', { hasText: 'project-lint' })
+    await expect(lintRow).toBeVisible()
+    await expect(lintRow).toContainText('.agent/skills/project-lint/SKILL.md')
+    await expect(lintRow).toContainText('项目代码风格检查')
 
-    // git 导入：填仓库地址 → 列表出现新行（来源=git 导入，正文含 mock 标记）
-    await page.getByRole('button', { name: '导入 git 技能' }).click()
-    await page.getByPlaceholder('https://github.com/org/skill-repo.git').fill('https://github.com/example/awesome-skill.git')
-    await page.locator('.el-dialog').getByRole('button', { name: '导入', exact: true }).click()
-    const importedRow = page.locator('.skill-table .el-table__row', { hasText: 'awesome-skill' })
-    await expect(importedRow).toBeVisible()
-    await expect(importedRow).toContainText('git 导入')
+    // 清空选择 → 工作区表清空回到空态占位
+    await wsSelect.hover()
+    await wsSelect.locator('.el-select__clear').click()
+    await expect(wsTable.locator('.el-table__row')).toHaveCount(0)
 
-    // 删除创建的技能 → 行消失（确认弹窗按钮默认「确定」）
-    await createdRow.getByRole('button', { name: '删除' }).click()
-    await page.locator('.el-message-box').getByRole('button', { name: '确定' }).click()
-    await expect(page.locator('.skill-table .el-table__row', { hasText: 'my-doc-skill' })).toHaveCount(0)
+    // 选无 skills 的 ws_002 → 空态提示
+    await wsSelect.click()
+    await page.getByRole('option', { name: '数据管线' }).click()
+    await expect(page.getByText('该工作区暂无 skills')).toBeVisible()
   })
 })

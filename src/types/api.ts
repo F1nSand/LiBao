@@ -243,32 +243,13 @@ export interface McpRegisterRequest {
   enable?: boolean
 }
 
-/** ---------- Skills（M7-A 主 Agent 第三方 Skills 适配，交接板 2026-08-20 契约） ---------- */
+/** ---------- Skills（M7-A 简化 2026-08-25：两级文件目录，删 org CRUD / git 导入） ---------- */
 export interface Skill {
-  id: string
-  /** org 级（与工具/KB 一致，数据隔离） */
-  org_id?: string
   name: string
-  /** 路由描述（进 system_prompt 前缀，主 Agent 据此判断何时使用） */
-  description?: string
-  /** SKILL.md 正文（经内置 meta 工具 tl_load_skill 按需取回） */
-  body: string
-  /** 来源：手动创建 / git 导入 */
-  source: 'manual' | 'git'
-  /** 默认关闭（约束优先，与工具一致） */
-  enabled: boolean
-  created_at: string
-  updated_at?: string
-}
-
-export interface CreateSkillRequest {
-  name: string
-  description?: string
-  body: string
-}
-
-export interface ImportSkillRequest {
-  url: string
+  /** 路由描述（进 project_overlay 消息通道，主 Agent 据此判断何时使用） */
+  description: string
+  /** 相对 skills 根的路径（全局 skills/<name>/SKILL.md；工作区 .agent/skills/<name>/SKILL.md） */
+  path: string
 }
 
 /** ---------- 知识库 / RAG ---------- */

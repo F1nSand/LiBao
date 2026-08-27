@@ -190,27 +190,17 @@ export const messages: Record<string, Message[]> = {
   ],
 }
 
-/** Skills 种子（M7-A 契约，交接板 2026-08-20；org 级、默认关闭，与工具同模式） */
+/** Skills 种子（M7-A 简化 2026-08-25：两级目录——全局 + 工作区，删 org CRUD） */
 export const skills: Skill[] = [
   {
-    id: 'sk_001',
-    org_id: 'org_1',
     name: 'python-代码审查',
     description: '审查 Python 代码：发现 bug、安全隐患与可读性问题。用户请求代码评审时使用。',
-    body: '# 代码审查\n\n审查 Python 代码：\n1. 先通读全部相关文件\n2. 按严重度列出问题（阻塞 / 警告 / 建议）\n3. 每条附最小修复建议\n4. 不评论风格偏好，只指出实质问题\n',
-    source: 'manual',
-    enabled: true,
-    created_at: isoDate(120),
+    path: 'skills/python-代码审查/SKILL.md',
   },
   {
-    id: 'sk_002',
-    org_id: 'org_1',
     name: 'sql-查询优化',
     description: 'SQL 查询优化：改写慢查询、补充索引建议。用户请求优化查询/排查慢 SQL 时使用。',
-    body: '# SQL 优化\n\n- 先看执行计划（EXPLAIN）\n- 优先覆盖索引\n- 避免 SELECT *\n- 拆分大 JOIN\n',
-    source: 'git',
-    enabled: false,
-    created_at: isoDate(80),
+    path: 'skills/sql-查询优化/SKILL.md',
   },
 ]
 
