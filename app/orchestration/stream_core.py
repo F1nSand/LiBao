@@ -16,6 +16,8 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
+from langchain_core.messages import HumanMessage
+
 from app.core.config import get_settings
 from app.core.errors import ERR_LLM_FAILURE
 from app.core.messages import message_text  # 独立模块（memory_extract/memory 共用，防导入环）
@@ -135,6 +137,7 @@ def build_initial_state(
     image_refs: list[dict[str, str]] | None = None,
     image_candidate_count: int = 0,
     image_omitted_count: int = 0,
+    document_refs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。
 
@@ -191,6 +194,15 @@ def build_initial_state(
         n_images=image_candidate_count,
         n_dropped=image_omitted_count,
     )
+    # 文档正文不进 state：只保存轻量 ref，当前轮正文由 context_builder 从
+    # graph configurable.document_context 临时水合。
+    if document_refs:
+        existing = first_message.content
+        if isinstance(existing, list):
+            blocks = list(existing)
+        else:
+            blocks = [{"type": "text", "text": str(existing)}]
+        first_message = HumanMessage(content=[*document_refs, *blocks])
     return {
         "messages": [first_message],
         "agent_config": {

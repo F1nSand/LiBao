@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import get_current_user, get_db
 from app.api.schemas.chat import ChatRequest
 from app.core.config import get_settings
+from app.core.errors import ERR_WORKSPACE_FILE_REF_INVALID, AppError
 from app.core.logging import get_trace_id
 from app.orchestration.chat_stream import chat_stream_events
 from app.services.agent import AgentService
@@ -76,6 +77,16 @@ async def chat_stream(
     else:
         workspace = _session_workspace(str(conversation.id))
 
+    # 工作区引用只能绑定真实的 workspace root。普通会话使用的临时会话目录
+    # 仅供工具落地，不接受客户端借此读取任意路径。
+    file_refs: list[str] = []
+    if req.message.file_refs:
+        if ws_id is None:
+            raise AppError(ERR_WORKSPACE_FILE_REF_INVALID, "工作区文件引用非法或不可读取")
+        file_refs = await WorkspaceService().validate_file_refs(
+            db, user, str(ws_id), [ref.path for ref in req.message.file_refs]
+        )
+
     graph = request.app.state.graph
     trace_id = get_trace_id()
 
@@ -95,6 +106,7 @@ async def chat_stream(
             user=user,
             content=req.message.content,
             attachments=attachments,
+            file_refs=file_refs,
             workspace=workspace,
             trace_id=trace_id,
         ),

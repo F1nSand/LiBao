@@ -58,6 +58,7 @@ def serialize_message(msg: Message) -> dict[str, Any]:
         "content": msg.content,
         "thinking": getattr(msg, "thinking", None),  # 该轮推理（docs 03 §3 逐轮消息扩展）
         "attachments": msg.attachments or [],
+        "file_refs": getattr(msg, "file_refs", None) or [],
         "tool_calls": msg.tool_calls or [],
         "token_usage": msg.token_usage,
         "cost": msg.token_usage.get("cost", 0.0) if isinstance(msg.token_usage, dict) else 0.0,

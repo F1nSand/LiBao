@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ntpath
 import os
 import re
 import shutil
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from app.core.config import get_settings
 from app.core.errors import (
+    ERR_WORKSPACE_FILE_REF_INVALID,
     ERR_WORKSPACE_NAME_CONFLICT,
     ERR_WORKSPACE_NOT_FOUND,
     ERR_WORKSPACE_PATH_FORBIDDEN,
@@ -26,6 +28,48 @@ from app.storage.repositories.workspace import WorkspaceRepository
 from app.tools.filesystem import resolve_workspace_path
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_file_ref_path(root: str | Path, raw_path: str) -> tuple[str, Path]:
+    """解析聊天中的工作区文件引用并执行完整安全检查。
+
+    引用协议只接受相对 POSIX 路径。所有错误统一为 40015，调用方不能借此
+    区分文件不存在、目录、越界或符号链接，从而避免把本地文件系统状态泄露
+    到聊天 API。返回的路径是用于持久化的规范相对路径和用于读取的真实路径。
+    """
+
+    def invalid() -> None:
+        raise AppError(ERR_WORKSPACE_FILE_REF_INVALID, "工作区文件引用非法或不可读取")
+
+    if not isinstance(raw_path, str):
+        invalid()
+    value = raw_path.strip()
+    if not value:
+        invalid()
+    normalized = value.replace("\\", "/")
+    # ntpath catches Windows drive/UNC paths even when the service is tested on POSIX.
+    if ntpath.isabs(value) or ntpath.splitdrive(value)[0] or PurePosixPath(normalized).is_absolute():
+        invalid()
+    parts = PurePosixPath(normalized).parts
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        invalid()
+
+    root_path = Path(root).resolve()
+    candidate = root_path.joinpath(*parts)
+    # Reject symlinks at every path component, including an in-root link that points
+    # to another in-root file: file refs are restricted to ordinary files.
+    current = root_path
+    for part in parts:
+        current = current / part
+        if current.is_symlink():
+            invalid()
+    try:
+        target = candidate.resolve()
+        if not target.is_relative_to(root_path) or not target.is_file():
+            invalid()
+    except (OSError, RuntimeError, ValueError):
+        invalid()
+    return "/".join(parts), target
 
 
 def _slugify_name(name: str) -> str:
@@ -180,6 +224,24 @@ class WorkspaceService:
         if row is None:
             raise AppError(ERR_WORKSPACE_NOT_FOUND, "工作区不存在或无权访问")
         return row
+
+    async def validate_file_refs(
+        self, db: Any, user: User, workspace_id: str, paths: list[str]
+    ) -> list[str]:
+        """校验聊天文件引用，返回规范化的相对路径列表。
+
+        该方法只负责请求边界校验；正文读取由 orchestration/document_context 在
+        实际发送时完成，以保证每次显式引用看到工作区文件的当前版本。
+        """
+        ws = await self.get_in_org(db, user.org_id, workspace_id)
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for path in paths:
+            canonical, _ = resolve_file_ref_path(ws.root_path, path)
+            if canonical not in seen:
+                seen.add(canonical)
+                normalized.append(canonical)
+        return normalized
 
     async def create(self, db: Any, user: User, req: Any) -> Workspace:
         repo = WorkspaceRepository(db)

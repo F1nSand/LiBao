@@ -45,6 +45,20 @@ def _image_ctx(config: Optional[RunnableConfig]) -> Optional[dict[str, Any]]:  #
     }
 
 
+def _document_ctx(config: Optional[RunnableConfig]) -> Optional[dict[str, Any]]:  # noqa: UP045
+    """从 configurable 取当前轮文档正文；正文绝不写入 AgentState/checkpoint。"""
+    if config is None:
+        return None
+    cfg = config.get("configurable", {}) or {}
+    if "document_context" not in cfg:
+        return None
+    context = cfg.get("document_context") or {}
+    return {
+        "index": context.get("index") or {},
+        "current_ids": set(context.get("current_ids") or []),
+    }
+
+
 async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig] = None) -> dict[str, Any]:  # noqa: UP045  LangGraph 需 Optional 形式
     agent = state.get("agent_config", {})
     trace_id = (config or {}).get("configurable", {}).get("trace_id")
@@ -67,7 +81,14 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
     )
 
     start = time.perf_counter()
-    response = await model.ainvoke(build_context(state, prompt_note, image_ctx=_image_ctx(config)))
+    response = await model.ainvoke(
+        build_context(
+            state,
+            prompt_note,
+            image_ctx=_image_ctx(config),
+            document_ctx=_document_ctx(config),
+        )
+    )
     duration_ms = int((time.perf_counter() - start) * 1000)
 
     # token 统计累计（totals 为 LastValue，读旧值再加）

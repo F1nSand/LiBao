@@ -97,7 +97,7 @@ async def test_analyze_txt_extracts(att_fixture):
         assert att.analysis["text"] == "这是笔记内容"
 
 
-async def test_analyze_pdf_metadata_only(att_fixture):
+async def test_analyze_pdf_unreadable_is_failed(att_fixture):
     user, other, tmp = att_fixture
     svc = AttachmentService()
     async with get_store().session() as session:
@@ -106,20 +106,21 @@ async def test_analyze_pdf_metadata_only(att_fixture):
     await analyze_attachment(att_id)
     async with get_store().session() as session:
         att = await svc.get_attachment(session, user, att_id)
-        assert att.status == "ready"
+        assert att.status == "failed"
         assert att.analysis["text"] is None
-        assert "PDF" in att.analysis["reason"]
+        assert "PDF" in att.analysis["reason"] or "文档" in att.analysis["reason"]
 
 
 async def test_analyze_failed_gives_60004(att_fixture):
     user, other, tmp = att_fixture
     svc = AttachmentService()
     async with get_store().session() as session:
-        att = await svc.save_upload(session, user, "bad.bin", "application/msword", b"\x00\x01")
+        with pytest.raises(AppError) as upload_exc:
+            await svc.save_upload(session, user, "bad.doc", "application/msword", b"\x00\x01")
+        assert upload_exc.value.code == 40012
+        att = await svc.save_upload(session, user, "bad.pdf", "application/pdf", b"not a pdf")
         att_id = att.id
-        att.status = "failed"  # 模拟分析失败（doc 提取不可用 → failed 路径）
-        att.error = "模拟分析失败"
-        await session.commit()
+        await analyze_attachment(att_id)
         with pytest.raises(AppError) as exc:
             await svc.get_analysis(session, user, att_id)
         assert exc.value.code == 60004

@@ -1,11 +1,12 @@
 """附件领域服务（docs 01 §7.6 / docs 03 §5.9）。本地磁盘存储 MVP（MinIO 为 M4 接缝）。
 
-状态机：uploaded → analyzing → ready | failed（前端 2.5s 轮询 /attachments/{id}/analysis）。
-分析链：图片 → ready + 视觉降级文本（I2，无 VLM）；txt/md → utf-8 提取；pdf/office → 仅 metadata。
+状态机：uploaded → analyzing → ready | failed（内部抽取缓存；不表示模型已读取）。
+分析链：图片保留 vision 兼容诊断；txt/md → utf-8 提取；pdf/docx → 正文抽取；legacy .doc 拒绝上传。
 """
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ from app.core.errors import (
     ERR_FILE_TOO_LARGE,
     AppError,
 )
-from app.storage.attachment_analysis import _ALLOWED, analyze_content
+from app.storage.attachment_analysis import _ALLOWED, _IMAGE_TYPES, analyze_content
 from app.storage.file.store import get_store
 from app.storage.models.attachment import Attachment
 from app.storage.models.user import User
@@ -87,6 +88,32 @@ class AttachmentService:
         except OSError as exc:
             raise AppError(ERR_ATTACH_STORAGE_FAILURE, f"附件读取失败: {exc}") from exc
 
+    async def ensure_extracted(self, db: Any, att: Attachment) -> dict[str, Any]:
+        """确保文档正文抽取缓存可用；聊天消费和上传后台预热共用此状态。
+
+        ``ready`` 只代表抽取缓存完成，不代表模型已经读过文件。图片不走此方法，
+        仍由 vision 流程按当前模型能力读取原始字节。
+        """
+        if att.status == "ready" and isinstance(att.analysis, dict):
+            return att.analysis
+        att.status = "analyzing"
+        await db.commit()
+        try:
+            analysis = await asyncio.to_thread(analyze_content, att)
+            att.analysis = analysis
+            if analysis.get("text") is None and att.content_type not in _IMAGE_TYPES:
+                att.status = "failed"
+                att.error = analysis.get("reason") or "文档正文提取失败"
+            else:
+                att.status = "ready"
+                att.error = None
+        except Exception as exc:  # noqa: BLE001
+            att.analysis = None
+            att.status = "failed"
+            att.error = str(exc)[:500]
+        await db.commit()
+        return att.analysis or {"type": "document", "text": None, "reason": att.error or "文档正文提取失败"}
+
     async def get_analysis(self, db: Any, user: User, attachment_id: uuid.UUID) -> dict:
         att = await self.get_attachment(db, user, attachment_id)
         if att.status == "failed":
@@ -117,17 +144,8 @@ async def analyze_attachment(attachment_id: uuid.UUID) -> None:
         att = await repo.get_any_org(attachment_id)
         if att is None or att.status != "uploaded":
             return
-        att.status = "analyzing"
-        await db.commit()
-        try:
-            analysis = analyze_content(att)
-            att.analysis = analysis
-            att.status = "ready"
-            att.error = None
-        except Exception as exc:  # noqa: BLE001  分析失败 → failed + error（前端降级"无法分析"）
-            att.status = "failed"
-            att.error = str(exc)[:500]
-        await db.commit()
+        service = AttachmentService()
+        await service.ensure_extracted(db, att)
 
 
 def _spawn_analyze(attachment_id: uuid.UUID) -> None:

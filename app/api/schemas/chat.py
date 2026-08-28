@@ -5,18 +5,39 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.errors import ERR_INPUT_TOO_LONG, AppError
 
 CONTENT_LIMIT = 32000
+MAX_SOURCES = 10
+
+
+class FileRef(BaseModel):
+    """工作区内的相对文件引用。
+
+    路径是否存在、是否越出当前工作区以及是否为普通文件由服务层在拿到
+    workspace_id 后再次校验；schema 层只做形状与长度约束，避免把真实路径
+    状态泄露为不同的 HTTP 响应。
+    """
+
+    path: str = Field(min_length=1, max_length=1024)
+
+    @field_validator("path")
+    @classmethod
+    def _path_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("path 不能为空")
+        return value
 
 
 class ChatMessageInput(BaseModel):
     content: str
     role: Literal["user"] = "user"
     # S9：附件 ID 用 uuid 类型校验，非法值由 pydantic 返回 422（此前路由 uuid.UUID(aid) 裸抛 500）
-    attachments: list[uuid.UUID] = []
+    attachments: list[uuid.UUID] = Field(default_factory=list, max_length=MAX_SOURCES)
+    file_refs: list[FileRef] = Field(default_factory=list, max_length=MAX_SOURCES)
 
     @field_validator("content")
     @classmethod

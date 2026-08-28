@@ -17,6 +17,7 @@ class Message(Row):
     content: str = ""
     thinking: str | None = None  # 该轮推理（reasoning_content，docs 03 §3）
     attachments: list = field(default_factory=list)
+    file_refs: list = field(default_factory=list)
     tool_calls: list = field(default_factory=list)
     token_usage: dict | None = None
     parent_id: uuid.UUID | None = None

@@ -56,7 +56,10 @@ def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = No
 
 
 def build_context(
-    state: AgentState, prompt_note: str | None = None, image_ctx: dict[str, Any] | None = None
+    state: AgentState,
+    prompt_note: str | None = None,
+    image_ctx: dict[str, Any] | None = None,
+    document_ctx: dict[str, Any] | None = None,
 ) -> list[BaseMessage]:
     """组装进模型的完整消息列表：SystemMessage(静态) + 历史 + 记忆注入块 + 状态栏(尾部动态)。
 
@@ -71,6 +74,7 @@ def build_context(
     system = SystemMessage(content=system_prompt)
     if image_ctx is not None:
         from app.core.multimodal import render_message_content
+        from app.orchestration.document_context import render_document_content
 
         history: list[BaseMessage] = []
         for m in state.get("messages", []):
@@ -80,12 +84,35 @@ def build_context(
                 current_ids=image_ctx.get("current_ids") or set(),
                 vision=bool(image_ctx.get("vision")),
             )
+            if document_ctx is not None:
+                rendered = render_document_content(
+                    rendered,
+                    index=document_ctx.get("index") or {},
+                    current_ids=set(document_ctx.get("current_ids") or []),
+                )
             if rendered is m.content:
                 history.append(m)
             else:
                 history.append(m.model_copy(update={"content": rendered}))
     else:
         history = list(state.get("messages", []))
+        if document_ctx is not None:
+            from app.orchestration.document_context import render_document_content
+
+            history = [
+                m.model_copy(
+                    update={
+                        "content": render_document_content(
+                            m.content,
+                            index=document_ctx.get("index") or {},
+                            current_ids=set(document_ctx.get("current_ids") or []),
+                        )
+                    }
+                )
+                if isinstance(getattr(m, "content", None), list)
+                else m
+                for m in history
+            ]
 
     # 工作区/项目级叠加（[工作区]/[项目约定]/skills 路由段）：消息通道渲染，绝不进 system_prompt
     # （前缀缓存铁律 2026-08-24；skills 渐进披露——只列路由，正文 load_skill 按需取回）
