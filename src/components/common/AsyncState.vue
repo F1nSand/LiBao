@@ -8,6 +8,7 @@ const props = withDefaults(
     status: AsyncStatus
     errorMessage?: string | null
     emptyText?: string
+    emptyActionText?: string
     unavailableText?: string
     loadingText?: string
     retryText?: string
@@ -15,13 +16,14 @@ const props = withDefaults(
   {
     errorMessage: null,
     emptyText: '暂无数据',
+    emptyActionText: '',
     unavailableText: '当前功能暂不可用',
     loadingText: '正在加载…',
     retryText: '重试',
   },
 )
 
-const emit = defineEmits<{ retry: [] }>()
+const emit = defineEmits<{ retry: []; action: [] }>()
 </script>
 
 <template>
@@ -34,7 +36,12 @@ const emit = defineEmits<{ retry: [] }>()
       <span>{{ props.errorMessage || '加载失败，请重试' }}</span>
       <el-button size="small" @click="emit('retry')">{{ props.retryText }}</el-button>
     </div>
-    <EmptyState v-else-if="props.status === 'success-empty'" :text="props.emptyText" />
+    <EmptyState
+      v-else-if="props.status === 'success-empty'"
+      :text="props.emptyText"
+      :action-text="props.emptyActionText || undefined"
+      @action="emit('action')"
+    />
     <EmptyState v-else-if="props.status === 'unavailable'" :text="props.unavailableText" />
     <slot v-else />
   </div>

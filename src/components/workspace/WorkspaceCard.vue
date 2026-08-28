@@ -67,9 +67,9 @@ function enter() {
       <el-input v-else v-model="name" size="small" placeholder="工作区名称" class="mono" @keyup.enter="save" />
     </template>
 
-    <div v-if="!editing" class="ws-card-desc" @click="enter">
+    <button v-if="!editing" type="button" class="ws-card-desc" @click="enter">
       {{ workspace.description || '暂无描述' }}
-    </div>
+    </button>
     <div v-else class="ws-card-edit">
       <el-input v-model="desc" size="small" type="textarea" :rows="2" placeholder="描述（气泡显示内容）" />
       <div class="ws-card-edit-ops">
@@ -113,6 +113,12 @@ function enter() {
   flex-shrink: 0;
 }
 .ws-card-desc {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
   font-size: 13px;
   color: var(--app-text-muted);
   min-height: 44px;
@@ -133,5 +139,12 @@ function enter() {
 }
 .mono {
   font-family: var(--app-font-mono);
+}
+@media (max-width: 480px) {
+  .ws-card-ops :deep(.el-button),
+  .ws-card-edit-ops :deep(.el-button),
+  :deep(.el-card__footer .el-button) {
+    min-height: var(--app-control-touch);
+  }
 }
 </style>

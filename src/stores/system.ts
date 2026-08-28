@@ -36,7 +36,7 @@ export const useSystemStore = defineStore('system', {
       this.status = 'loading'
       this.errorMessage = null
       try {
-        const res = await swallowNotImplemented(fetchLogs({ page: 1, page_size: 20, ...params }))
+        const res = await swallowNotImplemented(fetchLogs({ page: params.page ?? 1, page_size: params.page_size ?? 20, ...params }))
         if (res) {
           this.logs = res.items
           this.logTotal = res.total

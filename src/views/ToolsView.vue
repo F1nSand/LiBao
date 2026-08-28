@@ -5,6 +5,8 @@ import { useToolStore } from '@/stores/tool'
 import type { ToolDefinition } from '@/types'
 import ToolTestModal from '@/components/business/ToolTestModal.vue'
 import ToolSearchBar from '@/components/business/ToolSearchBar.vue'
+import AsyncState from '@/components/common/AsyncState.vue'
+import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 
 /** 工具管理（docs/02 §4 / docs/03 §5.5）：注册/启用开关/沙盒测试/MCP 源；元工具（tool_search 等发现层）与常规工具区分 */
 const store = useToolStore()
@@ -13,6 +15,9 @@ const activeTool = ref<ToolDefinition | null>(null)
 const testVisible = ref(false)
 const createVisible = ref(false)
 const mcpVisible = ref(false)
+const createSubmitting = ref(false)
+const mcpSubmitting = ref(false)
+const busyToolId = ref<string | null>(null)
 
 /** 类别筛选：全部 / 元工具（平台发现层，tool_search 等常驻）/ 常规工具（经 tool_search 发现） */
 const metaFilter = ref<'all' | 'meta' | 'regular'>('all')
@@ -50,15 +55,20 @@ function openTest(t: ToolDefinition) {
 }
 
 async function onToggle(t: ToolDefinition, enabled: boolean) {
-  if (enabled) {
-    await ElMessageBox.confirm(
-      `启用工具「${t.name}」？遵循默认关闭原则，请确认其安全性。`,
-      '启用确认',
-      { type: 'warning', confirmButtonText: '启用', cancelButtonText: '取消' },
-    )
+  busyToolId.value = t.id
+  try {
+    if (enabled) {
+      await ElMessageBox.confirm(
+        `启用工具「${t.name}」？遵循默认关闭原则，请确认其安全性。`,
+        '启用确认',
+        { type: 'warning', confirmButtonText: '启用', cancelButtonText: '取消' },
+      )
+    }
+    await store.toggle(t.id, enabled)
+    ElMessage.success(enabled ? '已启用' : '已停用')
+  } finally {
+    busyToolId.value = null
   }
-  await store.toggle(t.id, enabled)
-  ElMessage.success(enabled ? '已启用' : '已停用')
 }
 
 async function createTool() {
@@ -75,16 +85,21 @@ async function createTool() {
       return
     }
   }
-  await store.create({
-    name: form.name,
-    description: form.description,
-    tool_type: form.tool_type,
-    require_confirm: form.require_confirm,
-    params_schema: paramsSchema,
-  })
-  createVisible.value = false
-  Object.assign(form, { name: '', description: '', tool_type: 'execution', require_confirm: false, params_schema: '' })
-  ElMessage.success('工具已注册')
+  createSubmitting.value = true
+  try {
+    await store.create({
+      name: form.name,
+      description: form.description,
+      tool_type: form.tool_type,
+      require_confirm: form.require_confirm,
+      params_schema: paramsSchema,
+    })
+    createVisible.value = false
+    Object.assign(form, { name: '', description: '', tool_type: 'execution', require_confirm: false, params_schema: '' })
+    ElMessage.success('工具已注册')
+  } finally {
+    createSubmitting.value = false
+  }
 }
 
 async function registerMcp() {
@@ -92,10 +107,15 @@ async function registerMcp() {
     ElMessage.warning('请输入 MCP 源地址或命令')
     return
   }
-  await store.registerMcp(mcpForm.url_or_command)
-  mcpVisible.value = false
-  mcpForm.url_or_command = ''
-  ElMessage.success('MCP 源已注册')
+  mcpSubmitting.value = true
+  try {
+    await store.registerMcp(mcpForm.url_or_command)
+    mcpVisible.value = false
+    mcpForm.url_or_command = ''
+    ElMessage.success('MCP 源已注册')
+  } finally {
+    mcpSubmitting.value = false
+  }
 }
 
 async function onDelete(t: ToolDefinition) {
@@ -118,7 +138,7 @@ async function onDelete(t: ToolDefinition) {
       </div>
     </div>
 
-    <div class="tool-search-wrap">
+    <div class="tool-search-wrap app-filter-bar">
       <ToolSearchBar />
       <el-radio-group v-model="metaFilter" size="small">
         <el-radio-button value="all">全部</el-radio-button>
@@ -127,7 +147,16 @@ async function onDelete(t: ToolDefinition) {
       </el-radio-group>
     </div>
 
-    <el-table v-loading="store.loading" :data="filteredTools" class="tool-table">
+    <AsyncState
+      :status="store.status"
+      :error-message="store.errorMessage"
+      empty-text="暂无已注册工具"
+      empty-action-text="注册工具"
+      @retry="store.retry"
+      @action="createVisible = true"
+    >
+      <div class="app-table-wrap">
+        <el-table :data="filteredTools" class="tool-table">
       <el-table-column prop="name" label="名称" min-width="140">
         <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
       </el-table-column>
@@ -145,7 +174,7 @@ async function onDelete(t: ToolDefinition) {
       </el-table-column>
       <el-table-column label="启用" width="90">
         <template #default="{ row }">
-          <el-switch :model-value="row.enabled" size="small" @change="(v: boolean) => onToggle(row, v)" />
+          <el-switch :model-value="row.enabled" size="small" :disabled="busyToolId === row.id" @change="(v: boolean) => onToggle(row, v)" />
         </template>
       </el-table-column>
       <el-table-column label="操作" width="180" fixed="right">
@@ -154,10 +183,12 @@ async function onDelete(t: ToolDefinition) {
           <el-button size="small" type="danger" plain @click="onDelete(row)">删除</el-button>
         </template>
       </el-table-column>
-    </el-table>
+        </el-table>
+      </div>
+    </AsyncState>
 
     <!-- 注册工具 -->
-    <el-dialog :model-value="createVisible" title="注册工具" width="520px" @close="createVisible = false">
+    <ResponsiveDialog v-model="createVisible" title="注册工具" width="520px">
       <el-form label-width="120px">
         <el-form-item label="名称" required><el-input v-model="form.name" placeholder="如 stock_query" /></el-form-item>
         <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="2" /></el-form-item>
@@ -173,12 +204,12 @@ async function onDelete(t: ToolDefinition) {
       </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
-        <el-button type="primary" @click="createTool">注册</el-button>
+        <el-button type="primary" :loading="createSubmitting" :disabled="createSubmitting" @click="createTool">注册</el-button>
       </template>
-    </el-dialog>
+    </ResponsiveDialog>
 
     <!-- 注册 MCP -->
-    <el-dialog :model-value="mcpVisible" title="注册 MCP 源" width="480px" @close="mcpVisible = false">
+    <ResponsiveDialog v-model="mcpVisible" title="注册 MCP 源" width="480px">
       <el-form label-width="140px">
         <el-form-item label="地址/命令" required>
           <el-input v-model="mcpForm.url_or_command" placeholder="npx @modelcontextprotocol/server-xxx 或 http://…" />
@@ -187,9 +218,9 @@ async function onDelete(t: ToolDefinition) {
       </el-form>
       <template #footer>
         <el-button @click="mcpVisible = false">取消</el-button>
-        <el-button type="primary" @click="registerMcp">注册</el-button>
+        <el-button type="primary" :loading="mcpSubmitting" :disabled="mcpSubmitting" @click="registerMcp">注册</el-button>
       </template>
-    </el-dialog>
+    </ResponsiveDialog>
 
     <ToolTestModal :visible="testVisible" :tool="activeTool" @close="testVisible = false; activeTool = null" />
   </div>
@@ -202,11 +233,10 @@ async function onDelete(t: ToolDefinition) {
 }
 .tool-search-wrap {
   margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  justify-content: space-between;
 }
 .tool-table {
+  min-width: 760px;
   flex: 1;
   border: 1px solid var(--app-border-light);
   border-radius: var(--app-radius-lg);
@@ -216,5 +246,24 @@ async function onDelete(t: ToolDefinition) {
 .mono {
   font-family: var(--app-font-mono);
   font-size: 12px;
+}
+@media (max-width: 768px) {
+  .tool-search-wrap {
+    align-items: stretch;
+  }
+  .tool-search-wrap > :first-child,
+  .tool-search-wrap > :last-child {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .tool-search-wrap :deep(.el-radio-group) {
+    display: flex;
+  }
+  .tool-search-wrap :deep(.el-radio-button) {
+    flex: 1;
+  }
+  .tool-search-wrap :deep(.el-radio-button__inner) {
+    width: 100%;
+  }
 }
 </style>

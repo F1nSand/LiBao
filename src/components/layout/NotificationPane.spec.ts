@@ -6,6 +6,9 @@ const state = vi.hoisted(() => ({
   items: [] as Notification[],
   unread: 0,
   loading: false,
+  status: 'success' as const,
+  errorMessage: null as string | null,
+  load: vi.fn(),
   markReadById: vi.fn(),
 }))
 
@@ -16,6 +19,9 @@ vi.mock('@/composables/useNotifications', async () => {
       items: ref(state.items),
       unread: ref(state.unread),
       loading: ref(state.loading),
+      status: ref(state.status),
+      errorMessage: ref(state.errorMessage),
+      load: state.load,
       markReadById: state.markReadById,
     }),
   }
@@ -35,6 +41,9 @@ describe('NotificationPane 键盘语义', () => {
     })
     state.unread = 1
     state.loading = false
+    state.status = 'success'
+    state.errorMessage = null
+    state.load.mockReset()
     state.markReadById.mockReset()
   })
 

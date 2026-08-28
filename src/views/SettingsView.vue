@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listProviders, createProvider, updateProvider, deleteProvider, activateProvider, getActiveProvider } from '@/api/provider'
 import { FEATURE, isUnavailable } from '@/api/availability'
@@ -10,7 +10,11 @@ import { useSSE } from '@/composables/useSSE'
 import { THEMES, getStoredTheme } from '@/theme/themes'
 import NotificationPane from '@/components/layout/NotificationPane.vue'
 import ThemePane from '@/components/layout/ThemePane.vue'
+import AsyncState from '@/components/common/AsyncState.vue'
+import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 import type { ProviderConfig } from '@/types'
+
+type ProviderListStatus = 'idle' | 'loading' | 'success-empty' | 'success' | 'error' | 'unavailable'
 
 /** 设置（docs/02 §4 / docs/03 §5.1）：单用户本地模式 → Provider 配置 / 通知 / 主题 三个 pane（tag 切换，非悬浮窗） */
 
@@ -47,7 +51,13 @@ const providerForm = reactive({
   api_key: '',
   model: '',
 })
-const providerLoading = ref(false)
+const providerStatus = ref<ProviderListStatus>('idle')
+const providerErrorMessage = ref<string | null>(null)
+const providerSubmitting = ref(false)
+const providerNameRef = ref<HTMLElement | null>(null)
+const providerNameError = ref('')
+const providerBaseUrlError = ref('')
+const providerModelError = ref('')
 
 onMounted(() => {
   void loadProviders()
@@ -59,13 +69,38 @@ onBeforeUnmount(() => sse.disconnect())
 
 /* ---------- Provider 配置 ---------- */
 async function loadProviders() {
-  providerLoading.value = true
+  providerStatus.value = 'loading'
+  providerErrorMessage.value = null
   try {
     const list = await swallowNotImplemented(listProviders())
-    if (list) providers.value = list
-  } finally {
-    providerLoading.value = false
+    if (list) {
+      providers.value = list
+      providerStatus.value = list.length ? 'success' : 'success-empty'
+    } else {
+      providerStatus.value = 'unavailable'
+    }
+  } catch (e) {
+    providerStatus.value = 'error'
+    providerErrorMessage.value = e instanceof Error ? e.message : 'Provider 列表加载失败'
   }
+}
+
+async function retryProviders() {
+  await loadProviders()
+}
+
+function onTabKeydown(e: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
+  const current = e.currentTarget as HTMLElement
+  const tabs = Array.from(current.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])
+  const position = tabs.indexOf(current)
+  const nextPosition = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : position + (e.key === 'ArrowRight' ? 1 : -1)
+  const next = tabs[nextPosition]
+  if (!next) return
+  e.preventDefault()
+  next.focus()
+  const nextTab = next.dataset.tab as typeof activeTab.value | undefined
+  if (nextTab) activeTab.value = nextTab
 }
 
 async function loadActiveProvider() {
@@ -77,6 +112,9 @@ function resetProviderForm() {
   Object.assign(providerForm, {
     id: '', name: '', website: '', base_url: '', is_full_url: false, api_key: '', model: '',
   })
+  providerNameError.value = ''
+  providerBaseUrlError.value = ''
+  providerModelError.value = ''
 }
 
 async function openAddProvider() {
@@ -100,6 +138,16 @@ function openEditProvider(p: ProviderConfig) {
 }
 
 async function saveProvider() {
+  providerNameError.value = providerForm.name.trim() ? '' : '请输入 Provider 名称'
+  providerBaseUrlError.value = providerForm.base_url.trim() ? '' : '请输入请求地址'
+  providerModelError.value = providerForm.model.trim() ? '' : '请输入模型名'
+  if (providerNameError.value || providerBaseUrlError.value || providerModelError.value) {
+    ElMessage.warning('请填写名称、请求地址和模型名')
+    await nextTick()
+    providerNameRef.value?.focus()
+    return
+  }
+  providerSubmitting.value = true
   const body = {
     name: providerForm.name,
     website: providerForm.website || undefined,
@@ -108,13 +156,17 @@ async function saveProvider() {
     model: providerForm.model || undefined,
     ...(providerForm.api_key ? { api_key: providerForm.api_key } : {}), // 留空 = 不传（编辑不改 key）
   }
-  const saved = providerDialogMode.value === 'create'
-    ? await swallowNotImplemented(createProvider(body))
-    : await swallowNotImplemented(updateProvider(providerForm.id, body))
-  if (saved === undefined) return // 后端未实现 → 打标降级，不弹错
-  providerDialog.value = false
-  ElMessage.success(providerDialogMode.value === 'create' ? 'Provider 已保存' : 'Provider 已更新')
-  await loadProviders()
+  try {
+    const saved = providerDialogMode.value === 'create'
+      ? await swallowNotImplemented(createProvider(body))
+      : await swallowNotImplemented(updateProvider(providerForm.id, body))
+    if (saved === undefined) return // 后端未实现 → 打标降级，不弹错
+    providerDialog.value = false
+    ElMessage.success(providerDialogMode.value === 'create' ? 'Provider 已保存' : 'Provider 已更新')
+    await loadProviders()
+  } finally {
+    providerSubmitting.value = false
+  }
 }
 
 async function onActivateProvider(p: ProviderConfig) {
@@ -145,38 +197,56 @@ async function onDeleteProvider(id: string) {
     </div>
 
     <div class="settings-tabs">
-      <div class="settings-tag-row">
+      <div class="settings-tag-row" role="tablist" aria-label="设置分区">
         <button
           type="button"
+          id="settings-provider-tab"
+          role="tab"
+          data-tab="provider"
+          aria-controls="settings-provider-panel"
+          :aria-selected="activeTab === 'provider'"
           class="settings-tag"
           :class="{ active: activeTab === 'provider' }"
           @click="activeTab = 'provider'"
+          @keydown="onTabKeydown"
         >
           Provider 配置
         </button>
         <button
           type="button"
+          id="settings-notifications-tab"
+          role="tab"
+          data-tab="notifications"
+          aria-controls="settings-notifications-panel"
+          :aria-selected="activeTab === 'notifications'"
           class="notif-tag"
           :class="{ active: activeTab === 'notifications' }"
           aria-label="通知"
           @click="activeTab = 'notifications'"
+          @keydown="onTabKeydown"
         >
           <el-icon :size="14"><Bell /></el-icon><span>通知</span>
           <span v-if="unread > 0" class="notif-tag-badge">{{ unread > 99 ? '99+' : unread }}</span>
         </button>
         <button
           type="button"
+          id="settings-theme-tab"
+          role="tab"
+          data-tab="theme"
+          aria-controls="settings-theme-panel"
+          :aria-selected="activeTab === 'theme'"
           class="theme-tag"
           :class="{ active: activeTab === 'theme' }"
           title="主题配色"
           @click="activeTab = 'theme'"
+          @keydown="onTabKeydown"
         >
           <span class="theme-tag-dot" :style="{ background: currentPrimary }" /><span>主题</span>
         </button>
       </div>
 
       <Transition name="settings-pane" mode="out-in">
-        <div v-if="activeTab === 'provider'" key="provider" class="settings-pane">
+        <div v-if="activeTab === 'provider'" id="settings-provider-panel" key="provider" class="settings-pane" role="tabpanel" aria-labelledby="settings-provider-tab">
           <template v-if="!providersUnavailable">
             <div class="users-toolbar">
               <span v-if="activeProvider" class="active-hint">
@@ -184,7 +254,16 @@ async function onDeleteProvider(id: string) {
               </span>
               <el-button type="primary" :icon="'Plus'" @click="openAddProvider">添加 Provider</el-button>
             </div>
-            <el-table :data="providers" v-loading="providerLoading" size="small">
+            <AsyncState
+              :status="providersUnavailable ? 'unavailable' : providerStatus"
+              :error-message="providerErrorMessage"
+              empty-text="暂无 Provider 配置"
+              empty-action-text="添加 Provider"
+              @retry="retryProviders"
+              @action="openAddProvider"
+            >
+              <div class="app-table-wrap">
+                <el-table :data="providers" size="small">
               <el-table-column label="别名" width="160">
                 <template #default="{ row }">
                   <span>{{ row.name }}</span>
@@ -215,33 +294,40 @@ async function onDeleteProvider(id: string) {
                   <el-button size="small" text type="danger" @click="onDeleteProvider(row.id)">删除</el-button>
                 </template>
               </el-table-column>
-            </el-table>
+                </el-table>
+              </div>
+            </AsyncState>
           </template>
           <EmptyState v-else text="后端暂未实现 Provider 配置接口（契约已发交接板）" />
         </div>
-        <NotificationPane v-else-if="activeTab === 'notifications'" key="notifications" />
-        <ThemePane v-else key="theme" v-model="themeId" />
+        <div v-else-if="activeTab === 'notifications'" id="settings-notifications-panel" key="notifications" role="tabpanel" aria-labelledby="settings-notifications-tab">
+          <NotificationPane />
+        </div>
+        <div v-else id="settings-theme-panel" key="theme" role="tabpanel" aria-labelledby="settings-theme-tab">
+          <ThemePane v-model="themeId" />
+        </div>
       </Transition>
     </div>
 
     <!-- 添加/编辑 Provider -->
-    <el-dialog
+    <ResponsiveDialog
       :model-value="providerDialog"
       :title="providerDialogMode === 'create' ? '添加 Provider' : '编辑 Provider'"
       width="500px"
       @close="providerDialog = false"
     >
       <el-form label-width="100px">
-        <el-form-item label="名称（别名）" required>
-          <el-input v-model="providerForm.name" placeholder="如：我的 DeepSeek / 公司内网代理" />
+        <el-form-item label="名称（别名）" required :error="providerNameError">
+          <el-input ref="providerNameRef" v-model="providerForm.name" placeholder="如：我的 DeepSeek / 公司内网代理" @input="providerNameError = ''" />
         </el-form-item>
         <el-form-item label="官网链接">
           <el-input v-model="providerForm.website" placeholder="https://platform.deepseek.com（可选，仅展示）" />
         </el-form-item>
-        <el-form-item label="请求地址">
+        <el-form-item label="请求地址" required :error="providerBaseUrlError">
           <el-input
             v-model="providerForm.base_url"
             placeholder="https://api.deepseek.com 或 https://api.openai.com/v1"
+            @input="providerBaseUrlError = ''"
           />
         </el-form-item>
         <el-form-item label="完整 URL">
@@ -256,8 +342,8 @@ async function onDeleteProvider(id: string) {
             }}
           </span>
         </el-form-item>
-        <el-form-item label="模型名">
-          <el-input v-model="providerForm.model" placeholder="裸名，如 gpt-4o / deepseek-chat" />
+        <el-form-item label="模型名" required :error="providerModelError">
+          <el-input v-model="providerForm.model" placeholder="裸名，如 gpt-4o / deepseek-chat" @input="providerModelError = ''" />
         </el-form-item>
         <el-form-item label="API Key">
           <el-input
@@ -270,9 +356,9 @@ async function onDeleteProvider(id: string) {
       </el-form>
       <template #footer>
         <el-button @click="providerDialog = false">取消</el-button>
-        <el-button type="primary" @click="saveProvider">保存</el-button>
+        <el-button type="primary" :loading="providerSubmitting" :disabled="providerSubmitting" @click="saveProvider">保存</el-button>
       </template>
-    </el-dialog>
+    </ResponsiveDialog>
   </div>
 </template>
 
@@ -312,6 +398,7 @@ async function onDeleteProvider(id: string) {
   padding: 8px 0;
   border-bottom: 1px solid var(--app-border-light);
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 /* 统一 tag（Provider/通知/主题）：hover 主色 + active 高亮 + 按压反馈 */
 .settings-tag,
@@ -379,5 +466,27 @@ async function onDeleteProvider(id: string) {
 }
 .settings-pane-leave-to {
   opacity: 0;
+}
+@media (max-width: 768px) {
+  .settings-tabs {
+    padding-inline: 10px;
+  }
+  .settings-tag-row {
+    gap: 6px;
+  }
+  .settings-tag,
+  .notif-tag,
+  .theme-tag {
+    min-height: var(--app-control-touch);
+    padding-inline: 10px;
+  }
+  .users-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .users-toolbar :deep(.el-button) {
+    width: 100%;
+  }
 }
 </style>

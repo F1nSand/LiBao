@@ -5,6 +5,8 @@ import { useMemoryStore } from '@/stores/memory'
 import { formatDate } from '@/utils/format'
 import type { CreateLongTermMemoryRequest, LongTermMemory, LongTermMemoryVersion } from '@/types'
 import JsonViewer from '@/components/common/JsonViewer.vue'
+import AsyncState from '@/components/common/AsyncState.vue'
+import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 
 /** 长期记忆卡片（docs/02 §6.2 / docs/03 §5.7）：只读展示 + 版本历史 + 新增/改写（只增） */
 const store = useMemoryStore()
@@ -13,6 +15,8 @@ const addVisible = ref(false)
 const versionsVisible = ref(false)
 const versionsOf = ref<LongTermMemory | null>(null)
 const versions = ref<LongTermMemoryVersion[]>([])
+const versionsLoading = ref(false)
+const submitting = ref(false)
 
 const form = reactive<CreateLongTermMemoryRequest>({
   card_type: 'note',
@@ -35,9 +39,14 @@ async function save() {
     return
   }
   const body = form.card_type === 'json_card' ? safeParse(form.body as string) : { content: form.body }
-  await store.create({ ...form, body, importance: (form.importance ?? 0.5) / 5 })
-  addVisible.value = false
-  ElMessage.success('已写入（只增版本化）')
+  submitting.value = true
+  try {
+    await store.create({ ...form, body, importance: (form.importance ?? 0.5) / 5 })
+    addVisible.value = false
+    ElMessage.success('已写入（只增版本化）')
+  } finally {
+    submitting.value = false
+  }
 }
 
 function safeParse(s: string): unknown {
@@ -68,8 +77,15 @@ function noteText(m: LongTermMemory): string {
 
 async function showVersions(m: LongTermMemory) {
   versionsOf.value = m
-  versions.value = await store.versions(m.id)
-  versionsVisible.value = true
+  versionsLoading.value = true
+  try {
+    versions.value = await store.versions(m.id)
+    versionsVisible.value = true
+  } catch {
+    ElMessage.error('版本历史加载失败')
+  } finally {
+    versionsLoading.value = false
+  }
 }
 
 async function onDelete(m: LongTermMemory) {
@@ -85,8 +101,16 @@ async function onDelete(m: LongTermMemory) {
       <el-button type="primary" :icon="'Plus'" @click="openAdd">新增记忆</el-button>
     </div>
 
-    <div class="memory-grid">
-      <el-card v-for="m in store.longterm" :key="m.id" shadow="hover" class="memory-card">
+    <AsyncState
+      :status="store.status"
+      :error-message="store.errorMessage"
+      empty-text="暂无长期记忆"
+      empty-action-text="新增记忆"
+      @retry="store.retry"
+      @action="openAdd"
+    >
+      <div class="memory-grid">
+        <el-card v-for="m in store.longterm" :key="m.id" shadow="hover" class="memory-card">
         <template #header>
           <div class="memory-head">
             <span class="memory-title">{{ m.title }}</span>
@@ -108,11 +132,11 @@ async function onDelete(m: LongTermMemory) {
             <el-button size="small" text type="danger" @click="onDelete(m)">删除</el-button>
           </div>
         </template>
-      </el-card>
-      <el-empty v-if="store.longterm.length === 0" description="暂无长期记忆" />
-    </div>
+        </el-card>
+      </div>
+    </AsyncState>
 
-    <el-dialog :model-value="addVisible" title="新增/改写记忆（只增版本化）" width="520px" @close="addVisible = false">
+    <ResponsiveDialog v-model="addVisible" title="新增/改写记忆（只增版本化）" width="520px">
       <el-form label-width="80px">
         <el-form-item label="类型">
           <el-radio-group v-model="form.card_type">
@@ -141,11 +165,12 @@ async function onDelete(m: LongTermMemory) {
       </el-form>
       <template #footer>
         <el-button @click="addVisible = false">取消</el-button>
-        <el-button type="primary" @click="save">写入</el-button>
+        <el-button type="primary" :loading="submitting" :disabled="submitting" @click="save">写入</el-button>
       </template>
-    </el-dialog>
+    </ResponsiveDialog>
 
-    <el-dialog :model-value="versionsVisible" :title="`版本历史：${versionsOf?.title ?? ''}`" width="520px" @close="versionsVisible = false">
+    <ResponsiveDialog v-model="versionsVisible" :title="`版本历史：${versionsOf?.title ?? ''}`" width="520px">
+      <div v-if="versionsLoading" class="versions-loading" role="status">正在加载版本历史…</div>
       <div v-for="v in versions" :key="v.id" class="version-item">
         <div class="version-head">
           <span class="version-no">v{{ v.version }}</span>
@@ -153,8 +178,8 @@ async function onDelete(m: LongTermMemory) {
         </div>
         <JsonViewer :data="v.body" />
       </div>
-      <el-empty v-if="versions.length === 0" description="暂无历史版本" :image-size="60" />
-    </el-dialog>
+      <el-empty v-if="!versionsLoading && versions.length === 0" description="暂无历史版本" :image-size="60" />
+    </ResponsiveDialog>
   </div>
 </template>
 
@@ -168,6 +193,9 @@ async function onDelete(m: LongTermMemory) {
   gap: 16px;
   overflow-y: auto;
   padding-bottom: 20px;
+}
+.memory-grid > * {
+  min-width: 0;
 }
 .memory-card {
   box-shadow: var(--app-shadow-card);
@@ -229,5 +257,21 @@ async function onDelete(m: LongTermMemory) {
 .version-time {
   color: var(--app-text-muted);
   font-size: 12px;
+}
+.versions-loading {
+  min-height: 80px;
+  display: grid;
+  place-items: center;
+  color: var(--app-text-muted);
+  font-size: var(--app-font-size-sm);
+}
+@media (max-width: 480px) {
+  .memory-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .memory-actions :deep(.el-button) {
+    min-height: var(--app-control-touch);
+  }
 }
 </style>

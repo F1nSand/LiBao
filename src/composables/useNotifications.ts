@@ -1,6 +1,7 @@
 import { reactive, toRefs } from 'vue'
 import { ElMessage } from 'element-plus'
 import { listNotifications, markRead } from '@/api/notifications'
+import { FEATURE, isUnavailable } from '@/api/availability'
 import type { Notification } from '@/types'
 import type { SseEnvelope } from '@/types/sse'
 
@@ -9,21 +10,33 @@ import type { SseEnvelope } from '@/types/sse'
  * SSE 连接由挂载方（SettingsView）持有——useSSE 的 onScopeDispose 需要组件作用域，
  * 此处只提供 state + 纯逻辑；多组件调用共享同一实例，无重复请求。
  */
-const state = reactive<{ items: Notification[]; unread: number; loading: boolean }>({
+type NotificationStatus = 'idle' | 'loading' | 'success-empty' | 'success' | 'error' | 'unavailable'
+
+const state = reactive<{ items: Notification[]; unread: number; loading: boolean; status: NotificationStatus; errorMessage: string | null }>({
   items: [],
   unread: 0,
   loading: false,
+  status: 'idle',
+  errorMessage: null,
 })
 
-/** 拉取通知列表（失败静默，后端未实现走降级） */
+/** 拉取通知列表（区分加载/空/失败/未实现，供设置页恢复） */
 async function load() {
+  if (isUnavailable(FEATURE.notifications)) {
+    state.status = 'unavailable'
+    return
+  }
   state.loading = true
+  state.status = 'loading'
+  state.errorMessage = null
   try {
     const res = await listNotifications({ page: 1, page_size: 20 })
     state.items = res.items
     state.unread = res.items.filter((n) => !n.read).length
-  } catch {
-    /* 通知加载失败静默（原 NotificationBell 行为） */
+    state.status = state.items.length ? 'success' : 'success-empty'
+  } catch (e) {
+    state.status = isUnavailable(FEATURE.notifications) ? 'unavailable' : 'error'
+    state.errorMessage = e instanceof Error ? e.message : '通知加载失败'
   } finally {
     state.loading = false
   }

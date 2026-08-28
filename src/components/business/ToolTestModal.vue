@@ -3,6 +3,7 @@ import { computed, reactive, ref } from 'vue'
 import { useToolStore } from '@/stores/tool'
 import type { ToolDefinition } from '@/types'
 import JsonViewer from '@/components/common/JsonViewer.vue'
+import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 
 /** 沙盒测试弹窗（docs/02 §6.2）：按 params_schema 动态生成表单 → POST /tools/{id}/test */
 const props = defineProps<{ visible: boolean; tool: ToolDefinition | null }>()
@@ -14,14 +15,17 @@ const result = ref<{ ok: boolean; output?: unknown; duration_ms?: number; error?
 const loading = ref(false)
 
 const properties = computed(() => {
-  const schema = props.tool?.params_schema as { properties?: Record<string, { type?: string; description?: string }> } | undefined
+  const schema = props.tool?.params_schema as {
+    properties?: Record<string, { type?: string; description?: string; required?: boolean; default?: unknown; enum?: unknown[]; minimum?: number; maximum?: number }>
+  } | undefined
   return schema?.properties ?? {}
 })
 
 function init() {
   result.value = null
-  Object.keys(properties.value).forEach((k) => {
-    if (values[k] === undefined) values[k] = ''
+  Object.keys(values).forEach((k) => delete values[k])
+  Object.entries(properties.value).forEach(([key, prop]) => {
+    values[key] = prop.default ?? (prop.type === 'boolean' ? false : prop.type === 'number' ? null : '')
   })
 }
 
@@ -38,7 +42,7 @@ async function run() {
 </script>
 
 <template>
-  <el-dialog
+  <ResponsiveDialog
     :model-value="visible"
     :title="`沙盒测试：${tool?.name ?? ''}`"
     width="520px"
@@ -51,12 +55,20 @@ async function run() {
           v-for="(prop, key) in properties"
           :key="key"
           :label="prop.description || key"
+          :required="!!prop.required"
         >
-          <el-input
+          <el-switch v-if="prop.type === 'boolean'" v-model="values[key]" />
+          <el-input-number
+            v-else-if="prop.type === 'number' || prop.type === 'integer'"
             v-model="values[key]"
-            :placeholder="prop.type ?? 'value'"
-            clearable
+            :min="prop.minimum"
+            :max="prop.maximum"
+            controls-position="right"
           />
+          <el-select v-else-if="prop.enum?.length" v-model="values[key]" clearable class="test-field-control">
+            <el-option v-for="option in prop.enum" :key="String(option)" :label="String(option)" :value="option" />
+          </el-select>
+          <el-input v-else v-model="values[key]" :placeholder="prop.type ?? 'value'" clearable />
         </el-form-item>
       </template>
       <el-form-item v-else label="参数">
@@ -75,7 +87,7 @@ async function run() {
       <el-button @click="emit('close')">关闭</el-button>
       <el-button type="primary" :loading="loading" @click="run">执行测试</el-button>
     </template>
-  </el-dialog>
+  </ResponsiveDialog>
 </template>
 
 <style scoped>
@@ -108,8 +120,11 @@ async function run() {
   padding: 6px;
 }
 .test-error {
-  color: #ef4444;
+  color: var(--app-danger);
   font-size: 12px;
   margin-top: 6px;
+}
+.test-field-control {
+  width: 100%;
 }
 </style>

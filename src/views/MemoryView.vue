@@ -7,6 +7,7 @@ import { listWorkspaces } from '@/api/workspace'
 import { listProjectMemory } from '@/api/memory'
 import { readWorkspaceFile } from '@/api/workspace'
 import type { ProjectMemoryFile, Workspace } from '@/types'
+import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 
 /** 记忆管理（docs/02 §4 / docs/03 §5.7）：长期记忆卡片（RAG）+ 项目记忆文件（P5） */
 const store = useMemoryStore()
@@ -131,9 +132,9 @@ async function onMaintenance() {
       </el-tab-pane>
     </el-tabs>
 
-    <el-dialog v-model="dialogVisible" :title="fileContent?.title ?? ''" width="640px">
+    <ResponsiveDialog v-model="dialogVisible" :title="fileContent?.title ?? ''" width="640px">
       <pre class="file-content">{{ fileContent?.content }}</pre>
-    </el-dialog>
+    </ResponsiveDialog>
   </div>
 </template>
 
@@ -146,6 +147,7 @@ async function onMaintenance() {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 .project-list {
   display: flex;
@@ -184,5 +186,13 @@ async function onMaintenance() {
   font-family: var(--app-font-mono);
   font-size: 13px;
   line-height: 1.6;
+}
+@media (max-width: 480px) {
+  .project-header :deep(.el-select) {
+    width: 100% !important;
+  }
+  .project-header :deep(.el-button) {
+    min-height: var(--app-control-touch);
+  }
 }
 </style>

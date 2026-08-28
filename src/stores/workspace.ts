@@ -9,7 +9,7 @@ export const useWorkspaceStore = defineStore('workspace', {
   state: () => ({
     workspaces: [] as Workspace[],
     loading: false,
-    status: 'idle' as 'idle' | 'loading' | 'success' | 'error' | 'unavailable',
+    status: 'idle' as 'idle' | 'loading' | 'success-empty' | 'success' | 'error' | 'unavailable',
     errorMessage: null as string | null,
   }),
   getters: {
@@ -28,7 +28,7 @@ export const useWorkspaceStore = defineStore('workspace', {
         const res = await swallowNotImplemented(listWorkspaces({ page_size: 100 }))
         if (res) {
           this.workspaces = res.items
-          this.status = 'success'
+          this.status = this.workspaces.length ? 'success' : 'success-empty'
         } else {
           this.status = 'unavailable'
         }

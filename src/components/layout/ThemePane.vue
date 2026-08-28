@@ -11,6 +11,19 @@ function select(id: string) {
   setStoredTheme(id)
   emit('update:modelValue', id)
 }
+
+function onSwatchKeydown(e: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
+  const current = e.currentTarget as HTMLElement
+  const swatches = Array.from(current.parentElement?.querySelectorAll<HTMLElement>('.theme-swatch') ?? [])
+  const position = swatches.indexOf(current)
+  const columns = window.matchMedia('(max-width: 480px)').matches ? 2 : 3
+  const delta = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' ? -columns : columns
+  const next = swatches[position + delta]
+  if (!next) return
+  e.preventDefault()
+  next.focus()
+}
 </script>
 
 <template>
@@ -23,7 +36,10 @@ function select(id: string) {
         class="theme-swatch"
         :class="{ active: t.id === modelValue }"
         :title="t.name"
+        :aria-label="`选择主题：${t.name}`"
+        :aria-pressed="t.id === modelValue"
         @click="select(t.id)"
+        @keydown="onSwatchKeydown"
       >
         <span class="theme-swatch-preview">
           <span class="theme-swatch-primary" :style="{ background: t.preview.primary }" />
@@ -82,7 +98,15 @@ function select(id: string) {
   width: 34%;
 }
 .theme-swatch-name {
-  font-size: 12px;
+  font-size: var(--app-font-size-xs);
   color: var(--app-text-secondary);
+}
+@media (max-width: 480px) {
+  .theme-pane-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .theme-swatch {
+    min-height: var(--app-control-touch);
+  }
 }
 </style>

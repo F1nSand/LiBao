@@ -2,11 +2,11 @@
 import { computed } from 'vue'
 import { useNotifications } from '@/composables/useNotifications'
 import { FEATURE, isUnavailable } from '@/api/availability'
-import EmptyState from '@/components/common/EmptyState.vue'
+import AsyncState from '@/components/common/AsyncState.vue'
 
 /** 设置页「通知」pane（原 NotificationBell 悬浮层改专门窗口）：
  *  消费 useNotifications 模块级单例（state 共享，SSE 由 SettingsView 持有连接）。 */
-const { items, unread, loading, markReadById } = useNotifications()
+const { items, unread, status, errorMessage, load, markReadById } = useNotifications()
 /** 后端未实现通知接口（列表 GET 404 打标）→ pane 内 EmptyState；不用 notificationsStream 标志（SSE 打的是 stream） */
 const unavailable = computed(() => isUnavailable(FEATURE.notifications))
 </script>
@@ -17,10 +17,14 @@ const unavailable = computed(() => isUnavailable(FEATURE.notifications))
       <span class="notif-title">通知</span>
       <span class="notif-count">{{ unread }} 未读</span>
     </div>
-    <EmptyState v-if="unavailable" text="后端暂未实现通知接口" />
-    <div v-else-if="loading" class="notif-empty">加载中…</div>
-    <div v-else-if="items.length === 0" class="notif-empty">暂无通知</div>
-    <ul v-else class="notif-list">
+    <AsyncState
+      :status="unavailable ? 'unavailable' : status"
+      :error-message="errorMessage"
+      empty-text="暂无通知"
+      unavailable-text="后端暂未实现通知接口"
+      @retry="load"
+    >
+      <ul class="notif-list">
       <li v-for="n in items.slice(0, 20)" :key="n.id" class="notif-item-wrap">
         <button
           type="button"
@@ -36,7 +40,8 @@ const unavailable = computed(() => isUnavailable(FEATURE.notifications))
           </span>
         </button>
       </li>
-    </ul>
+      </ul>
+    </AsyncState>
   </div>
 </template>
 

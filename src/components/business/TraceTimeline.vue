@@ -45,6 +45,17 @@ watch(() => props.traceId, load, { immediate: true })
 function meta(ev: TraceEvent) {
   return NODE_META[ev.node_type] ?? { label: ev.node_type, color: '#6b7280' }
 }
+
+function onTraceKeydown(e: KeyboardEvent) {
+  if (!['ArrowDown', 'ArrowUp'].includes(e.key)) return
+  const current = e.currentTarget as HTMLElement
+  const heads = Array.from(current.closest('.timeline-list')?.querySelectorAll<HTMLElement>('.tl-head') ?? [])
+  const position = heads.indexOf(current)
+  const next = heads[position + (e.key === 'ArrowDown' ? 1 : -1)]
+  if (!next) return
+  e.preventDefault()
+  next.focus()
+}
 </script>
 
 <template>
@@ -57,12 +68,19 @@ function meta(ev: TraceEvent) {
           <span v-if="i < detail.events.length - 1" class="tl-line" :style="{ background: meta(ev).color }" />
         </div>
         <div class="tl-body">
-          <div class="tl-head" @click="expanded = expanded === i ? null : i">
+          <button
+            type="button"
+            class="tl-head"
+            :aria-expanded="expanded === i"
+            :aria-label="`${meta(ev).label} ${ev.name}，${expanded === i ? '收起详情' : '展开详情'}`"
+            @click="expanded = expanded === i ? null : i"
+            @keydown="onTraceKeydown"
+          >
             <span class="tl-node" :style="{ color: meta(ev).color }">{{ meta(ev).label }}</span>
             <span class="tl-name">{{ ev.name }}</span>
             <span class="tl-status" :class="ev.status">{{ ev.status }}</span>
             <span v-if="ev.duration_ms != null" class="tl-duration">{{ ev.duration_ms }}ms</span>
-          </div>
+          </button>
           <div v-if="ev.token_usage?.total_tokens" class="tl-tokens">{{ ev.token_usage.total_tokens }} tokens</div>
           <div v-if="expanded === i" class="tl-detail">
             <div v-if="ev.input !== undefined"><div class="tl-label">输入</div><JsonViewer :data="ev.input" /></div>
@@ -72,7 +90,10 @@ function meta(ev: TraceEvent) {
       </div>
     </div>
     <EmptyState v-else-if="unavailable" text="后端暂未实现 trace 接口" />
-    <el-empty v-else-if="loadFailed" description="trace 加载失败" :image-size="60" />
+    <div v-else-if="loadFailed" class="trace-error" role="alert">
+      <span>trace 加载失败，请重试</span>
+      <el-button size="small" @click="load">重试</el-button>
+    </div>
     <el-empty v-else description="点击日志行查看 trace" :image-size="60" />
   </div>
 </template>
@@ -115,10 +136,17 @@ function meta(ev: TraceEvent) {
   padding-bottom: 14px;
 }
 .tl-head {
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   font-size: 13px;
   border-radius: var(--app-radius);
   transition: background 0.15s;
@@ -152,6 +180,15 @@ function meta(ev: TraceEvent) {
 .tl-tokens {
   font-size: 11px;
   color: var(--app-text-muted);
+}
+.trace-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 8px;
+  color: var(--app-danger);
+  font-size: var(--app-font-size-sm);
 }
 .tl-detail {
   margin-top: 6px;
