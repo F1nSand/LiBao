@@ -64,6 +64,19 @@ class AttachmentService:
             raise AppError(ERR_ATTACHMENT_NOT_FOUND, "附件不存在或无权访问")
         return row
 
+    async def get_owned_many(
+        self, db: Any, user_id: uuid.UUID, attachment_ids: list[uuid.UUID]
+    ) -> list[Attachment]:
+        """按请求顺序批量校验归属；任何缺失、软删或他人附件都统一报 40403。"""
+        repo = AttachmentRepository(db)
+        rows: list[Attachment] = []
+        for attachment_id in attachment_ids:
+            row = await repo.get(user_id, attachment_id)
+            if row is None:
+                raise AppError(ERR_ATTACHMENT_NOT_FOUND, "附件不存在或无权访问")
+            rows.append(row)
+        return rows
+
     async def get_attachment_by_id(self, db: Any, attachment_id: uuid.UUID) -> Attachment | None:
         """按 id 直取（不做 owner 校验）——编排层专用：owner 校验已在 chat 路由唯一入口完成（项目既有约定）。"""
         return await AttachmentRepository(db).get_any_org(attachment_id)

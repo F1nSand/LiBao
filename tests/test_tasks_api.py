@@ -11,16 +11,19 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from langchain_core.messages import AIMessage
+from pydantic import ValidationError
 
 from app.api.main import create_app
 from app.api.routers.tasks import _task_event_stream
+from app.api.schemas.chat import CONTENT_LIMIT
+from app.api.schemas.tasks import SubmitTaskRequest
 from app.core.errors import AppError
 from app.orchestration.graph import build_graph
 from app.orchestration.task_run import run_task_graph
 from app.services.task import TaskService
 from app.storage.constants import ADMIN_USER, DEFAULT_ORG_ID
 from app.storage.file.store import get_store
-from app.storage.models import AgentConfig, User
+from app.storage.models import AgentConfig, Attachment, User
 from app.storage.repositories.run_log import RunLogRepository
 from app.storage.repositories.task import TaskRepository
 
@@ -281,3 +284,83 @@ async def test_json_resume_denied_preserves_false_approved(monkeypatch):
     assert captured == [
         {"graph": graph, "task_id": task_id, "approved": False, "trace_id": "route-deny-trace"}
     ]
+
+
+def test_submit_task_preserves_extra_input_keys():
+    payload = {"message": "hello", "legacy": {"nested": [1, True]}, "count": 0}
+    request = SubmitTaskRequest(input=payload)
+    assert request.input == payload
+    assert request.input is not payload
+
+
+def test_submit_task_normalizes_attachment_uuid_strings():
+    attachment_id = uuid.uuid4()
+    request = SubmitTaskRequest(input={"attachment_ids": [str(attachment_id)]})
+    assert request.input["attachment_ids"] == [str(attachment_id)]
+
+
+def test_submit_task_rejects_non_list_attachment_ids_422():
+    with pytest.raises(ValidationError):
+        SubmitTaskRequest(input={"attachment_ids": str(uuid.uuid4())})
+
+
+def test_submit_task_rejects_invalid_attachment_uuid_422():
+    with pytest.raises(ValidationError):
+        SubmitTaskRequest(input={"attachment_ids": ["not-a-uuid"]})
+
+
+def test_submit_task_rejects_overlong_message():
+    with pytest.raises(ValidationError):
+        SubmitTaskRequest(input={"message": "x" * (CONTENT_LIMIT + 1)})
+
+
+async def _create_route_attachment(*, user_id: uuid.UUID, deleted: bool = False) -> Attachment:
+    async with get_store().session() as session:
+        attachment = Attachment(
+            user_id=user_id,
+            filename="route.png",
+            content_type="image/png",
+            size_bytes=4,
+            storage_path="",
+            status="uploaded",
+        )
+        if deleted:
+            from datetime import UTC, datetime
+
+            attachment.deleted_at = datetime.now(UTC)
+        session.add(attachment)
+        await session.commit()
+    return attachment
+
+
+@pytest.mark.parametrize("kind", ["foreign", "deleted"])
+async def test_submit_task_rejects_inaccessible_attachment_before_task_creation(monkeypatch, kind):
+    await _create_default_route_agent()
+    attachment = await _create_route_attachment(
+        user_id=uuid.uuid4() if kind == "foreign" else ADMIN_USER.id,
+        deleted=kind == "deleted",
+    )
+    before = 0
+    async with get_store().session() as session:
+        before = await TaskRepository(session).count_for_user(ADMIN_USER.id)
+
+    called = []
+
+    def fake_spawn_run(**kwargs):
+        called.append(kwargs)
+        return None
+
+    monkeypatch.setattr("app.api.routers.tasks.spawn_run", fake_spawn_run)
+    app = await _http_task_app(object())
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/tasks",
+            json={"input": {"message": "should reject", "attachment_ids": [str(attachment.id)]}},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["code"] == 40403
+    assert called == []
+    async with get_store().session() as session:
+        assert await TaskRepository(session).count_for_user(ADMIN_USER.id) == before

@@ -18,6 +18,7 @@ from app.core.logging import get_trace_id
 from app.orchestration.chat_stream import resume_stream_events
 from app.orchestration.task_worker import route_cancel, spawn_run
 from app.services.agent import AgentService
+from app.services.attachment import AttachmentService
 from app.services.serializers import serialize_task
 from app.services.task import TaskService, subscribe, unsubscribe
 from app.storage.models.task import Task
@@ -82,6 +83,9 @@ async def submit_task(
     db: Any = Depends(get_db),
 ):
     agent = await AgentService().get_default(db, user.org_id)  # 单通用 Agent，不接收 agent_id
+    attachment_ids = req.input.get("attachment_ids", [])
+    if attachment_ids:
+        await AttachmentService().get_owned_many(db, user.id, [uuid.UUID(value) for value in attachment_ids])
     task = await TaskService().submit(db, user, agent.id, req.input)
     # 本地单机化：直接进程内跑图（spawn_run 注册进 _RUNNING，可取消）
     spawn_run(
