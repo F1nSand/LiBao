@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { isSettingsRoute, menuItems, type MenuItem } from '@/router/routes'
 import { useMediaQuery } from '@/composables/useMediaQuery'
-import { NARROW_LAYOUT_MQ } from '@/constants/layout'
+import { MOBILE_LAYOUT_MQ, NARROW_LAYOUT_MQ } from '@/constants/layout'
 import ConversationList from '@/components/business/ConversationList.vue'
 
 /**
@@ -15,9 +15,34 @@ const userCollapsed = ref(false)
 /** 设置气泡开关 */
 const settingsOpen = ref(false)
 const isNarrow = useMediaQuery(NARROW_LAYOUT_MQ)
-/** 对话页窄屏不自动收起（会话列表在侧栏内需可用），其它页照常自动收起 */
-const autoNarrow = computed(() => isNarrow.value && route.path !== '/chat')
-const collapsed = computed(() => autoNarrow.value || userCollapsed.value)
+const isMobile = useMediaQuery(MOBILE_LAYOUT_MQ)
+const drawerOpen = ref(false)
+const autoNarrow = computed(() => isNarrow.value && !isMobile.value)
+const collapsed = computed(() => !isMobile.value && (autoNarrow.value || userCollapsed.value))
+
+function openDrawer() {
+  if (isMobile.value) drawerOpen.value = true
+}
+
+function closeDrawer() {
+  drawerOpen.value = false
+}
+
+defineExpose({ openDrawer, closeDrawer })
+
+watch(
+  () => route.fullPath,
+  () => closeDrawer(),
+)
+
+function onWindowKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && drawerOpen.value) closeDrawer()
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', onWindowKeydown)
+  onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
+}
 
 function pick(paths: string[]): MenuItem[] {
   return paths.map((p) => menuItems.find((i) => i.path === p)).filter((i): i is MenuItem => !!i)
@@ -42,12 +67,12 @@ const settingsChildren = computed(() => {
 </script>
 
 <template>
-  <aside class="sidebar" :class="{ collapsed }">
+  <aside class="sidebar" :class="{ collapsed, 'is-mobile': isMobile, 'drawer-open': drawerOpen }">
     <div class="sidebar-logo">
       <el-icon :size="20"><ChatDotRound /></el-icon>
       <span v-show="!collapsed" class="logo-text">Agent 工作台</span>
       <button
-        v-if="!isNarrow || route.path === '/chat'"
+        v-if="!isNarrow"
         class="collapse-btn logo-collapse"
         type="button"
         :title="collapsed ? '展开' : '折叠'"
@@ -65,6 +90,7 @@ const settingsChildren = computed(() => {
         class="nav-item"
         :class="{ active: isActive(item) }"
         :title="collapsed ? item.title : undefined"
+        :aria-current="isActive(item) ? 'page' : undefined"
       >
         <el-icon :size="18"><component :is="item.icon" /></el-icon>
         <span v-show="!collapsed" class="nav-text">{{ item.title }}</span>
@@ -104,6 +130,7 @@ const settingsChildren = computed(() => {
           :to="item.path"
           class="sub-item"
           :class="{ active: route.path === item.path }"
+          :aria-current="route.path === item.path ? 'page' : undefined"
           @click="settingsOpen = false"
         >
           <el-icon :size="15"><component :is="item.icon" /></el-icon>
@@ -112,6 +139,7 @@ const settingsChildren = computed(() => {
       </el-popover>
     </nav>
   </aside>
+  <div v-if="isMobile && drawerOpen" class="sidebar-backdrop" aria-hidden="true" @click="closeDrawer" />
 </template>
 
 <style scoped>
@@ -121,12 +149,12 @@ const settingsChildren = computed(() => {
   border-right: 1px solid var(--app-sidebar-border);
   display: flex;
   flex-direction: column;
-  transition: width 0.2s ease;
+  transition: width 0.2s var(--ease-out), transform 0.2s var(--ease-out);
   overflow: hidden;
   flex-shrink: 0;
 }
 .sidebar.collapsed {
-  width: 64px;
+  width: var(--app-sidebar-collapsed-width);
 }
 .sidebar-logo {
   height: var(--app-topbar-height);
@@ -142,8 +170,8 @@ const settingsChildren = computed(() => {
 }
 .logo-collapse {
   margin-left: auto;
-  width: 30px;
-  height: 30px;
+  width: var(--app-control-sm);
+  height: var(--app-control-sm);
   padding: 0;
   flex-shrink: 0;
 }
@@ -219,6 +247,28 @@ const settingsChildren = computed(() => {
   color: var(--app-sidebar-text);
   cursor: pointer;
   border-radius: var(--app-radius);
+}
+
+.sidebar-backdrop {
+  position: fixed;
+  z-index: calc(var(--app-z-dropdown) - 1);
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+@media (max-width: 768px) {
+  .sidebar.is-mobile {
+    position: fixed;
+    z-index: var(--app-z-dropdown);
+    inset: 0 auto 0 0;
+    width: min(var(--app-sidebar-width), calc(100vw - 48px));
+    height: 100dvh;
+    transform: translateX(-100%);
+    box-shadow: 8px 0 24px rgba(15, 23, 42, 0.18);
+  }
+  .sidebar.is-mobile.drawer-open {
+    transform: translateX(0);
+  }
 }
 .collapse-btn:hover {
   background: var(--app-sidebar-item-hover);

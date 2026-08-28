@@ -8,6 +8,7 @@
   --app-sidebar-item-hover: rgba(255, 255, 255, 0.06);
   --app-sidebar-item-active-bg: rgba(99, 102, 241, 0.22);
   --app-sidebar-width: 232px;
+  --app-sidebar-collapsed-width: 64px;
   --app-sidebar-logo-bg: #171728;
   --app-sidebar-conv-bg: #26263a; /* 会话列表浅色框（侧边栏一深一浅） */
 
