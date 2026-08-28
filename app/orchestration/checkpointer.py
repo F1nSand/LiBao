@@ -34,6 +34,36 @@ from langgraph.checkpoint.base import (
 SCHEMA_VERSION = 1
 
 
+def _load_pending_write(channel: str, value: str) -> Any:
+    try:
+        return lc_loads(value)
+    except NotImplementedError:
+        if channel != "__error__":
+            raise
+        try:
+            error_id = json.loads(value).get("id") or []
+        except (json.JSONDecodeError, AttributeError):
+            error_id = []
+        return {"error_type": str(error_id[-1]) if error_id else "UnserializableError"}
+
+
+def _checkpoint_before_failed_input(records: dict[str, Any], latest_id: str) -> str | None:
+    latest = records[latest_id]
+    has_error = any(
+        pair[0] == "__error__"
+        for task_writes in (latest.get("writes") or {}).values()
+        for pair in task_writes
+    )
+    if not has_error:
+        return latest_id
+    ids = sorted(records)
+    for index in range(ids.index(latest_id), -1, -1):
+        metadata = lc_loads(records[ids[index]]["metadata"])
+        if metadata.get("source") == "input":
+            return ids[index - 1] if index > 0 else None
+    return latest_id
+
+
 def _thread_key(config: dict[str, Any]) -> str:
     """thread_key = thread_id（subagent 场景拼 checkpoint_ns 的 sha1 短前缀，防同目录碰撞）。"""
     cfg = config.get("configurable", config)
@@ -132,7 +162,17 @@ class JsonFileSaver(BaseCheckpointSaver):
             rec = data["checkpoints"].get(cid)
             if rec is None:
                 return
-            rec["writes"][task_id] = [[ch, lc_dumps(val)] for ch, val in writes]
+            rec["writes"][task_id] = [
+                [
+                    ch,
+                    lc_dumps(
+                        {"error_type": type(val).__name__}
+                        if ch == "__error__" and isinstance(val, BaseException)
+                        else val
+                    ),
+                ]
+                for ch, val in writes
+            ]
             self._save(path, data)
 
     def get_tuple(self, config: dict[str, Any]) -> CheckpointTuple | None:
@@ -145,7 +185,11 @@ class JsonFileSaver(BaseCheckpointSaver):
             if cid is not None and str(cid) in recs:
                 record = recs[str(cid)]
             elif recs:
-                record = recs[max(recs.keys())]  # checkpoint_id 可比较 → 最新
+                latest_id = max(recs.keys())  # checkpoint_id 可比较 → 最新
+                checkpoint_id = _checkpoint_before_failed_input(recs, latest_id)
+                if checkpoint_id is None:
+                    return None
+                record = recs[checkpoint_id]
             else:
                 return None
             checkpoint: Checkpoint = lc_loads(record["checkpoint"])
@@ -157,7 +201,7 @@ class JsonFileSaver(BaseCheckpointSaver):
             pending_writes: list[tuple[str, str, Any]] = []
             for tid, chans in (record.get("writes") or {}).items():
                 for ch, val in chans:
-                    pending_writes.append((tid, ch, lc_loads(val)))
+                    pending_writes.append((tid, ch, _load_pending_write(ch, val)))
             return CheckpointTuple(
                 config={"configurable": {**cfg, "checkpoint_id": checkpoint["id"]}},
                 checkpoint=checkpoint,

@@ -1,6 +1,7 @@
 """JsonFileSaver 测试：put/get_tuple/list/put_writes 全接口 + 消息序列化 round-trip + checkpoint_ns。"""
 from __future__ import annotations
 
+from langchain_core.load import dumps as lc_dumps
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.orchestration.checkpointer import JsonFileSaver
@@ -52,6 +53,39 @@ async def test_put_writes_and_pending(tmp_path):
     tup = await saver.aget_tuple(config)
     assert tup.pending_writes == [("task-1", "messages", tup.pending_writes[0][2])]
     assert isinstance(tup.pending_writes[0][2], AIMessage)
+
+
+async def test_error_pending_write_roundtrip_is_loadable(tmp_path):
+    """节点异常写入 checkpoint 后必须可恢复，不能让同一 thread 永久中毒。"""
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-error"}}
+    saver.put(config, _checkpoint("c1"), {"source": "loop", "step": 1}, {})
+    cfg = {"configurable": {"thread_id": "t-error", "checkpoint_id": "c1"}}
+    saver.put_writes(cfg, [("__error__", RuntimeError("boom"))], task_id="task-error")
+
+    tup = await saver.aget_tuple(config)
+
+    assert tup is not None
+    assert len(tup.pending_writes) == 1
+    assert tup.pending_writes[0][:2] == ("task-error", "__error__")
+
+
+async def test_legacy_not_implemented_error_write_is_loadable(tmp_path):
+    """兼容旧版已落盘的 not_implemented 异常，现有中毒会话应可自动恢复。"""
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-legacy-error"}}
+    saver.put(config, _checkpoint("c1"), {"source": "loop", "step": 1}, {})
+    path = saver._path(config)
+    data = saver._load(path)
+    data["checkpoints"]["c1"]["writes"]["task-error"] = [
+        ["__error__", lc_dumps(RuntimeError("legacy boom"))]
+    ]
+    saver._save(path, data)
+
+    tup = await saver.aget_tuple(config)
+
+    assert tup is not None
+    assert tup.pending_writes[0][:2] == ("task-error", "__error__")
 
 
 async def test_list_before_limit(tmp_path):

@@ -12,6 +12,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from app.orchestration.chat_stream import chat_stream_events
+from app.orchestration.checkpointer import JsonFileSaver
 from app.orchestration.graph import build_graph
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Conversation, User
@@ -251,6 +252,60 @@ class SlowFakeModel:
     async def ainvoke(self, messages):
         await asyncio.sleep(0.5)
         return AIMessage(content="慢速回复完成")
+
+
+class FailOnceModel:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.seen_human_messages: list[list[str]] = []
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    async def ainvoke(self, messages):
+        self.seen_human_messages.append([str(m.content) for m in messages if m.type == "human"])
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("temporary model failure")
+        return AIMessage(content="恢复成功")
+
+
+async def test_chat_recovers_same_thread_after_model_error(chat_fixture, tmp_path):
+    """首轮模型异常后，同一会话下一条消息从上一干净状态继续，失败输入不重放。"""
+    user, agent, conv = chat_fixture
+    model = FailOnceModel()
+    graph = build_graph(JsonFileSaver(tmp_path / "chat-checkpoints"))
+
+    async def run(content: str, trace_id: str) -> list[str]:
+        frames: list[str] = []
+        async with get_store().session() as session:
+            async for frame in chat_stream_events(
+                db=session,
+                graph=graph,
+                conversation=conv,
+                agent=agent,
+                user=user,
+                content=content,
+                trace_id=trace_id,
+                model_override=model,
+            ):
+                frames.append(frame)
+        return [
+            json.loads(frame.split("\n\n")[0].split("data: ", 1)[1])["type"]
+            for frame in frames
+            if not frame.startswith(":")
+        ]
+
+    first_types = await run("失败消息", "trace-error-first")
+    second_types = await run("恢复消息", "trace-error-second")
+
+    assert first_types[-1] == "error"
+    assert second_types[-1] == "done"
+    assert "error" not in second_types
+    assert model.seen_human_messages == [["失败消息"], ["恢复消息"]]
+    async with get_store().session() as session:
+        messages = await MessageRepository(session).list_by_conversation(conv.id)
+    assert [message.role for message in messages] == ["user", "user", "assistant"]
 
 
 async def test_disconnect_drains_and_finalizes(chat_fixture):

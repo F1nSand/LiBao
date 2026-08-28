@@ -1,4 +1,12 @@
-# 进度账本 — plan: docs/plans/2026-08-27-provider-think-switch-fix.md
+# 进度账本 — plan: docs/plans/2026-08-27-chat-error-checkpoint-recovery.md
+
+- Task 1: complete (commits pending final archive, tests 2 checkpoint regressions → PASS)
+- Task 2: complete (commits pending final archive, tests checkpoint/chat/graph 20 passed; ruff PASS)
+- Task 3: complete — Test gate 515 passed / 2 skipped；Review/Simplify gates 无 findings；已创建归档提交
+
+---
+
+# 历史进度账本 — plan: docs/plans/2026-08-27-provider-think-switch-fix.md
 
 - Task 1: complete (commits none—目标文件含用户既有未提交改动，tests `.\.venv\Scripts\pytest.exe -p no:cacheprovider tests/test_provider.py tests/test_llm.py tests/test_chat_stream.py -q` → PASS, 23 passed)
 - Task 2: complete (commits none—同上，tests effective-model + reasoning pair → PASS, 2 passed; ruff → PASS)
