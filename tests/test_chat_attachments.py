@@ -199,6 +199,75 @@ async def test_image_attachment_vision_hydrates_block_and_no_b64_in_checkpoint(c
         assert "eDk5UE5H" not in data and "\x89PNG" not in data  # b64/原始字节不落盘
 
 
+async def test_chat_budget_drop_note_is_propagated(chat_att_fixture, monkeypatch):
+    """视觉模型保留请求顺序前缀，并把预算淘汰数传到模型可见文本。"""
+    from app.core.config import get_settings
+
+    user, agent, conv = chat_att_fixture
+    agent.model = "gpt-4o"
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", None)
+    monkeypatch.setattr(get_settings(), "image_total_budget_mb", 1)
+    async with get_store().session() as session:
+        first = await AttachmentService().save_upload(session, user, "first.png", "image/png", b"a" * 100)
+        second = await AttachmentService().save_upload(
+            session, user, "second.png", "image/png", b"b" * (2 * 1024 * 1024)
+        )
+        ids = [str(first.id), str(second.id)]
+    model = CapturingModel()
+    async with get_store().session() as session:
+        async for _ in chat_stream_events(
+            db=session,
+            graph=graph_local(),
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="按顺序描述图片",
+            attachments=ids,
+            trace_id="trace-mm-budget",
+            model_override=model,
+        ):
+            pass
+    human = next(m for m in model.seen[0] if m.type == "human")
+    assert isinstance(human.content, list)
+    text = next(block["text"] for block in human.content if block.get("type") == "text")
+    assert "1 张图片未能送达" in text
+
+
+async def test_all_unreadable_chat_images_report_omission(chat_att_fixture, monkeypatch):
+    """vision 模型所有图片读盘失败时仍保留明确 omission note，不静默退回纯文本。"""
+    from app.core.config import get_settings
+
+    user, agent, conv = chat_att_fixture
+    agent.model = "gpt-4o"
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", None)
+    async with get_store().session() as session:
+        att = await AttachmentService().save_upload(session, user, "unreadable.png", "image/png", b"png")
+        att_id = str(att.id)
+
+    async def fail_read(_att):
+        raise OSError("file removed")
+
+    monkeypatch.setattr(AttachmentService, "read_file", fail_read)
+    model = CapturingModel()
+    async with get_store().session() as session:
+        async for _ in chat_stream_events(
+            db=session,
+            graph=graph_local(),
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="这张图是什么",
+            attachments=[att_id],
+            trace_id="trace-mm-unreadable",
+            model_override=model,
+        ):
+            pass
+    human = next(m for m in model.seen[0] if m.type == "human")
+    assert isinstance(human.content, str)
+    assert "1 张图片未能送达" in human.content
+    assert "这张图是什么" in human.content
+
+
 def graph_local():
     from app.orchestration.graph import build_graph
 

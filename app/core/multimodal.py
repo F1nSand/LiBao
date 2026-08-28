@@ -74,17 +74,23 @@ def no_vision_note(model: str, n_images: int, n_dropped: int = 0) -> str:
         "请基于文字作答，如需看图请建议用户切换支持视觉的模型。）"
     )
     if n_dropped > 0:
-        note += f"另有 {n_dropped} 张图片因超过单轮大小预算未送达。"
+        note += f"另有 {n_dropped} 张图片未能送达；其中 {n_dropped} 张图片因超过单轮大小预算或读取失败。"
     return note
 
 
 def vision_drop_note(n_dropped: int) -> str:
     """vision 模型但部分图被预算裁剪的注记（拼在文本块前）。"""
-    return f"（系统提示：用户本次发送的部分图片（{n_dropped} 张）因超过单轮大小预算未能送达。）"
+    return f"（系统提示：用户本次发送的 {n_dropped} 张图片未能送达；其中可能因超过单轮大小预算或读取失败。）"
 
 
 def human_message_with_images(
-    text: str, refs: list[dict[str, str]], vision: bool, *, model: str = "", n_dropped: int = 0
+    text: str,
+    refs: list[dict[str, str]],
+    vision: bool,
+    *,
+    model: str = "",
+    n_images: int = 0,
+    n_dropped: int = 0,
 ) -> HumanMessage:
     """三分支构造初始用户消息（唯一构造收口）：
 
@@ -92,11 +98,14 @@ def human_message_with_images(
     ② vision=False 有 ref → str 注记前缀 + 原文（ref 全丢弃，本轮不做 OCR——用户拍板）
     ③ 无 ref → HumanMessage(content=text)（与无多模态时的现状逐字节相同，零回归锚点）
     """
-    if not refs:
+    candidate_count = n_images or len(refs)
+    if not refs and candidate_count == 0:
         return HumanMessage(content=text)
     if not vision:
-        prefix = no_vision_note(model or "当前模型", len(refs), n_dropped)
+        prefix = no_vision_note(model or "当前模型", candidate_count, n_dropped)
         return HumanMessage(content=f"{prefix}\n\n{text}")
+    if not refs:
+        return HumanMessage(content=f"{vision_drop_note(n_dropped or candidate_count)}\n\n{text}")
     blocks: list[dict[str, Any]] = [dict(r) for r in refs]
     text_block = {"type": "text", "text": f"{vision_drop_note(n_dropped)}{text}" if n_dropped else text}
     blocks.append(text_block)

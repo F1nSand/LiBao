@@ -28,15 +28,21 @@ def _resolve_model(state: AgentState, config: Optional[RunnableConfig]) -> Any: 
 
 
 def _image_ctx(config: Optional[RunnableConfig]) -> Optional[dict[str, Any]]:  # noqa: UP045
-    """从 graph_config.configurable 取图片水合上下文（chat 层写入；测试/Mock 路径无 → None → ref 降级直通）。"""
+    """从 graph_config.configurable 取图片水合上下文。
+
+    显式空键代表恢复路径：历史 ref 必须转为省略文本；完全没有图片键才走旧的无图快速路径。
+    """
     if config is None:
         return None
     cfg = config.get("configurable", {}) or {}
-    payload = cfg.get("image_payload")
-    current_ids = cfg.get("current_image_ids")
-    if not payload and not current_ids:
+    image_keys = {"image_payload", "current_image_ids", "vision"}
+    if not image_keys.intersection(cfg):
         return None
-    return {"index": payload or {}, "current_ids": set(current_ids or []), "vision": bool(cfg.get("vision"))}
+    return {
+        "index": cfg.get("image_payload") or {},
+        "current_ids": set(cfg.get("current_image_ids") or []),
+        "vision": bool(cfg.get("vision")),
+    }
 
 
 async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig] = None) -> dict[str, Any]:  # noqa: UP045  LangGraph 需 Optional 形式

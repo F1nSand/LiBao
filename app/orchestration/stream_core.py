@@ -133,6 +133,8 @@ def build_initial_state(
     workspace: dict[str, Any] | None = None,
     *,
     image_refs: list[dict[str, str]] | None = None,
+    image_candidate_count: int = 0,
+    image_omitted_count: int = 0,
 ) -> dict[str, Any]:
     """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。
 
@@ -181,7 +183,14 @@ def build_initial_state(
     effective_model = resolve_effective_model(agent)
     refs = list(image_refs or [])
     vision = supports_vision(effective_model, get_settings().llm_vision_declared)
-    first_message = human_message_with_images(content, refs, vision, model=effective_model)
+    first_message = human_message_with_images(
+        content,
+        refs,
+        vision,
+        model=effective_model,
+        n_images=image_candidate_count,
+        n_dropped=image_omitted_count,
+    )
     return {
         "messages": [first_message],
         "agent_config": {

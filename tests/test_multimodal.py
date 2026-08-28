@@ -1,6 +1,10 @@
 """多模态消息适配测试（2026-08-27）：能力判定 / 三分支构造 / 水合渲染 / 预算裁剪。"""
 from __future__ import annotations
 
+import uuid
+from types import SimpleNamespace
+
+from app.core.config import get_settings
 from app.core.multimodal import (
     ImagePayload,
     encode_image,
@@ -13,6 +17,10 @@ from app.core.multimodal import (
     render_message_content,
 )
 from app.core.vision import has_vision_pattern, supports_vision
+from app.orchestration.context_builder import build_context
+from app.orchestration.multimodal_input import prepare_image_input
+from app.orchestration.nodes.agent_execute import _image_ctx
+from app.orchestration.stream_core import build_initial_state
 
 # ---- B1 能力判定 ----
 
@@ -194,3 +202,161 @@ def test_fit_budget_drops_overflow_tail_and_counts():
     assert dropped2 == 1 and [p.att_id for p in kept2] == ["s"]
     # note 含被剔数
     assert "1 张图片因超过单轮大小预算" in no_vision_note("m", 2, 1)
+
+
+# ---- Task 6：统一、带 owner 的图片准备 ----
+
+
+async def test_prepare_image_input_owner_order_and_mime(monkeypatch):
+    user_id = uuid.uuid4()
+    first_id, pdf_id, second_id, foreign_id = (uuid.uuid4() for _ in range(4))
+    rows = {
+        first_id: SimpleNamespace(id=first_id, user_id=user_id, content_type="image/png"),
+        pdf_id: SimpleNamespace(id=pdf_id, user_id=user_id, content_type="application/pdf"),
+        second_id: SimpleNamespace(id=second_id, user_id=user_id, content_type="image/jpeg"),
+        foreign_id: SimpleNamespace(id=foreign_id, user_id=uuid.uuid4(), content_type="image/png"),
+    }
+    seen_owner_ids: list[tuple[uuid.UUID, uuid.UUID]] = []
+    reads: list[uuid.UUID] = []
+
+    class FakeAttachmentRepository:
+        def __init__(self, db):
+            pass
+
+        async def get(self, owner_id, attachment_id):
+            seen_owner_ids.append((owner_id, attachment_id))
+            row = rows.get(attachment_id)
+            return row if row is not None and row.user_id == owner_id else None
+
+    async def read_file(self, row):
+        reads.append(row.id)
+        return b"bytes-" + str(row.id).encode()
+
+    monkeypatch.setattr("app.orchestration.multimodal_input.AttachmentRepository", FakeAttachmentRepository)
+    monkeypatch.setattr("app.orchestration.multimodal_input.AttachmentService.read_file", read_file)
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", True)
+
+    result = await prepare_image_input(
+        object(),
+        user_id=user_id,
+        attachment_ids=[str(second_id), str(pdf_id), str(first_id), str(foreign_id)],
+        effective_model="deepseek-chat",
+    )
+
+    assert [ref["attachment_id"] for ref in result.image_refs] == [str(second_id), str(first_id)]
+    assert list(result.image_payload) == [str(second_id), str(first_id)]
+    assert result.candidate_count == 2 and result.omitted_count == 0 and result.vision is True
+    assert reads == [second_id, first_id]
+    assert all("data_b64" not in ref and "bytes" not in ref for ref in result.image_refs)
+    assert all(owner == user_id for owner, _ in seen_owner_ids)
+
+
+async def test_prepare_image_input_non_vision_never_reads_files(monkeypatch):
+    user_id = uuid.uuid4()
+    image_id = uuid.uuid4()
+    row = SimpleNamespace(id=image_id, user_id=user_id, content_type="image/png")
+    reads = 0
+
+    class FakeAttachmentRepository:
+        def __init__(self, db):
+            pass
+
+        async def get(self, owner_id, attachment_id):
+            return row if owner_id == user_id and attachment_id == image_id else None
+
+    async def read_file(_row):
+        nonlocal reads
+        reads += 1
+        raise AssertionError("non-vision preparation must not read image files")
+
+    monkeypatch.setattr("app.orchestration.multimodal_input.AttachmentRepository", FakeAttachmentRepository)
+    monkeypatch.setattr("app.orchestration.multimodal_input.AttachmentService.read_file", read_file)
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", False)
+
+    result = await prepare_image_input(
+        object(), user_id=user_id, attachment_ids=[str(image_id)], effective_model="gpt-4o"
+    )
+
+    assert result.vision is False
+    assert result.candidate_count == 1 and result.omitted_count == 1
+    assert result.image_refs == () and result.image_payload == {}
+    assert reads == 0
+
+
+async def test_prepare_image_input_counts_read_failures_and_budget_drops(monkeypatch):
+    user_id = uuid.uuid4()
+    kept_id, unreadable_id, oversized_id = (uuid.uuid4() for _ in range(3))
+    rows = {
+        att_id: SimpleNamespace(id=att_id, user_id=user_id, content_type="image/png")
+        for att_id in (kept_id, unreadable_id, oversized_id)
+    }
+
+    class FakeAttachmentRepository:
+        def __init__(self, db):
+            pass
+
+        async def get(self, owner_id, attachment_id):
+            return rows.get(attachment_id) if owner_id == user_id else None
+
+    async def read_file(_service, row):
+        if row.id == unreadable_id:
+            raise OSError("missing file")
+        return b"x" * (100 if row.id == kept_id else 2 * 1024 * 1024)
+
+    monkeypatch.setattr("app.orchestration.multimodal_input.AttachmentRepository", FakeAttachmentRepository)
+    monkeypatch.setattr("app.orchestration.multimodal_input.AttachmentService.read_file", read_file)
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", True)
+    monkeypatch.setattr(get_settings(), "image_total_budget_mb", 1)
+
+    result = await prepare_image_input(
+        object(),
+        user_id=user_id,
+        attachment_ids=[str(kept_id), str(unreadable_id), str(oversized_id)],
+        effective_model="gpt-4o",
+    )
+
+    assert result.candidate_count == 3 and result.omitted_count == 2
+    assert [ref["attachment_id"] for ref in result.image_refs] == [str(kept_id)]
+    assert set(result.image_payload) == {str(kept_id)}
+
+
+def test_empty_image_context_converts_refs_to_fallback():
+    ctx = _image_ctx(
+        {"configurable": {"image_payload": {}, "current_image_ids": set(), "vision": False}}
+    )
+    assert ctx is not None
+    state = {
+        "agent_config": {"system_prompt": "system"},
+        "messages": [
+            __import__("langchain_core.messages", fromlist=["HumanMessage"]).HumanMessage(
+                content=[make_ref_block("att-historical", "image/png"), {"type": "text", "text": "看图"}]
+            )
+        ],
+    }
+    rendered = build_context(state, image_ctx=ctx)
+    human = next(m for m in rendered if m.type == "human")
+    assert all(not is_ref_block(block) for block in human.content)
+    assert "图片已省略" in human.content[0]["text"]
+
+
+def test_initial_state_reports_omission_when_no_image_survives(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", True)
+    agent = SimpleNamespace(
+        tools=[],
+        system_prompt="system",
+        model="gpt-4o",
+        max_steps=5,
+        name="vision",
+        org_id=uuid.uuid4(),
+    )
+    state = build_initial_state(
+        agent,
+        "描述",
+        image_refs=[],
+        image_candidate_count=2,
+        image_omitted_count=2,
+    )
+    assert "2" in state["messages"][0].content
+    assert "未能送达" in state["messages"][0].content

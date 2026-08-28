@@ -7,7 +7,6 @@ M2：require_confirm 工具 → interrupt 事件（自动建 Task 承接）→ P
 
 from __future__ import annotations
 
-import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -15,8 +14,8 @@ from typing import Any
 from langgraph.types import Command
 
 from app.core.events import sse_emitter
+from app.orchestration.multimodal_input import PreparedImageInput, image_config, prepare_image_input
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
-from app.services.attachment import AttachmentService
 from app.services.notification import maybe_notify_from_tool_results
 from app.services.serializers import serialize_message
 from app.services.task import TaskService, push_event
@@ -41,9 +40,6 @@ async def _backfill_attachments(
     repo = AttachmentRepository(db)
     for aid in attachment_ids:
         await repo.backfill_conversation(uuid.UUID(aid), conversation_id, message_id)
-
-logger = logging.getLogger(__name__)
-
 
 def _spawn_memory_extract(
     final_state: dict[str, Any],
@@ -84,6 +80,7 @@ def _graph_config(
     image_payload: dict[str, Any] | None = None,
     current_image_ids: set[str] | None = None,
     vision: bool = False,
+    image_context: PreparedImageInput | None = None,
 ) -> dict[str, Any]:
     cfg: dict[str, Any] = {
         "configurable": {
@@ -94,8 +91,11 @@ def _graph_config(
     }
     if model_override is not None:
         cfg["configurable"]["model"] = model_override
-    # 多模态（2026-08-27）：图片 b64 载荷只进 configurable（不落 checkpoint），见 core/multimodal
-    if image_payload:
+    # 多模态：图片 b64 载荷只进 configurable（不落 checkpoint）。新路径使用共享准备结果；
+    # 保留旧参数以兼容测试和少量内部调用。
+    if image_context is not None:
+        cfg["configurable"].update(image_config(image_context))
+    elif image_payload:
         cfg["configurable"]["image_payload"] = image_payload
         cfg["configurable"]["current_image_ids"] = set(current_image_ids or [])
         cfg["configurable"]["vision"] = vision
@@ -130,42 +130,16 @@ async def chat_stream_events(
     # 逐轮消息收集（docs 03 §3 多消息扩展）：stream_core 每轮工具结果齐后 append + 即时落库
     round_sink: list[dict[str, Any]] = []
 
-    # ---- ⓪ 多模态图片载荷准备（2026-08-27）：读盘+b64 进 configurable（不进 state/checkpoint）----
-    # 节点保持无 IO 铁律：读盘在此层包 to_thread；vision 判定在 build_initial_state 内；mime 白名单 core/multimodal
-    from app.core.config import get_settings
-    from app.core.multimodal import ImagePayload, encode_image, fit_budget, is_image_mime, make_ref_block
-
-    image_payload: dict[str, ImagePayload] = {}
-    current_image_ids: set[str] = set()
-    image_refs: list[dict[str, str]] = []
-    img_candidates: list[tuple[str, str]] = []  # (att_id, mime)，仅图片 mime 入候选，保序
-    for aid in attachments or []:
-        mime = (attachment_mimes or {}).get(aid, "")
-        if is_image_mime(mime):
-            img_candidates.append((aid, mime))
-    if img_candidates:
-        att_service_img = AttachmentService()
-        payloads: list[ImagePayload] = []
-        for aid, mime in img_candidates:
-            try:
-                att_row = await att_service_img.get_attachment_by_id(db, uuid.UUID(aid))
-                if att_row is None:
-                    raise ValueError("附件不存在")
-                data = await att_service_img.read_file(att_row)  # async（内部本地小读）
-                payloads.append(ImagePayload(att_id=aid, mime=mime, data_b64=encode_image(data)))
-            except Exception as exc:  # noqa: BLE001  单张读盘失败不阻断后续图
-                logger.warning("图片载荷读取失败 %s: %s", aid, exc)
-        kept, dropped_by_budget = fit_budget(payloads, get_settings().image_total_budget_mb)
-        image_payload = {p.att_id: p for p in kept}
-        current_image_ids = {p.att_id for p in kept}
-        ref_mimes = dict(img_candidates)
-        image_refs = [make_ref_block(p.att_id, ref_mimes.get(p.att_id, "image/png")) for p in kept]
-    # vision 判定与 build_initial_state 同源：effective model（agent 钉死优先）+ settings 声明
-    from app.core.vision import supports_vision
+    # ---- ⓪ 多模态图片载荷准备（不进 state/checkpoint）----
+    # owner 校验、mime 过滤、vision 判定、读盘和预算都由共享流水线收口。
     from app.orchestration.stream_core import resolve_effective_model
 
-    _effective_model = resolve_effective_model(agent)
-    is_vision = supports_vision(_effective_model, get_settings().llm_vision_declared)
+    prepared_images = await prepare_image_input(
+        db,
+        user_id=user.id,
+        attachment_ids=list(attachments or []),
+        effective_model=resolve_effective_model(agent),
+    )
 
     async def _persist_round(round_msg: dict[str, Any]) -> None:
         """即时落库（docs 03 §3）：每轮工具结果齐后同步写该轮 Message（任务中 DB 已有已完成轮次）。"""
@@ -213,9 +187,7 @@ async def chat_stream_events(
         trace_id=trace_id,
         assistant_msg_id=assistant_msg_id,
         model_override=model_override,
-        image_payload=image_payload,
-        current_image_ids=current_image_ids,
-        vision=is_vision,
+        image_context=prepared_images,
     )
 
     async def on_interrupt(value: dict[str, Any]) -> str:
@@ -223,7 +195,7 @@ async def chat_stream_events(
             db,
             user=user,
             agent_id=agent.id,
-            input={"message": content, "attachment_ids": list(current_image_ids)},
+            input={"message": content, "attachment_ids": list(attachments or [])},
             value=value,
             conversation_id=conversation.id,
             thread_id=str(conversation.id),
@@ -282,7 +254,9 @@ async def chat_stream_events(
             org_id=str(agent.org_id),
             enabled_tool_ids=await ToolService().enabled_tool_ids(db, agent.org_id),
             workspace=workspace,
-            image_refs=image_refs or None,
+            image_refs=list(prepared_images.image_refs) or None,
+            image_candidate_count=prepared_images.candidate_count,
+            image_omitted_count=prepared_images.omitted_count,
         ),
         graph_config=graph_config,
         emit=emit,
