@@ -54,12 +54,21 @@ async function onDelete(id: string) {
         v-for="c in filtered"
         :key="c.id"
         class="conv-item"
+        :data-conversation-id="c.id"
         :class="{ active: c.id === chat.currentId }"
-        @click="onSelect(c.id)"
       >
-        <span class="conv-item-title">{{ c.title || '新会话' }}</span>
+        <button
+          type="button"
+          class="conv-item-select"
+          :aria-current="c.id === chat.currentId ? 'page' : undefined"
+          @click="onSelect(c.id)"
+        >
+          <span class="conv-item-title">{{ c.title || '新会话' }}</span>
+        </button>
         <el-dropdown trigger="click" @command="(cmd: string) => cmd === 'del' && onDelete(c.id)">
-          <span class="conv-item-more" @click.stop><el-icon><MoreFilled /></el-icon></span>
+          <button type="button" class="conv-item-more" :aria-label="`会话 ${c.title || '新会话'} 更多操作`" @click.stop>
+            <el-icon><MoreFilled /></el-icon>
+          </button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="del" divided>删除</el-dropdown-item>
@@ -130,6 +139,19 @@ async function onDelete(id: string) {
   font-size: 13px;
   color: var(--app-sidebar-text);
 }
+.conv-item-select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .conv-item:hover {
   background: var(--app-sidebar-item-hover);
   color: var(--app-sidebar-text-active);
@@ -148,8 +170,16 @@ async function onDelete(id: string) {
 .conv-item-more {
   color: var(--app-sidebar-text);
   display: flex;
-  padding: 2px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--app-control-sm);
+  min-width: var(--app-control-sm);
+  min-height: var(--app-control-sm);
+  padding: 0;
+  border: none;
   border-radius: var(--app-radius-sm);
+  background: transparent;
+  cursor: pointer;
   opacity: 0.6;
 }
 .conv-item:hover .conv-item-more {

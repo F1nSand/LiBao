@@ -6,7 +6,7 @@ test.describe('对话滚动位置（记忆/恢复 + 新会话贴底，docs/02 §
     await gotoChat(page)
 
     // 打开长会话（无滚动记录 → 默认到底，最近对话）
-    await page.locator('.conv-item:has-text("滚动测试长会话")').click()
+    await page.locator('.conv-item[data-conversation-id="c_scroll"]').click()
     const list = page.locator('.msg-list')
     await list.locator('.msg-row').first().waitFor({ timeout: 10_000 })
     await page.waitForTimeout(400) // 等双 rAF + timeout 落地
@@ -23,14 +23,14 @@ test.describe('对话滚动位置（记忆/恢复 + 新会话贴底，docs/02 §
     expect(pos.top).toBeGreaterThan(0)
 
     // 切走 c_002（无记录 → 默认到底）
-    await page.locator('.conv-item:has-text("什么是 SSE")').click()
+    await page.locator('.conv-item[data-conversation-id="c_002"]').click()
     await list.locator('.msg-row').first().waitFor({ timeout: 10_000 })
     await page.waitForTimeout(400)
     pos = await list.evaluate((el) => ({ top: el.scrollTop, h: el.scrollHeight, c: el.clientHeight }))
     expect(pos.top).toBeGreaterThanOrEqual(pos.h - pos.c - 40)
 
     // 切回 c_scroll → 恢复原位（不被强制拉到底）
-    await page.locator('.conv-item:has-text("滚动测试长会话")').click()
+    await page.locator('.conv-item[data-conversation-id="c_scroll"]').click()
     await page.waitForTimeout(400)
     pos = await list.evaluate((el) => ({ top: el.scrollTop, h: el.scrollHeight, c: el.clientHeight }))
     expect(pos.top).toBeLessThan(pos.h - pos.c - 100) // 未强制到底

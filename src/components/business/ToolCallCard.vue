@@ -25,6 +25,7 @@ const hasParams = computed(() => props.input !== undefined || props.output !== u
 const expanded = ref(false)
 const hover = ref(false)
 function toggle(): void {
+  if (!hasParams.value) return
   expanded.value = !expanded.value
 }
 
@@ -42,11 +43,12 @@ function primitiveText(v: unknown): string {
 
 <template>
   <div class="tool-row">
-    <div
+    <button
+      type="button"
       class="tool-row-head"
       :class="{ running: isRunning, failed: isFailed }"
-      role="button"
-      :aria-expanded="expanded"
+      :aria-expanded="hasParams ? expanded : false"
+      :disabled="!hasParams"
       @click="toggle"
       @mouseenter="hover = true"
       @mouseleave="hover = false"
@@ -61,7 +63,7 @@ function primitiveText(v: unknown): string {
       <span v-else-if="isFailed" class="tool-status failed">{{ status === 'timeout' ? '超时' : '失败' }}</span>
       <span v-else-if="isCancelled" class="tool-status cancelled">已取消</span>
       <span v-else class="tool-status ok">完成</span>
-    </div>
+    </button>
 
     <div v-if="error || isFailed" class="tool-body">
       <div v-if="error" class="tool-error">{{ error }}</div>
@@ -87,7 +89,7 @@ function primitiveText(v: unknown): string {
 /* 工具调用活动行：无外框平铺（非气泡），字号小于正文、弱化灰色 */
 .tool-row {
   width: 100%;
-  font-size: 12px;
+  font-size: var(--app-font-size-xs);
   color: var(--app-text-secondary);
   line-height: 20px;
 }
@@ -95,8 +97,17 @@ function primitiveText(v: unknown): string {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   color: var(--app-text-secondary);
+}
+.tool-row-head:disabled {
+  cursor: default;
 }
 .tool-leading {
   color: var(--app-text-muted);
@@ -108,7 +119,7 @@ function primitiveText(v: unknown): string {
   color: var(--app-primary);
 }
 .tool-summary {
-  font-size: 12px;
+  font-size: var(--app-font-size-xs);
   color: var(--app-text-secondary);
   word-break: break-all;
 }
@@ -116,30 +127,30 @@ function primitiveText(v: unknown): string {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: var(--app-font-size-xs);
   color: var(--app-text-muted);
 }
 .tool-status.running {
   color: var(--app-primary);
 }
 .tool-status.awaiting {
-  color: #f59e0b;
+  color: var(--app-warning);
 }
 .tool-status.failed {
-  color: #ef4444;
+  color: var(--app-danger);
 }
 .tool-status.cancelled {
   color: var(--app-text-muted);
 }
 .tool-status.ok {
-  color: #16a34a;
+  color: var(--app-success);
 }
 .tool-body {
   max-width: 100%;
 }
 .tool-error {
-  color: #ef4444;
-  font-size: 12px;
+  color: var(--app-danger);
+  font-size: var(--app-font-size-xs);
   overflow-wrap: anywhere;
 }
 .tool-params {
@@ -149,14 +160,14 @@ function primitiveText(v: unknown): string {
   margin-top: 4px;
 }
 .tool-param-label {
-  font-size: 11px;
+  font-size: var(--app-font-size-xs);
   color: var(--app-text-muted);
   margin-bottom: 2px;
 }
 .tool-param-pre {
   margin: 0;
   font-family: var(--app-font-mono);
-  font-size: 11px;
+  font-size: var(--app-font-size-xs);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -169,7 +180,7 @@ function primitiveText(v: unknown): string {
   color: var(--app-text-secondary);
 }
 .tool-param-dur {
-  font-size: 11px;
+  font-size: var(--app-font-size-xs);
   color: var(--app-text-muted);
 }
 </style>

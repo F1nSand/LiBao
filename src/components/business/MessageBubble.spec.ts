@@ -102,6 +102,8 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     const w = mount(MessageBubble, { props: { message: toolMsg } })
     const row = w.find('.msg-activity .tool-row')
     expect(row.exists()).toBe(true)
+    expect(row.find('.tool-row-head').element.tagName).toBe('BUTTON')
+    expect(row.find('.tool-row-head').attributes('aria-expanded')).toBe('false')
     // 默认收起：只显示单行预览（工具 · 摘要），无 .tool-params
     expect(row.find('.tool-summary').text()).toContain('web_search · SSE')
     expect(row.find('.tool-params').exists()).toBe(false)
@@ -161,6 +163,8 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     }
     const w = mount(MessageBubble, { props: { message: msg } })
     expect(w.find('.thinking-row').exists()).toBe(true)
+    expect(w.find('.thinking-row').element.tagName).toBe('BUTTON')
+    expect(w.find('.thinking-row').attributes('aria-expanded')).toBe('false')
     // 默认收起：单行预览 `Think · 首行截断`，不显示全文
     const preview = w.find('.thinking-preview')
     expect(preview.exists()).toBe(true)

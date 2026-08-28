@@ -21,18 +21,20 @@ const unavailable = computed(() => isUnavailable(FEATURE.notifications))
     <div v-else-if="loading" class="notif-empty">加载中…</div>
     <div v-else-if="items.length === 0" class="notif-empty">暂无通知</div>
     <ul v-else class="notif-list">
-      <li
-        v-for="n in items.slice(0, 20)"
-        :key="n.id"
-        class="notif-item"
-        :class="{ unread: !n.read }"
-        @click="markReadById(n.id)"
-      >
-        <span class="notif-dot" :class="n.level" />
-        <div class="notif-body">
-          <div class="notif-text">{{ n.title }}</div>
-          <div v-if="n.body" class="notif-sub">{{ n.body }}</div>
-        </div>
+      <li v-for="n in items.slice(0, 20)" :key="n.id" class="notif-item-wrap">
+        <button
+          type="button"
+          class="notif-item"
+          :class="{ unread: !n.read }"
+          :aria-label="n.body ? `${n.title}：${n.body}` : n.title"
+          @click="markReadById(n.id)"
+        >
+          <span class="notif-dot" :class="n.level" aria-hidden="true" />
+          <span class="notif-body">
+            <span class="notif-text">{{ n.title }}</span>
+            <span v-if="n.body" class="notif-sub">{{ n.body }}</span>
+          </span>
+        </button>
       </li>
     </ul>
   </div>
@@ -68,11 +70,20 @@ const unavailable = computed(() => isUnavailable(FEATURE.notifications))
   max-height: 420px;
   overflow-y: auto;
 }
+.notif-item-wrap {
+  list-style: none;
+}
 .notif-item {
   display: flex;
   gap: 8px;
+  width: 100%;
   padding: 8px 6px;
+  border: none;
   border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition: background 0.15s var(--ease-out);
 }
@@ -91,26 +102,29 @@ const unavailable = computed(() => isUnavailable(FEATURE.notifications))
   background: var(--app-border);
 }
 .notif-dot.info {
-  background: #409eff;
+  background: var(--app-info);
 }
 .notif-dot.success {
-  background: #22c55e;
+  background: var(--app-success);
 }
 .notif-dot.warning {
-  background: #f59e0b;
+  background: var(--app-warning);
 }
 .notif-dot.error {
   background: var(--app-danger);
 }
 .notif-body {
+  display: block;
   min-width: 0;
 }
 .notif-text {
+  display: block;
   font-size: var(--app-font-size-sm);
   line-height: 1.4;
 }
 .notif-sub {
-  font-size: 12px;
+  display: block;
+  font-size: var(--app-font-size-xs);
   color: var(--app-text-muted);
 }
 </style>

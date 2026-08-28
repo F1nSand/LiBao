@@ -32,6 +32,7 @@ const showStreamBubble = computed(() => !!props.stream && props.stream.segments.
 /** 贴底跟随：滚动在最下方（±32px）视为 pinned；用户滚走即失效 */
 const FOLLOW_TOLERANCE = 32
 const pinned = ref(true)
+const showNewContent = ref(false)
 
 /** 当前会话 id（滚动位置记账/恢复用）：messages[0].conversation_id 优先 */
 const conversationId = computed(() => props.messages[0]?.conversation_id ?? props.stream?.conversationId ?? '')
@@ -56,6 +57,7 @@ function updatePinned(): void {
   } else {
     pinned.value = atBottom
   }
+  if (pinned.value) showNewContent.value = false
   // 滚动即记账：切走再回时恢复原位（追帧期间跳过，最终位置由 finalize 记）
   if (activeRun === -1 && conversationId.value) scrollPositions.set(conversationId.value, el.scrollTop)
 }
@@ -140,20 +142,34 @@ const contentVersion = computed(
 // 内容变化（流式/新消息/工具段/完成）：仅当贴底时跟随（保持吸底），滚走则不动
 watch(contentVersion, () => {
   if (pinned.value) scrollToStable('bottom')
+  else if (!props.loading) showNewContent.value = true
 })
 
 // 会话加载/切换（messages 引用替换）：恢复原位或贴底；与吸底跟随 watch 并存
 watch(
   () => props.messages,
-  () => applyScrollTo(),
+  () => {
+    showNewContent.value = false
+    applyScrollTo()
+  },
 )
 
-defineExpose({ containerRef })
+function jumpToLatest(): void {
+  showNewContent.value = false
+  pinned.value = true
+  scrollToStable('bottom')
+}
+
+defineExpose({ containerRef, jumpToLatest })
 </script>
 
 <template>
   <div ref="containerRef" class="msg-list">
     <StreamSkeleton :active="loading" />
+    <button v-if="showNewContent && !loading" type="button" class="new-content-btn" @click="jumpToLatest">
+      <el-icon :size="14"><ArrowDown /></el-icon>
+      有新内容 · 回到底部
+    </button>
     <div v-if="!loading && messages.length === 0 && !showStreamBubble" class="msg-empty">开始对话吧～</div>
     <template v-if="!loading">
       <div v-for="msg in messages" :key="msg.id" class="msg-row">
@@ -168,11 +184,34 @@ defineExpose({ containerRef })
 
 <style scoped>
 .msg-list {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   /* 底部 96px 缓冲带：流式文本最新一行停在缓冲上方，不顶到 composer */
   padding: 8px 0 96px;
+  background: var(--app-bg);
+}
+.new-content-btn {
+  position: absolute;
+  z-index: var(--app-z-dropdown);
+  left: 50%;
+  bottom: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: var(--app-control-sm);
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--app-primary-fill) 36%, var(--app-border));
+  border-radius: 999px;
+  background: var(--app-content-bg);
+  box-shadow: var(--app-shadow-card);
+  color: var(--app-link);
+  font-size: var(--app-font-size-sm);
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+.new-content-btn:hover {
   background: var(--app-bg);
 }
 .msg-empty {

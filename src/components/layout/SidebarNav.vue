@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { isSettingsRoute, menuItems, type MenuItem } from '@/router/routes'
 import { useMediaQuery } from '@/composables/useMediaQuery'
@@ -19,13 +19,20 @@ const isMobile = useMediaQuery(MOBILE_LAYOUT_MQ)
 const drawerOpen = ref(false)
 const autoNarrow = computed(() => isNarrow.value && !isMobile.value)
 const collapsed = computed(() => !isMobile.value && (autoNarrow.value || userCollapsed.value))
+let returnFocus: HTMLElement | null = null
 
 function openDrawer() {
-  if (isMobile.value) drawerOpen.value = true
+  if (isMobile.value) {
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    drawerOpen.value = true
+  }
 }
 
 function closeDrawer() {
+  const target = returnFocus
   drawerOpen.value = false
+  returnFocus = null
+  void nextTick(() => target?.focus())
 }
 
 defineExpose({ openDrawer, closeDrawer })
@@ -72,7 +79,17 @@ const settingsChildren = computed(() => {
       <el-icon :size="20"><ChatDotRound /></el-icon>
       <span v-show="!collapsed" class="logo-text">Agent 工作台</span>
       <button
-        v-if="!isNarrow"
+        v-if="isMobile"
+        class="collapse-btn logo-collapse"
+        type="button"
+        aria-label="关闭导航菜单"
+        title="关闭导航菜单"
+        @click="closeDrawer"
+      >
+        <el-icon><PanelLeftClose /></el-icon>
+      </button>
+      <button
+        v-else-if="!isNarrow"
         class="collapse-btn logo-collapse"
         type="button"
         :title="collapsed ? '展开' : '折叠'"
@@ -107,6 +124,7 @@ const settingsChildren = computed(() => {
         class="nav-item"
         :class="{ active: isActive(item) }"
         :title="collapsed ? item.title : undefined"
+        :aria-current="isActive(item) ? 'page' : undefined"
       >
         <el-icon :size="18"><component :is="item.icon" /></el-icon>
         <span v-show="!collapsed" class="nav-text">{{ item.title }}</span>

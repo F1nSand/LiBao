@@ -166,10 +166,10 @@ const usageText = computed(() => {
               <span class="agent-switch-label"><b>{{ item.from }}</b> → <b>{{ item.to }}</b></span>
               <span v-if="item.reason" class="agent-switch-reason">{{ item.reason }}</span>
             </div>
-            <div
+            <button
               v-else
+              type="button"
               class="thinking-row"
-              role="button"
               :aria-expanded="isThinkingExpanded(i)"
               @click="toggleThinking(i)"
               @mouseenter="setThinkingHover(i, true)"
@@ -181,7 +181,7 @@ const usageText = computed(() => {
               </span>
               <span v-if="isThinkingExpanded(i)" class="thinking-text">{{ item.text }}</span>
               <span v-else class="thinking-preview">{{ thinkPreview(item.text) }}</span>
-            </div>
+            </button>
           </template>
         </div>
 
@@ -205,8 +205,8 @@ const usageText = computed(() => {
   flex-shrink: 0;
 }
 .avatar-user {
-  background: var(--app-primary);
-  color: #fff;
+  background: var(--app-primary-fill);
+  color: var(--app-on-primary);
 }
 .avatar-assistant {
   background: #eef0f5;
@@ -241,7 +241,7 @@ const usageText = computed(() => {
   border: 1px solid color-mix(in srgb, var(--app-primary) 30%, transparent);
   border-radius: var(--app-radius-lg);
   font-size: 12px;
-  color: var(--app-primary);
+  color: var(--app-link);
   max-width: 260px;
 }
 .file-ref-chip .mono {
@@ -253,8 +253,8 @@ const usageText = computed(() => {
   font-family: var(--app-font-mono);
 }
 .user-text {
-  background: var(--app-primary);
-  color: #fff;
+  background: var(--app-primary-fill);
+  color: var(--app-on-primary);
   padding: 8px 16px;
   border-radius: var(--app-radius-lg);
   white-space: pre-wrap;
@@ -284,7 +284,7 @@ const usageText = computed(() => {
   display: inline-flex;
   gap: 6px;
   color: var(--app-text-muted);
-  font-size: 12px;
+  font-size: var(--app-font-size-xs);
   line-height: 20px;
 }
 .agent-switch {
@@ -292,15 +292,20 @@ const usageText = computed(() => {
 }
 .agent-switch-label b {
   font-weight: 600;
-  color: var(--app-primary);
+  color: var(--app-link);
 }
 .agent-switch-reason {
-  color: var(--app-text-muted);
+  color: var(--app-text-tertiary);
 }
 /* thinking：无外框平铺行（非气泡），默认收起单行预览，整行点击展开 */
 .thinking-row {
   width: 100%;
   align-items: flex-start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 .thinking-arrow {
@@ -310,14 +315,13 @@ const usageText = computed(() => {
   transition: color 0.15s;
 }
 .thinking-row:hover .thinking-arrow {
-  color: var(--app-primary);
+  color: var(--app-link);
 }
 .thinking-preview {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
-  color: var(--app-text-muted);
-  opacity: 0.85;
+  font-size: var(--app-font-size-xs);
+  color: var(--app-text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -325,8 +329,8 @@ const usageText = computed(() => {
 .thinking-text {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
-  opacity: 0.85;
+  font-size: var(--app-font-size-xs);
+  color: var(--app-text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
@@ -335,9 +339,8 @@ const usageText = computed(() => {
   color: var(--app-text-muted);
 }
 .msg-usage {
-  font-size: 11px;
-  color: var(--app-text-muted);
-  opacity: 0.7;
+  font-size: var(--app-font-size-xs);
+  color: var(--app-text-tertiary);
   margin-top: 8px;
   padding-left: 2px;
 }
