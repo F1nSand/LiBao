@@ -32,7 +32,7 @@ const diffSegments = computed(() =>
       <div class="tj-detail-head">
         <span class="tj-detail-title mono">#{{ cell.index }} · {{ kindLabel(cell.kind) }}</span>
         <span class="tj-detail-summary">{{ cell.text }}</span>
-        <button class="tj-close" type="button" title="关闭详情" @click="emit('close')">✕</button>
+        <button class="tj-close" type="button" title="关闭详情" aria-label="关闭详情" @click="emit('close')">✕</button>
       </div>
 
       <el-tabs v-model="activeTab" size="small" class="tj-tabs">
@@ -132,15 +132,20 @@ const diffSegments = computed(() =>
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--app-text-secondary);
-  font-size: 12px;
+  font-size: var(--app-font-size-xs);
 }
 .tj-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
   border: none;
   background: none;
   cursor: pointer;
   color: var(--app-text-muted);
-  font-size: 12px;
-  padding: 2px 4px;
+  font-size: 14px;
+  padding: 2px;
 }
 .tj-close:hover {
   color: var(--app-text-main);
@@ -153,18 +158,18 @@ const diffSegments = computed(() =>
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--app-font-mono);
-  font-size: 12px;
+  font-size: var(--app-font-size-xs);
   line-height: 1.6;
   color: var(--app-text-main);
 }
 .tj-placeholder {
   color: var(--app-text-muted);
-  font-size: 12px;
+  font-size: var(--app-font-size-xs);
   padding: 12px 0;
 }
 .tj-diff {
   font-family: var(--app-font-mono);
-  font-size: 12px;
+  font-size: var(--app-font-size-xs);
   line-height: 1.6;
   border: 1px solid var(--app-border-light);
   border-radius: var(--app-radius-sm);
@@ -188,10 +193,10 @@ const diffSegments = computed(() =>
   user-select: none;
 }
 .tj-diff-add .tj-diff-mark {
-  color: #16a34a;
+  color: var(--app-success);
 }
 .tj-diff-del .tj-diff-mark {
-  color: #ef4444;
+  color: var(--app-danger);
 }
 .tj-diff-code {
   white-space: pre-wrap;
@@ -211,7 +216,7 @@ const diffSegments = computed(() =>
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--app-font-size-xs);
 }
 .tj-metric-label {
   width: 64px;
@@ -222,7 +227,7 @@ const diffSegments = computed(() =>
   color: var(--app-text-main);
 }
 .tj-metric-value.err {
-  color: #ef4444;
+  color: var(--app-danger);
 }
 .tj-detail-empty {
   padding: 30px 20px;

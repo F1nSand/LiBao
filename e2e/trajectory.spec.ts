@@ -28,6 +28,21 @@ test.describe('对话轨迹页', () => {
     await expect(page).toHaveURL(/\/chat/)
   })
 
+  test('初始加载只请求一次并显示轨迹骨架屏', async ({ page }) => {
+    let requestCount = 0
+    await page.route('**/api/v1/conversations/c_001/trajectory**', async (route) => {
+      requestCount += 1
+      await new Promise((resolve) => setTimeout(resolve, 160))
+      await route.continue()
+    })
+
+    const navigation = page.goto('/trajectory/c_001')
+    await expect(page.locator('.tj-loading')).toBeVisible()
+    await navigation
+    await expect(page.locator('.tj-ledger')).toBeVisible()
+    expect(requestCount).toBe(1)
+  })
+
   test('c_002：纯文本会话，无 TOOL 标签行', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/trajectory/c_002')
@@ -83,6 +98,49 @@ test.describe('对话轨迹页', () => {
     await expect(page.locator('.tj-turn-bar.on')).toHaveCount(1)
   })
 
+  test('轨迹单元格、台账上下移动、详情分栏器支持键盘操作', async ({ page }) => {
+    await gotoChat(page)
+    await page.goto('/trajectory/c_001')
+    await page.locator('.tj-ledger').waitFor({ timeout: 10_000 })
+
+    const span = page.locator('.tj-span').first()
+    await span.focus()
+    await span.press('Enter')
+    await expect(span).toHaveAttribute('aria-pressed', 'true')
+
+    const rows = page.locator('.tj-ledger button.tj-cell')
+    expect(await rows.count()).toBeGreaterThan(1)
+    await rows.first().focus()
+    await rows.first().press('ArrowDown')
+    await expect(rows.nth(1)).toBeFocused()
+    await expect(rows.nth(1)).toHaveAttribute('aria-current', 'true')
+
+    const splitter = page.locator('.tj-splitter')
+    await expect(splitter).toBeVisible()
+    const before = await splitter.getAttribute('aria-valuenow')
+    await splitter.focus()
+    await splitter.press('ArrowLeft')
+    await expect(splitter).not.toHaveAttribute('aria-valuenow', before ?? '')
+  })
+
+  test('800/390 宽度下轨迹详情浮层不制造页面横向溢出', async ({ page }) => {
+    await gotoChat(page)
+    for (const viewport of [
+      { width: 800, height: 700 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport)
+      await page.goto('/trajectory/c_001')
+      await page.locator('.tj-ledger').waitFor({ timeout: 10_000 })
+      await expect(page.locator('.tj-lane-label').first()).toHaveAttribute('title', 'Input')
+      if (viewport.width < 480) await expect(page.locator('.tj-lane-label-short').first()).toBeVisible()
+      await page.locator('.tj-cell').first().click()
+      await expect(page.locator('.tj-detail')).toBeVisible()
+      const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+      expect(scrollWidth).toBeLessThanOrEqual(viewport.width)
+    }
+  })
+
   test('拖动框选 → 甘特聚焦区域：框内正常、外部变灰，首个选中', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/trajectory/c_001')
@@ -123,12 +181,19 @@ test.describe('对话轨迹页', () => {
 
   test('长会话 c_long：「加载更早」后节点数增加', async ({ page }) => {
     await gotoChat(page)
+    await page.route('**/api/v1/conversations/c_long/trajectory**', async (route) => {
+      if (route.request().url().includes('before_seq')) await new Promise((resolve) => setTimeout(resolve, 240))
+      await route.continue()
+    })
     await page.goto('/trajectory/c_long')
     await page.locator('.tj-ledger').waitFor({ timeout: 10_000 })
 
     await expect(page.locator('.tj-load-more')).toBeVisible()
     const before = await page.locator('.tj-cell').count()
-    await page.locator('.tj-load-more').click()
+    const loadMore = page.locator('.tj-load-more')
+    await loadMore.click()
+    await expect(loadMore).toBeDisabled()
+    await expect(loadMore).toBeEnabled({ timeout: 10_000 })
     await page.waitForTimeout(400)
     const after = await page.locator('.tj-cell').count()
     expect(after).toBeGreaterThan(before)

@@ -52,6 +52,10 @@ function cellMatchesQuery(c: TrajectoryCell): boolean {
   return cellMatches(c, props.query)
 }
 
+function kindShort(kind: TrajectoryCell['kind']): string {
+  return { user: 'U', steering: 'S', context: 'C', message: 'A', tool: 'T', compacted: '∷' }[kind]
+}
+
 /** 搜索模式：仅返回命中 cell（去掉分组头），Turn 头保留 */
 function searchResults(): Array<{ turn: TrajectoryTurn; cells: TrajectoryCell[] }> {
   if (!hasQuery.value) return []
@@ -110,6 +114,21 @@ function toggleFold(index: number) {
   else s.add(index)
   expandedTurnsFold.value = s
 }
+
+function onCellKeydown(e: KeyboardEvent) {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+  const current = e.currentTarget as HTMLElement
+  const rows = Array.from(listRef.value?.querySelectorAll<HTMLButtonElement>('button.tj-cell') ?? [])
+  const currentPosition = rows.indexOf(current as HTMLButtonElement)
+  if (currentPosition < 0) return
+  const nextPosition = currentPosition + (e.key === 'ArrowDown' ? 1 : -1)
+  const next = rows[nextPosition]
+  if (!next) return
+  e.preventDefault()
+  next.focus()
+  const nextIndex = next.dataset.cellIndex
+  if (nextIndex) emit('select', Number(nextIndex))
+}
 </script>
 
 <template>
@@ -117,14 +136,28 @@ function toggleFold(index: number) {
     <!-- 搜索模式：扁平命中行（Turn 头保留） -->
     <template v-if="hasQuery">
       <div v-for="{ turn, cells } in searchResults()" :key="`s-${turn.index}`" class="tj-turn">
-        <div v-for="c in cells" :key="c.index" class="tj-cell" :class="{ selected: selectedIndex === c.index, 'focus-dim': isCellDimmed(c.index) }" @click="emit('select', c.index)">
+        <button
+          v-for="c in cells"
+          :key="c.index"
+          type="button"
+          class="tj-cell"
+          :class="{ selected: selectedIndex === c.index, 'focus-dim': isCellDimmed(c.index) }"
+          :data-cell-index="c.index"
+          :aria-current="selectedIndex === c.index ? 'true' : undefined"
+          :aria-pressed="selectedIndex === c.index"
+          @click="emit('select', c.index)"
+          @keydown="onCellKeydown"
+        >
           <span v-if="c.index === turn.userCell?.index" class="tj-turn-badge">Turn {{ turn.index }}</span>
           <span v-else class="tj-cell-blank" />
-          <span class="tj-cell-label" :style="labelStyle(c)">{{ kindLabel(c.kind) }}</span>
+          <span class="tj-cell-label" :style="labelStyle(c)">
+            <span class="tj-cell-label-full">{{ kindLabel(c.kind) }}</span>
+            <span class="tj-cell-label-short" aria-hidden="true">{{ kindShort(c.kind) }}</span>
+          </span>
           <span class="tj-cell-text">{{ c.text }}</span>
           <span class="tj-cell-dur mono">{{ formatDuration(c.durationMs) }}</span>
           <span class="tj-cell-tok mono">{{ c.kind === 'message' ? formatTokens(c.tokenUsage) : '' }}</span>
-        </div>
+        </button>
       </div>
       <div v-if="searchResults().length === 0" class="tj-empty">无匹配记录</div>
     </template>
@@ -135,41 +168,90 @@ function toggleFold(index: number) {
         <!-- 左侧窄高光条（z 高于行底，hover/选中不遮挡）；含选中 cell 即亮 -->
         <span class="tj-turn-bar" :class="{ on: turnHasSelected(t) }" />
 
-        <div v-if="t.userCell" class="tj-cell turn-user" :class="{ selected: selectedIndex === t.userCell.index, 'focus-dim': isCellDimmed(t.userCell.index) }" @click="emit('select', t.userCell.index)">
+        <button
+          v-if="t.userCell"
+          type="button"
+          class="tj-cell turn-user"
+          :class="{ selected: selectedIndex === t.userCell.index, 'focus-dim': isCellDimmed(t.userCell.index) }"
+          :data-cell-index="t.userCell.index"
+          :aria-current="selectedIndex === t.userCell.index ? 'true' : undefined"
+          :aria-pressed="selectedIndex === t.userCell.index"
+          @click="emit('select', t.userCell.index)"
+          @keydown="onCellKeydown"
+        >
           <span class="tj-turn-badge" :class="{ on: turnHasSelected(t) }">Turn {{ t.index }}</span>
-          <span class="tj-cell-label" :style="labelStyle(t.userCell)">{{ kindLabel(t.userCell.kind) }}</span>
+          <span class="tj-cell-label" :style="labelStyle(t.userCell)">
+            <span class="tj-cell-label-full">{{ kindLabel(t.userCell.kind) }}</span>
+            <span class="tj-cell-label-short" aria-hidden="true">{{ kindShort(t.userCell.kind) }}</span>
+          </span>
           <span class="tj-cell-text">{{ t.userCell.text }}</span>
           <span class="tj-cell-dur mono">{{ formatDuration(t.userCell.durationMs) }}</span>
           <span class="tj-cell-tok mono" />
-        </div>
+        </button>
 
-        <div v-for="cc in t.contextCells" :key="cc.index" class="tj-cell" :class="{ selected: selectedIndex === cc.index, 'focus-dim': isCellDimmed(cc.index) }" @click="emit('select', cc.index)">
+        <button
+          v-for="cc in t.contextCells"
+          :key="cc.index"
+          type="button"
+          class="tj-cell"
+          :class="{ selected: selectedIndex === cc.index, 'focus-dim': isCellDimmed(cc.index) }"
+          :data-cell-index="cc.index"
+          :aria-current="selectedIndex === cc.index ? 'true' : undefined"
+          :aria-pressed="selectedIndex === cc.index"
+          @click="emit('select', cc.index)"
+          @keydown="onCellKeydown"
+        >
           <span class="tj-cell-blank" />
-          <span class="tj-cell-label" :style="labelStyle(cc)">{{ kindLabel(cc.kind) }}</span>
+          <span class="tj-cell-label" :style="labelStyle(cc)">
+            <span class="tj-cell-label-full">{{ kindLabel(cc.kind) }}</span>
+            <span class="tj-cell-label-short" aria-hidden="true">{{ kindShort(cc.kind) }}</span>
+          </span>
           <span class="tj-cell-text">{{ cc.text }}</span>
           <span class="tj-cell-dur mono">{{ formatDuration(cc.durationMs) }}</span>
           <span class="tj-cell-tok mono" />
-        </div>
+        </button>
 
         <template v-if="isTurnFolded(t)">
-          <div v-if="t.groups.length" class="tj-cell tj-fold" :class="{ 'focus-dim': !turnHasFocus(t) }" @click="toggleFold(t.index)">
+          <button
+            v-if="t.groups.length"
+            type="button"
+            class="tj-cell tj-fold"
+            :class="{ 'focus-dim': !turnHasFocus(t) }"
+            :aria-expanded="!isTurnFolded(t)"
+            @click="toggleFold(t.index)"
+            @keydown="onCellKeydown"
+          >
             <span class="tj-cell-blank" />
             <span class="tj-cell-label tj-fold-label">…</span>
             <span class="tj-cell-fold">{{ turnStepsSummary(t) }}</span>
             <span class="tj-cell-dur mono" />
             <span class="tj-cell-tok mono" />
-          </div>
+          </button>
         </template>
         <template v-else>
           <div v-for="g in t.groups" :key="`${t.index}-${g.step}`" class="tj-group">
             <template v-if="!isGroupCollapsed(t, g.step)">
-              <div v-for="c in visibleGroupCells(g)" :key="c.index" class="tj-cell" :class="{ selected: selectedIndex === c.index, 'focus-dim': isCellDimmed(c.index) }" @click="emit('select', c.index)">
+              <button
+                v-for="c in visibleGroupCells(g)"
+                :key="c.index"
+                type="button"
+                class="tj-cell"
+                :class="{ selected: selectedIndex === c.index, 'focus-dim': isCellDimmed(c.index) }"
+                :data-cell-index="c.index"
+                :aria-current="selectedIndex === c.index ? 'true' : undefined"
+                :aria-pressed="selectedIndex === c.index"
+                @click="emit('select', c.index)"
+                @keydown="onCellKeydown"
+              >
                 <span class="tj-cell-blank" />
-                <span class="tj-cell-label" :style="labelStyle(c)">{{ kindLabel(c.kind) }}</span>
+                <span class="tj-cell-label" :style="labelStyle(c)">
+                  <span class="tj-cell-label-full">{{ kindLabel(c.kind) }}</span>
+                  <span class="tj-cell-label-short" aria-hidden="true">{{ kindShort(c.kind) }}</span>
+                </span>
                 <span class="tj-cell-text">{{ c.text }}</span>
                 <span class="tj-cell-dur mono">{{ formatDuration(c.durationMs) }}</span>
                 <span class="tj-cell-tok mono">{{ c.kind === 'message' ? formatTokens(c.tokenUsage) : '' }}</span>
-              </div>
+              </button>
             </template>
           </div>
         </template>
@@ -214,15 +296,29 @@ function toggleFold(index: number) {
   align-items: center;
   gap: 8px;
   padding: 4px 8px 4px 10px;
+  width: 100%;
+  min-width: 0;
   cursor: pointer;
   border-radius: var(--app-radius-sm);
-  font-size: 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--app-font-size-sm);
+  text-align: left;
+  line-height: 1.35;
   content-visibility: auto;
   contain-intrinsic-size: auto 36px;
 }
 .tj-cell:hover,
 .tj-cell.selected {
   background: var(--app-bg); /* 选中行保持 hover 灰，高亮靠左侧高光条 */
+}
+.tj-cell:focus-visible {
+  position: relative;
+  z-index: 3;
+  outline: 2px solid var(--app-focus-ring);
+  outline-offset: -2px;
 }
 /* 聚焦区域外：变灰透明（聚焦内容本身不变） */
 .tj-cell.focus-dim {
@@ -231,7 +327,7 @@ function toggleFold(index: number) {
 }
 .tj-turn-badge {
   justify-self: start;
-  font-size: 10px;
+  font-size: var(--app-font-size-xs);
   color: var(--app-text-muted);
   background: var(--app-bg);
   border-radius: var(--app-radius-sm);
@@ -252,10 +348,13 @@ function toggleFold(index: number) {
   max-width: 100%;
   padding: 1px 8px;
   border-radius: var(--app-radius);
-  font-size: 11px;
+  font-size: var(--app-font-size-xs);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
+}
+.tj-cell-label-short {
+  display: none;
 }
 .tj-cell-text {
   min-width: 0;
@@ -268,7 +367,7 @@ function toggleFold(index: number) {
 .tj-cell-tok {
   text-align: right;
   color: var(--app-text-muted);
-  font-size: 11px;
+  font-size: var(--app-font-size-xs);
   white-space: nowrap;
 }
 /* Turns 收起省略行 */
@@ -282,7 +381,7 @@ function toggleFold(index: number) {
 }
 .tj-cell-fold {
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--app-font-size-sm);
   color: var(--app-text-muted);
   opacity: 0.8;
   overflow: hidden;
@@ -293,7 +392,7 @@ function toggleFold(index: number) {
   padding: 20px;
   text-align: center;
   color: var(--app-text-muted);
-  font-size: 12px;
+  font-size: var(--app-font-size-sm);
 }
 .mono {
   font-family: var(--app-font-mono);
@@ -311,6 +410,15 @@ function toggleFold(index: number) {
     padding: 0;
     border-radius: 50%;
     font-size: 0;
+  }
+  .tj-cell-label-short {
+    display: inline;
+    font-size: 11px;
+    line-height: 16px;
+    text-align: center;
+  }
+  .tj-cell-label-full {
+    display: none;
   }
 }
 </style>

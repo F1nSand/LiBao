@@ -17,6 +17,7 @@ const props = defineProps<{
   focusSet: Set<number>
   query: string
   hasMore: boolean
+  loadingEarlier: boolean
 }>()
 const emit = defineEmits<{
   select: [index: number]
@@ -85,7 +86,7 @@ const spans = computed(() =>
       startedAt: c.startedAt,
       durationMs: c.durationMs,
       toolName: c.toolName,
-      toolTip: `${kindLabel(c.kind)}${c.toolName ? ` · ${c.toolName}` : ''} · ${formatTime(c.startedAt)}${
+      toolTip: `${kindLabel(c.kind)}${c.toolName ? ` · ${c.toolName}` : ''}${c.isError ? ' · 失败' : ''} · ${formatTime(c.startedAt)}${
         c.durationMs != null ? ` · ${formatDuration(c.durationMs)}` : ''
       }`,
       // 第二行：tool 单元格展示入参摘要（cell.text 已含工具名 + 截断入参）
@@ -226,22 +227,35 @@ function onKeydown(e: KeyboardEvent) {
   >
     <div v-if="durationOn && !hasAnyDuration" class="tj-note">无耗时数据，已回退为顺序视图</div>
     <div class="tj-hint">
-      <button v-if="hasMore" class="tj-load-more" type="button" @click="emit('loadEarlier')">… 加载更早</button>
+      <button
+        v-if="hasMore"
+        class="tj-load-more"
+        type="button"
+        :disabled="loadingEarlier"
+        :aria-busy="loadingEarlier"
+        @click="emit('loadEarlier')"
+      >
+        {{ loadingEarlier ? '… 加载中' : '… 加载更早' }}
+      </button>
     </div>
     <div class="tj-track">
       <div v-for="lane in LANES" :key="lane.name" class="tj-lane">
-        <span class="tj-lane-label">{{ lane.name }}</span>
+        <span class="tj-lane-label" :title="lane.name" :aria-label="lane.name">
+          <span class="tj-lane-label-full">{{ lane.name }}</span>
+          <span class="tj-lane-label-short" aria-hidden="true">{{ lane.name.slice(0, 1) }}</span>
+        </span>
         <div class="tj-lane-body">
-          <div
+          <button
             v-for="s in spansInLane(lane.index)"
             :key="s.index"
             class="tj-span"
             :class="{ selected: selectedIndex === s.index, 'focus-dim': focusSet.size > 0 && !focusSet.has(s.index), error: s.isError, dimmed: s.dimmed }"
             :style="{ left: `${s.x}px`, width: `${s.width}px`, background: s.color }"
             role="button"
+            type="button"
             :aria-label="s.toolTip"
+            :aria-pressed="selectedIndex === s.index"
             tabindex="0"
-            @keydown.enter="emit('select', s.index)"
             @mousedown.stop
             @click.stop="emit('select', s.index)"
           >
@@ -252,7 +266,7 @@ function onKeydown(e: KeyboardEvent) {
                 <div v-if="s.toolParams" class="tj-tip-line tj-tip-params">{{ s.toolParams }}</div>
               </template>
             </el-tooltip>
-          </div>
+          </button>
         </div>
       </div>
       <div v-if="boxRect" class="tj-box" :style="{ left: `${LABEL_W + boxRect.left}px`, width: `${boxRect.width}px` }" />
@@ -285,15 +299,20 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--app-bg);
   color: var(--app-primary);
   border-radius: var(--app-radius-sm);
-  padding: 1px 8px;
-  font-size: 11px;
+  min-height: 32px;
+  padding: 3px 8px;
+  font-size: var(--app-font-size-xs);
   cursor: pointer;
 }
 .tj-load-more:hover {
   border-color: var(--app-primary);
 }
+.tj-load-more:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
 .tj-note {
-  font-size: 12px;
+  font-size: var(--app-font-size-xs);
   color: var(--app-text-muted);
   margin-bottom: 2px;
 }
@@ -309,8 +328,11 @@ function onKeydown(e: KeyboardEvent) {
 .tj-lane-label {
   width: 44px;
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--app-font-size-xs);
   color: var(--app-text-muted);
+}
+.tj-lane-label-short {
+  display: none;
 }
 .tj-lane-body {
   position: relative;
@@ -323,9 +345,15 @@ function onKeydown(e: KeyboardEvent) {
   position: absolute;
   top: 2px;
   bottom: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
   border-radius: 3px;
   cursor: pointer;
   opacity: 0.85;
+  appearance: none;
+  font: inherit;
 }
 .tj-span:hover {
   opacity: 1;
@@ -333,6 +361,10 @@ function onKeydown(e: KeyboardEvent) {
 .tj-span.selected {
   outline: 2px solid var(--app-primary);
   opacity: 1;
+}
+.tj-span:focus-visible {
+  outline: 2px solid var(--app-focus-ring);
+  outline-offset: 2px;
 }
 .tj-span.error {
   outline: 1px solid #ef4444;
@@ -357,6 +389,23 @@ function onKeydown(e: KeyboardEvent) {
   border-left: 1px solid var(--app-primary);
   border-right: 1px solid var(--app-primary);
   pointer-events: none;
+}
+@media (max-width: 480px) {
+  .tj-timeline {
+    padding-inline: 4px;
+  }
+  .tj-lane-label {
+    width: 24px;
+    display: grid;
+    place-items: center;
+  }
+  .tj-lane-label-full {
+    display: none;
+  }
+  .tj-lane-label-short {
+    display: inline;
+    font-weight: 600;
+  }
 }
 </style>
 

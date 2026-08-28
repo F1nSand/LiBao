@@ -7,6 +7,7 @@ import TrajectoryTimeline from './TrajectoryTimeline.vue'
 import TrajectoryLedger from './TrajectoryLedger.vue'
 import TrajectoryDetailPanel from './TrajectoryDetailPanel.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import StreamSkeleton from '@/components/common/StreamSkeleton.vue'
 
 /** 轨迹工作区（docs/02 §6.3）：独立页 TrajectoryView 与 Chat「轨迹」模式共用；无页面级 back/title。
  * `live` = 会话流式活跃 → 轮询实时同步（docs 03 §5.2.1 / §5.8 逐轮落库后即现）。 */
@@ -25,6 +26,9 @@ const turnsOn = ref(false)
 const callsOn = ref(false)
 const splitWidth = ref(480)
 const mainRef = ref<HTMLElement | null>(null)
+const SPLIT_MIN = 240
+const SPLIT_MAX = 720
+const DETAIL_MIN = 320
 /** 窄屏（中窗口）下详情面板改为浮层覆盖台账 */
 const detailOverlay = useMediaQuery('(max-width: 1100px)')
 
@@ -46,6 +50,7 @@ async function load() {
   focusSet.value = new Set()
   query.value = ''
   collapsedAll.value = false
+  store.reset()
   await store.load(id)
   if (store.error) return
   // 跨视图定位：focus=<toolCallId> → 选中该工具记录
@@ -58,11 +63,21 @@ async function load() {
   }
 }
 
-watch(() => props.conversationId, load, { immediate: true })
-
 /* ---------- live 实时同步：流式活跃时轮询刷新（不重置选中/搜索/折叠，避免打断查看） ---------- */
 const POLL_INTERVAL_MS = 2500
 let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const initialLoading = computed(() => store.initialLoading)
+const refreshing = computed(() => store.refreshing)
+const loadingEarlier = computed(() => store.loadingEarlier)
+const splitMax = computed(() => {
+  const available = (mainRef.value?.clientWidth ?? 1040) - DETAIL_MIN
+  return Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, available))
+})
+
+function clampSplitWidth(width: number): number {
+  return Math.min(splitMax.value, Math.max(SPLIT_MIN, width))
+}
 
 async function refresh() {
   const id = props.conversationId
@@ -83,9 +98,10 @@ function stopPolling() {
 
 watch(
   () => props.conversationId,
-  () => {
+  (id) => {
+    stopPolling()
     void load()
-    startPolling()
+    if (id && props.live) startPolling()
   },
   { immediate: true },
 )
@@ -127,7 +143,7 @@ function onResetSelection() {
   focusSet.value = new Set()
 }
 function onLoadEarlier() {
-  if (props.conversationId) void store.loadEarlier(props.conversationId)
+  if (props.conversationId && !loadingEarlier.value) void store.loadEarlier(props.conversationId)
 }
 function onEsc(e: KeyboardEvent) {
   if (e.key === 'Escape') onResetSelection()
@@ -143,8 +159,7 @@ function onSplitStart(e: MouseEvent) {
   const startX = e.clientX
   const startW = splitWidth.value
   const onMove = (ev: MouseEvent) => {
-    const containerW = mainRef.value?.clientWidth ?? 1200
-    splitWidth.value = Math.min(Math.max(startW + (startX - ev.clientX), 240), containerW - 320)
+    splitWidth.value = clampSplitWidth(startW + (startX - ev.clientX))
   }
   const onUp = () => {
     document.removeEventListener('mousemove', onMove)
@@ -154,6 +169,22 @@ function onSplitStart(e: MouseEvent) {
   document.body.style.userSelect = 'none'
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
+}
+
+function onSplitKeydown(e: KeyboardEvent) {
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    splitWidth.value = clampSplitWidth(splitWidth.value + 16)
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    splitWidth.value = clampSplitWidth(splitWidth.value - 16)
+  } else if (e.key === 'Home') {
+    e.preventDefault()
+    splitWidth.value = SPLIT_MIN
+  } else if (e.key === 'End') {
+    e.preventDefault()
+    splitWidth.value = splitMax.value
+  }
 }
 </script>
 
@@ -181,16 +212,30 @@ function onSplitStart(e: MouseEvent) {
       <template v-if="!conversationId">
         <EmptyState text="请先选择会话" />
       </template>
+      <template v-else-if="initialLoading">
+        <div class="tj-loading" role="status" aria-live="polite">
+          <StreamSkeleton :active="true" />
+          <span>正在加载轨迹…</span>
+        </div>
+      </template>
       <template v-else-if="store.unavailable">
         <EmptyState text="后端暂未实现对话轨迹接口" />
       </template>
-      <template v-else-if="store.error">
-        <el-empty description="轨迹加载失败" :image-size="60" />
+      <template v-else-if="store.error && turns.length === 0">
+        <div class="tj-error" role="alert">
+          <span>{{ store.errorMessage || '轨迹加载失败，请重试' }}</span>
+          <el-button size="small" @click="void load()">重试</el-button>
+        </div>
       </template>
       <template v-else-if="turns.length === 0">
         <EmptyState text="该会话暂无轨迹数据" />
       </template>
       <template v-else>
+        <div v-if="refreshing" class="tj-refreshing" role="status" aria-live="polite">正在刷新轨迹…</div>
+        <div v-if="store.error" class="tj-refresh-error" role="alert">
+          <span>{{ store.errorMessage || '轨迹刷新失败' }}</span>
+          <el-button text size="small" @click="void refresh()">重试</el-button>
+        </div>
         <TrajectoryTimeline
           :turns="turns"
           :duration-on="durationOn"
@@ -198,13 +243,14 @@ function onSplitStart(e: MouseEvent) {
           :focus-set="focusSet"
           :query="query"
           :has-more="store.hasMore"
+          :loading-earlier="loadingEarlier"
           @select="onCellSelect"
           @empty="onTimelineEmpty"
           @focus="onTimelineFocus"
           @reset="onResetSelection"
           @load-earlier="onLoadEarlier"
-        />
-        <div ref="mainRef" class="tj-main" :class="{ 'detail-overlay': detailOverlay }">
+          />
+          <div ref="mainRef" class="tj-main" :class="{ 'detail-overlay': detailOverlay }">
           <TrajectoryLedger
             :turns="turns"
             :query="query"
@@ -216,13 +262,25 @@ function onSplitStart(e: MouseEvent) {
             @select="onLedgerSelect"
             class="tj-ledger"
           />
-          <div class="tj-splitter" title="拖拽调宽" @mousedown="onSplitStart" />
+          <div
+            class="tj-splitter"
+            role="separator"
+            tabindex="0"
+            aria-orientation="vertical"
+            aria-label="调整详情面板宽度"
+            :aria-valuemin="SPLIT_MIN"
+            :aria-valuemax="splitMax"
+            :aria-valuenow="splitWidth"
+            title="拖拽调宽"
+            @mousedown="onSplitStart"
+            @keydown="onSplitKeydown"
+          />
           <TrajectoryDetailPanel
             v-show="!detailOverlay || !!selectedCell"
             :cell="selectedCell"
             class="tj-detail"
             :style="detailOverlay ? {} : { width: `${splitWidth}px` }"
-            @close="selectedIndex = null"
+            @close="onResetSelection"
           />
         </div>
       </template>
@@ -247,6 +305,7 @@ function onSplitStart(e: MouseEvent) {
   background: var(--app-content-bg);
   border-bottom: 1px solid var(--app-border-light);
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .tj-tool-btn {
   margin: 0 !important; /* 去掉 el-button 相邻 margin，紧挨排 */
@@ -277,6 +336,7 @@ function onSplitStart(e: MouseEvent) {
   min-height: 0;
   display: flex;
   position: relative;
+  min-width: 0;
 }
 .tj-ledger {
   flex: 1;
@@ -284,10 +344,14 @@ function onSplitStart(e: MouseEvent) {
 }
 .tj-splitter {
   width: 6px;
+  min-width: 6px;
+  min-height: 32px;
   cursor: col-resize;
   flex-shrink: 0;
+  border-radius: var(--app-radius-sm);
 }
-.tj-splitter:hover {
+.tj-splitter:hover,
+.tj-splitter:focus-visible {
   background: var(--el-color-primary-light-7);
 }
 .tj-detail {
@@ -300,11 +364,62 @@ function onSplitStart(e: MouseEvent) {
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(460px, 88%);
+  width: min(460px, calc(100% - 8px));
+  max-width: 100%;
   z-index: 5;
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.1);
 }
 .tj-main.detail-overlay .tj-splitter {
   display: none;
+}
+.tj-loading,
+.tj-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 120px;
+  padding: 20px;
+  color: var(--app-text-secondary);
+}
+.tj-loading {
+  flex-direction: column;
+}
+.tj-loading .stream-skeleton {
+  width: min(360px, 80%);
+}
+.tj-error {
+  flex-direction: column;
+  color: var(--app-danger);
+}
+.tj-refreshing,
+.tj-refresh-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: var(--app-font-size-xs);
+}
+.tj-refreshing {
+  color: var(--app-text-muted);
+}
+.tj-refresh-error {
+  color: var(--app-danger);
+}
+@media (max-width: 480px) {
+  .tj-panel-toolbar {
+    padding: 4px 8px;
+  }
+  .tj-tool-btn {
+    min-height: 32px;
+  }
+  .tj-toolbar-spacer {
+    display: none;
+  }
+  .tj-search {
+    width: 100%;
+    margin-top: 2px;
+  }
 }
 </style>
