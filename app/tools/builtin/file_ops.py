@@ -25,10 +25,12 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.tools.context import get_tool_workspace_root
 from app.tools.filesystem import resolve_workspace_path
+from app.tools.sandbox import SandboxCommand, SandboxErrorCode, SandboxFailure
 
 _MAX_READ = 20000
 _MAX_WRITE = 100000
 _MAX_BASH_OUT = 4000
+_HOST_BASH_TIMEOUT_S = 30
 
 # 工作区文件工具 id 集（build_initial_state 在工作区上下文时注入；默认 enabled=True，仅工作区可见）
 FILE_TOOL_IDS = ("tl_read_file", "tl_write_file", "tl_edit_file", "tl_glob", "tl_grep", "tl_bash", "tl_undo_file")
@@ -573,10 +575,52 @@ async def _run_shell(command: str, workdir: str) -> subprocess.CompletedProcess:
     非 Windows 或探测不到 bash 时降级 shell=True（cmd，维持旧行为）。
     """
     bash = _bash_executable() if sys.platform == "win32" else None
-    run_kwargs = dict(cwd=workdir, capture_output=True, encoding="utf-8", errors="replace", timeout=120)
+    run_kwargs = dict(
+        cwd=workdir,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=_HOST_BASH_TIMEOUT_S,
+    )
     if bash:
         return await asyncio.to_thread(subprocess.run, [bash, "-c", command], **run_kwargs)
     return await asyncio.to_thread(subprocess.run, command, shell=True, **run_kwargs)
+
+
+async def build_bash_sandbox_command(command: str, cwd: str | None = None) -> SandboxCommand:
+    """审查并构建容器内 bash 命令；此函数不启动 Docker。"""
+    root = _root()
+    if not root:
+        raise SandboxFailure(SandboxErrorCode.INVALID_WORKDIR, "不在工作区上下文")
+    try:
+        workdir = resolve_workspace_path(root, cwd) if cwd else Path(root).resolve()
+    except AppError as exc:
+        raise SandboxFailure(SandboxErrorCode.INVALID_WORKDIR, exc.message) from exc
+
+    fast = _fast_review(command)
+    if fast == "block":
+        raise SandboxFailure(
+            SandboxErrorCode.UNSUPPORTED_TOOL,
+            "命令被审查拦截（安全黑名单）",
+            output={"error": "命令被审查拦截（安全黑名单）", "verdict": "block", "reason": "命中危险命令模式"},
+        )
+    degraded_note: str | None = None
+    if fast is None:
+        review = await _review_command(command)
+        if review["verdict"] == "block":
+            reason = review["reason"]
+            raise SandboxFailure(
+                SandboxErrorCode.UNSUPPORTED_TOOL,
+                f"命令被审查拦截: {reason}",
+                output={"error": f"命令被审查拦截: {reason}", "verdict": "block", "reason": reason},
+            )
+        if review.get("degraded"):
+            degraded_note = review["reason"]
+
+    relative = workdir.relative_to(Path(root).resolve()).as_posix()
+    container_workdir = "/workspace" if relative == "." else f"/workspace/{relative}"
+    env = {"LIBAO_BASH_REVIEW_NOTE": degraded_note} if degraded_note else {}
+    return SandboxCommand(argv=("bash", "-lc", command), workdir=container_workdir, env=env)
 
 
 async def bash_handler(command: str, cwd: str | None = None) -> dict[str, Any]:
@@ -603,7 +647,7 @@ async def bash_handler(command: str, cwd: str | None = None) -> dict[str, Any]:
     try:
         result = await _run_shell(command, str(workdir))
     except subprocess.TimeoutExpired:
-        return {"error": "命令执行超时（120s）"}
+        return {"error": f"命令执行超时（{_HOST_BASH_TIMEOUT_S}s）"}
     stdout = result.stdout[-_MAX_BASH_OUT:]
     stderr = result.stderr[-2000:]
     payload: dict[str, Any] = {

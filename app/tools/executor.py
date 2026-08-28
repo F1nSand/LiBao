@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import random
 import time
@@ -18,8 +19,16 @@ from typing import Any
 from jsonschema import ValidationError, validate
 
 from app.core.config import get_settings
+from app.tools.context import get_tool_workspace_root
 from app.tools.registry import ToolSpec
-from app.tools.sandbox import SandboxLevel
+from app.tools.sandbox import (
+    SandboxCommand,
+    SandboxErrorCode,
+    SandboxFailure,
+    SandboxLevel,
+    SandboxResult,
+    run_docker_command,
+)
 
 # ---- 重试/幂等常量 ----
 _BACKOFF_BASE_MS = 300  # 指数退避基数（抖动上限同此值）
@@ -121,12 +130,25 @@ async def execute(spec: ToolSpec, input: dict[str, Any]) -> ToolResult:
     except ValidationError as exc:
         return ToolResult(ok=False, output=None, summary="", duration_ms=0, error=f"参数校验失败: {exc.message}")
 
-    if spec.handler is None:
-        return ToolResult(ok=False, output=None, summary="", duration_ms=0, error=f"工具 {spec.id} 未注册 handler")
+    if spec.sandbox == SandboxLevel.MICROVM:
+        return ToolResult(
+            ok=False,
+            output=None,
+            summary="",
+            duration_ms=0,
+            error=f"{SandboxErrorCode.UNSUPPORTED_TOOL.value}: microvm 沙箱暂不支持",
+        )
 
-    # ② 沙盒守卫（M2.5 接缝：docker/microvm 未实现）
-    if spec.sandbox != SandboxLevel.NONE:
-        return ToolResult(ok=False, output=None, summary="", duration_ms=0, error="沙盒执行暂未实现（M3）")
+    if spec.sandbox == SandboxLevel.DOCKER and spec.sandbox_command_builder is None:
+        return ToolResult(
+            ok=False,
+            output=None,
+            summary="",
+            duration_ms=0,
+            error=f"{SandboxErrorCode.UNSUPPORTED_TOOL.value}: docker 工具缺少命令构建器",
+        )
+    if spec.sandbox == SandboxLevel.NONE and spec.handler is None:
+        return ToolResult(ok=False, output=None, summary="", duration_ms=0, error=f"工具 {spec.id} 未注册 handler")
 
     # ③ 幂等去重（执行前查，成功才写）
     idem_key = _fingerprint(spec, input) if spec.idempotent else None
@@ -146,7 +168,7 @@ async def _execute_with_retries(
     last_error: Exception | None = None
     for attempt in range(spec.max_retries + 1):
         try:
-            output = await _call_with_timeout(spec.handler, input, timeout_sec)
+            output = await _call_with_timeout(spec, input, timeout_sec)
             duration = int((time.perf_counter() - start) * 1000)
             result = ToolResult(
                 ok=True, output=output, summary=_summarize(output), duration_ms=duration, retries=attempt
@@ -162,6 +184,23 @@ async def _execute_with_retries(
                 )
             if idem_key is not None:
                 await _cache_put(idem_key, result)
+            return result
+        except SandboxFailure as exc:
+            duration = int((time.perf_counter() - start) * 1000)
+            result = ToolResult(
+                ok=False,
+                output=exc.output,
+                summary=_summarize(exc.output) if exc.output is not None else "",
+                duration_ms=duration,
+                error=f"{exc.code.value}: {exc.message}",
+                retries=attempt,
+            )
+            if exc.retryable and attempt < spec.max_retries:
+                last_error = exc
+                await asyncio.sleep(
+                    _BACKOFF_BASE_MS / 1000 * (2**attempt) + random.uniform(0, _BACKOFF_BASE_MS / 1000)
+                )
+                continue
             return result
         except TimeoutError:
             duration = int((time.perf_counter() - start) * 1000)
@@ -184,8 +223,40 @@ async def _execute_with_retries(
     )
 
 
-async def _call_with_timeout(handler: Any, input: dict[str, Any], timeout_sec: float) -> Any:
-    """同步 handler 走 to_thread，异步 handler 直接 await；统一挂超时。"""
+async def _run_docker_attempt(spec: ToolSpec, input: dict[str, Any]) -> dict[str, Any]:
+    builder = spec.sandbox_command_builder
+    if builder is None:
+        raise SandboxFailure(SandboxErrorCode.UNSUPPORTED_TOOL, "docker 工具缺少命令构建器")
+    built = builder(**input)
+    command = await built if inspect.isawaitable(built) else built
+    if not isinstance(command, SandboxCommand):
+        raise SandboxFailure(SandboxErrorCode.UNSUPPORTED_TOOL, "docker 命令构建器返回了无效类型")
+    root = get_tool_workspace_root()
+    if not root:
+        raise SandboxFailure(SandboxErrorCode.INVALID_WORKDIR, "不在工作区上下文")
+    result: SandboxResult = await run_docker_command(
+        command,
+        workspace_root=root,
+        timeout_ms=spec.timeout_ms,
+        settings=get_settings(),
+    )
+    output: dict[str, Any] = {
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "returncode": result.exit_code,
+    }
+    if result.truncated:
+        output["truncated"] = True
+    if note := command.env.get("LIBAO_BASH_REVIEW_NOTE"):
+        output["note"] = note
+    return output
+
+
+async def _call_with_timeout(spec: ToolSpec, input: dict[str, Any], timeout_sec: float) -> Any:
+    """Docker 将命令构建与执行包在一次总超时内；NONE 继续兼容同步/异步 handler。"""
+    if spec.sandbox == SandboxLevel.DOCKER:
+        return await asyncio.wait_for(_run_docker_attempt(spec, input), timeout=timeout_sec)
+    handler = spec.handler
     coro = handler(**input) if asyncio.iscoroutinefunction(handler) else asyncio.to_thread(handler, **input)
     return await asyncio.wait_for(coro, timeout=timeout_sec)
 

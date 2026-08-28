@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import subprocess
 import tempfile
@@ -14,6 +15,7 @@ from app.core.errors import AppError
 from app.tools.builtin import file_ops
 from app.tools.context import set_tool_workspace_root
 from app.tools.filesystem import resolve_workspace_path
+from app.tools.sandbox import SandboxErrorCode, SandboxFailure
 
 
 def _review_settings(**over):
@@ -632,3 +634,48 @@ async def test_bash_handler_degraded_note(tmp_path, monkeypatch):
         assert out["stdout"] == "ran"
     finally:
         set_tool_workspace_root(None)
+
+
+async def test_bash_builder_uses_bash_lc(tmp_path):
+    set_tool_workspace_root(str(tmp_path))
+    try:
+        command = await file_ops.build_bash_sandbox_command("echo hi")
+        assert command.argv == ("bash", "-lc", "echo hi")
+        assert command.workdir == "/workspace"
+    finally:
+        set_tool_workspace_root(None)
+
+
+async def test_bash_builder_never_embeds_host_workspace_path(tmp_path):
+    set_tool_workspace_root(str(tmp_path))
+    try:
+        command = await file_ops.build_bash_sandbox_command("pwd", cwd="src")
+        assert str(tmp_path) not in command.argv
+        assert command.workdir == "/workspace/src"
+    finally:
+        set_tool_workspace_root(None)
+
+
+async def test_bash_review_block_prevents_docker_start(tmp_path, monkeypatch):
+    set_tool_workspace_root(str(tmp_path))
+    try:
+        _stub_review(monkeypatch, verdict="block", reason="语义审查拦截")
+        with pytest.raises(SandboxFailure) as exc:
+            await file_ops.build_bash_sandbox_command("python app.py")
+        assert exc.value.code == SandboxErrorCode.UNSUPPORTED_TOOL
+    finally:
+        set_tool_workspace_root(None)
+
+
+async def test_bash_cwd_escape_prevents_docker_start(tmp_path):
+    set_tool_workspace_root(str(tmp_path))
+    try:
+        with pytest.raises(SandboxFailure) as exc:
+            await file_ops.build_bash_sandbox_command("pwd", cwd="../outside")
+        assert exc.value.code == SandboxErrorCode.INVALID_WORKDIR
+    finally:
+        set_tool_workspace_root(None)
+
+
+def test_bash_has_no_legacy_120_second_timeout():
+    assert "timeout=120" not in inspect.getsource(file_ops._run_shell)

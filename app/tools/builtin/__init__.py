@@ -611,9 +611,9 @@ def register_builtin_tools() -> None:
             enabled=True,
             require_confirm=False,  # 语义审查是动态闸门（非静态确认）
             idempotent=False,
-            sandbox=SandboxLevel.NONE,
+            sandbox=SandboxLevel.DOCKER,
             timeout_ms=130000,
-            handler=file_ops.bash_handler,
+            sandbox_command_builder=file_ops.build_bash_sandbox_command,
             builtin=True,
         )
     )

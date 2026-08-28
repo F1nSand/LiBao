@@ -6,11 +6,14 @@ Redis 集成由 test_idempotency_redis.py 单独覆盖）。
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
+
+import pytest
 
 from app.core.config import get_settings
 from app.tools import executor
 from app.tools.registry import ToolSpec
-from app.tools.sandbox import SandboxLevel
+from app.tools.sandbox import SandboxCommand, SandboxErrorCode, SandboxFailure, SandboxLevel, SandboxResult
 
 
 def _spec(**kw) -> ToolSpec:
@@ -140,10 +143,115 @@ async def test_non_idempotent_not_cached():
     assert calls["n"] == 2  # 非幂等不缓存
 
 
-async def test_sandbox_guard_rejects_docker():
-    def handler(**kw):
-        return {"ok": True}
-
-    result = await executor.execute(_spec(sandbox=SandboxLevel.DOCKER, handler=handler), {})
+async def test_docker_requires_command_builder():
+    result = await executor.execute(_spec(sandbox=SandboxLevel.DOCKER, handler=lambda: {"ok": True}), {})
     assert result.ok is False
-    assert "沙盒执行暂未实现" in result.error
+    assert "sandbox_unsupported_tool" in result.error
+
+
+async def test_docker_runner_receives_workspace_and_spec_timeout(monkeypatch, tmp_path):
+    calls = []
+
+    async def builder(command):
+        return SandboxCommand(argv=("bash", "-lc", command))
+
+    async def runner(command, *, workspace_root, timeout_ms, settings):
+        calls.append((command, workspace_root, timeout_ms, settings))
+        return SandboxResult(exit_code=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(executor, "run_docker_command", runner)
+    monkeypatch.setattr(executor, "get_tool_workspace_root", lambda: str(tmp_path), raising=False)
+    settings = SimpleNamespace(tool_result_max_chars=8000)
+    monkeypatch.setattr(executor, "get_settings", lambda: settings)
+    spec = _spec(
+        id="t_docker_runner",
+        name="docker_runner",
+        sandbox=SandboxLevel.DOCKER,
+        sandbox_command_builder=builder,
+        timeout_ms=1234,
+        params_schema={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
+    )
+
+    result = await executor.execute(spec, {"command": "echo ok"})
+    assert result.ok is True
+    assert calls and calls[0][0].argv == ("bash", "-lc", "echo ok")
+    assert calls[0][1] == str(tmp_path)
+    assert calls[0][2] == 1234
+
+
+async def test_microvm_remains_unsupported():
+    result = await executor.execute(_spec(sandbox=SandboxLevel.MICROVM), {})
+    assert result.ok is False
+    assert "sandbox_unsupported_tool" in result.error
+
+
+@pytest.mark.parametrize(
+    ("code", "retryable", "expected_calls"),
+    [
+        (SandboxErrorCode.TIMEOUT, False, 1),
+        (SandboxErrorCode.UNSUPPORTED_TOOL, False, 1),
+        (SandboxErrorCode.INVALID_WORKDIR, False, 1),
+        (SandboxErrorCode.IMAGE_MISSING, False, 1),
+        (SandboxErrorCode.EXIT_NONZERO, False, 1),
+        (SandboxErrorCode.START_FAILED, True, 2),
+        (SandboxErrorCode.UNAVAILABLE, True, 2),
+    ],
+)
+async def test_docker_failure_retry_policy(monkeypatch, tmp_path, code, retryable, expected_calls):
+    calls = {"runner": 0}
+
+    async def builder():
+        return SandboxCommand(argv=("bash", "-lc", "true"))
+
+    async def runner(*args, **kwargs):
+        calls["runner"] += 1
+        raise SandboxFailure(code, "failure", retryable=retryable)
+
+    async def no_sleep(*args):
+        return None
+
+    monkeypatch.setattr(executor, "run_docker_command", runner)
+    monkeypatch.setattr(executor, "get_tool_workspace_root", lambda: str(tmp_path), raising=False)
+    monkeypatch.setattr(executor.asyncio, "sleep", no_sleep)
+    spec = _spec(
+        id=f"t_{code.value}",
+        name=f"docker_{code.value}",
+        sandbox=SandboxLevel.DOCKER,
+        sandbox_command_builder=builder,
+        max_retries=1,
+    )
+
+    result = await executor.execute(spec, {})
+    assert result.ok is False
+    assert code.value in result.error
+    assert calls["runner"] == expected_calls
+
+
+async def test_docker_failure_is_not_cached_until_success(monkeypatch, tmp_path):
+    executor._idem_cache.clear()
+    calls = {"runner": 0}
+
+    async def builder():
+        return SandboxCommand(argv=("bash", "-lc", "true"))
+
+    async def runner(*args, **kwargs):
+        calls["runner"] += 1
+        if calls["runner"] == 1:
+            raise SandboxFailure(SandboxErrorCode.EXIT_NONZERO, "failed")
+        return SandboxResult(exit_code=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(executor, "run_docker_command", runner)
+    monkeypatch.setattr(executor, "get_tool_workspace_root", lambda: str(tmp_path), raising=False)
+    spec = _spec(
+        id="t_docker_cache",
+        name="docker_cache",
+        sandbox=SandboxLevel.DOCKER,
+        sandbox_command_builder=builder,
+        idempotent=True,
+    )
+
+    first = await executor.execute(spec, {})
+    second = await executor.execute(spec, {})
+    assert first.ok is False
+    assert second.ok is True
+    assert calls["runner"] == 2

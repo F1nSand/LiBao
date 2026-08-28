@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from app.seed import ensure_seed_tools, seed_if_first_run
+from app.storage.constants import DEFAULT_ORG_ID
 from app.storage.file.store import get_store
+from app.storage.models import ToolDefinition
 
 
 async def test_seed_first_run_creates_data():
@@ -100,3 +102,15 @@ async def test_ensure_seed_tools_clears_legacy_model_prefix():
         if v.agent_id == agent.id and v.version == agent.current_version
     )
     assert version.model == ""  # 版本行 model 同步清空
+
+
+async def test_ensure_seed_tools_upgrades_existing_bash_to_docker():
+    store = get_store()
+    await seed_if_first_run(store)
+    bash = ToolDefinition(org_id=DEFAULT_ORG_ID, name="bash", sandbox="none", enabled=True)
+    store.table("tool_definitions").register(bash)
+    from app.storage.file.store import FileContext
+
+    await FileContext(store).commit()
+    await ensure_seed_tools(store)
+    assert bash.sandbox == "docker"

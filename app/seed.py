@@ -474,6 +474,10 @@ async def ensure_seed_tools(store: FileStore) -> None:
     existing_names = {t.name for t in await tools_table.list()}
     added = 0
     changed = False
+    for existing in await tools_table.list():
+        if existing.name == "bash" and existing.sandbox != "docker":
+            existing.sandbox = "docker"
+            changed = True
     for spec in TOOL_SPECS:
         if spec["name"] not in existing_names:
             tools_table.register(ToolDefinition(org_id=DEFAULT_ORG_ID, **spec))
