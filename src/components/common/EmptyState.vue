@@ -1,11 +1,15 @@
 <script setup lang="ts">
-defineProps<{ text?: string }>()
+const props = defineProps<{ text?: string; actionText?: string }>()
+const emit = defineEmits<{ action: [] }>()
 </script>
 
 <template>
-  <div class="empty-state">
+  <div class="empty-state" role="status">
     <el-icon :size="36" class="empty-icon"><Box /></el-icon>
     <p class="empty-text">{{ text ?? '暂无数据' }}</p>
+    <el-button v-if="props.actionText" class="empty-action" size="small" @click="emit('action')">
+      {{ props.actionText }}
+    </el-button>
   </div>
 </template>
 
@@ -24,5 +28,8 @@ defineProps<{ text?: string }>()
 .empty-text {
   margin: 0;
   font-size: var(--app-font-size-sm);
+}
+.empty-action {
+  margin-top: 12px;
 }
 </style>

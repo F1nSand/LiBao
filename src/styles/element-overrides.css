@@ -14,6 +14,19 @@
   --el-transition-duration-fast: 0.15s;
 }
 
+/* 公共容器：弹窗始终保留 12px 视口边距，长内容只在弹窗 body 内滚动。 */
+.el-dialog {
+  max-width: calc(100vw - 24px);
+  margin-inline: auto;
+}
+.el-dialog__body {
+  max-height: calc(100vh - 180px);
+  overflow: auto;
+}
+.el-table {
+  max-width: 100%;
+}
+
 /* 按钮按压反馈（emil-design-eng：可按压元素要回应按压，scale 0.95-0.98） */
 .el-button:not(.is-disabled) {
   transition:

@@ -1,5 +1,8 @@
 <script setup lang="ts">
-const props = defineProps<{ total: number; page: number; page_size: number }>()
+const props = withDefaults(
+  defineProps<{ total: number; page: number; page_size: number; disabled?: boolean }>(),
+  { disabled: false },
+)
 const emit = defineEmits<{ change: [page: number, pageSize: number] }>()
 </script>
 
@@ -9,6 +12,7 @@ const emit = defineEmits<{ change: [page: number, pageSize: number] }>()
       :total="props.total"
       :current-page="props.page"
       :page-size="props.page_size"
+      :disabled="props.disabled"
       :page-sizes="[10, 20, 50, 100]"
       layout="total, sizes, prev, pager, next"
       background
@@ -23,5 +27,16 @@ const emit = defineEmits<{ change: [page: number, pageSize: number] }>()
   display: flex;
   justify-content: flex-end;
   padding-top: 12px;
+  min-width: 0;
+}
+@media (max-width: 480px) {
+  .pagination-panel :deep(.el-pagination) {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 8px;
+  }
+  .pagination-panel :deep(.el-pagination__sizes) {
+    margin-right: 0;
+  }
 }
 </style>
