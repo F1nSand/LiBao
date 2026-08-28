@@ -15,3 +15,11 @@ uploads/
 # 版本控制
 .git/
 .gitignore
+
+# User/runtime data must never enter a Docker build context.
+.LiBao/
+agent_data/
+cache/
+checkpoints/
+data/
+kb/
