@@ -108,7 +108,7 @@ class ToolService:
                 spec.id,
                 require_confirm=row.require_confirm,
                 idempotent=row.idempotent,
-                sandbox=row.sandbox,
+                sandbox=_sandbox_level(row.sandbox),
                 timeout_ms=row.timeout_ms,
                 max_concurrency=row.max_concurrency,
             )

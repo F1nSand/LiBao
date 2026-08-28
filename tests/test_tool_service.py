@@ -165,3 +165,30 @@ async def test_sync_converts_persisted_sandbox_string_to_level(tool_fixture):
         assert get(f"tl_{name}").sandbox is SandboxLevel.DOCKER
     finally:
         unregister(f"tl_{name}")
+
+
+async def test_update_converts_sandbox_string_before_registry_sync(tool_fixture):
+    name = f"docker_update_{uuid.uuid4().hex[:8]}"
+
+    async def build_command(**kwargs):
+        return SandboxCommand(argv=("bash", "-lc", "true"))
+
+    register(
+        ToolSpec(
+            id=f"tl_{name}",
+            name=name,
+            description="docker update",
+            sandbox=SandboxLevel.NONE,
+            sandbox_command_builder=build_command,
+            enabled=False,
+            handler=lambda: None,
+            builtin=True,
+        )
+    )
+    try:
+        async with get_store().session() as session:
+            await ToolService().create(session, tool_fixture, CreateToolRequest(name=name))
+            await ToolService().update(session, tool_fixture, f"tl_{name}", UpdateToolRequest(sandbox="docker"))
+        assert get(f"tl_{name}").sandbox is SandboxLevel.DOCKER
+    finally:
+        unregister(f"tl_{name}")
