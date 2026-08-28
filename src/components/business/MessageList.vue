@@ -7,6 +7,7 @@ const scrollPositions = new Map<string, number>()
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Message } from '@/types'
 import type { StreamState } from '@/composables/useChatStream'
+import StreamSkeleton from '@/components/common/StreamSkeleton.vue'
 import MessageBubble from './MessageBubble.vue'
 
 /**
@@ -18,7 +19,7 @@ import MessageBubble from './MessageBubble.vue'
  * 2026-08-20：移除 .msg-row 的 content-visibility（scrollHeight 估算导致间歇不贴底/位置漂移），
  * 滚动改为确定性（scrollHeight 真实，nextTick + rAF 一次落地即可）。
  */
-const props = defineProps<{ messages: Message[]; stream?: StreamState | null }>()
+const props = defineProps<{ messages: Message[]; stream?: StreamState | null; loading?: boolean }>()
 
 const containerRef = ref<HTMLElement | null>(null)
 
@@ -152,8 +153,9 @@ defineExpose({ containerRef })
 
 <template>
   <div ref="containerRef" class="msg-list">
-    <div v-if="messages.length === 0 && !showStreamBubble" class="msg-empty">开始对话吧～</div>
-    <template v-else>
+    <StreamSkeleton :active="loading" />
+    <div v-if="!loading && messages.length === 0 && !showStreamBubble" class="msg-empty">开始对话吧～</div>
+    <template v-if="!loading">
       <div v-for="msg in messages" :key="msg.id" class="msg-row">
         <MessageBubble :message="msg" />
       </div>

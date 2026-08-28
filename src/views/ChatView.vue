@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useChatStream } from '@/composables/useChatStream'
@@ -11,7 +11,7 @@ import { swallowNotImplemented } from '@/utils/http-envelope'
 import { truncate } from '@/utils/format'
 import MessageList from '@/components/business/MessageList.vue'
 import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
-import AttachmentUploader from '@/components/business/AttachmentUploader.vue'
+import AttachmentUploader, { type PendingAttachment } from '@/components/business/AttachmentUploader.vue'
 import InterruptConfirmDialog from '@/components/business/InterruptConfirmDialog.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 
@@ -45,7 +45,10 @@ const stream = useChatStream({
 const currentStream = stream.state
 
 const input = ref('')
-const pendingAttachments = reactive<string[]>([])
+const pendingAttachments = ref<PendingAttachment[]>([])
+const attachmentUploader = ref<InstanceType<typeof AttachmentUploader> | null>(null)
+const isDragging = ref(false)
+const lastFailedDraft = ref<{ content: string; attachments: PendingAttachment[] } | null>(null)
 const interruptVisible = ref(false)
 
 /** 会话 | 轨迹 视图切换 */
@@ -66,15 +69,17 @@ const charCount = computed(() => input.value.length)
 
 function resetForNext() {
   input.value = ''
-  pendingAttachments.splice(0)
+  pendingAttachments.value = []
+  lastFailedDraft.value = null
 }
 
 async function send() {
   const content = input.value.trim()
-  if (!content || composerDisabled.value) return
+  const attachments = [...pendingAttachments.value]
+  if ((!content && !attachments.length) || composerDisabled.value) return
   input.value = ''
-  await sendWith(content, [...pendingAttachments])
-  pendingAttachments.splice(0)
+  pendingAttachments.value = []
+  await sendWith(content, attachments)
 }
 
 function stop() {
@@ -83,36 +88,94 @@ function stop() {
 }
 
 /** send() 的内容注入版 */
-async function sendWith(content: string, attachments: string[] = []) {
-  if (!content || composerDisabled.value) return
+async function sendWith(content: string, attachmentRefs: PendingAttachment[] = [], appendUser = true) {
+  const attachments = attachmentRefs.map((attachment) => attachment.attachment_id)
+  if ((!content && !attachments.length) || composerDisabled.value) return
   if (content.length > TOKEN_LIMIT) {
     ElMessage.error(`输入超过 ${TOKEN_LIMIT} 字符上限`)
     return
   }
-  // 若当前会话不存在则新建
-  if (!chat.currentId) {
-    await chat.createConversation(truncate(content, 20))
-  } else {
-    // 标题兜底：新建按钮创建的「新会话」——后端首条消息落库时已改名，本地列表同步
-    // （与后端 truncate 同语义，避免一直显示「新会话」）
-    const cur = chat.conversations.find((c) => c.id === chat.currentId)
-    if (cur && cur.title === '新会话') cur.title = truncate(content, 20)
+  lastFailedDraft.value = null
+  try {
+    // 若当前会话不存在则新建
+    if (!chat.currentId) {
+      await chat.createConversation(truncate(content || '附件消息', 20))
+    } else {
+      // 标题兜底：新建按钮创建的「新会话」——后端首条消息落库时已改名，本地列表同步
+      // （与后端 truncate 同语义，避免一直显示「新会话」）
+      const cur = chat.conversations.find((c) => c.id === chat.currentId)
+      if (cur && cur.title === '新会话') cur.title = truncate(content || '附件消息', 20)
+    }
+    if (appendUser) chat.appendUserMessage(content, [...attachments])
+    const req = {
+      conversation_id: chat.currentId,
+      message: { content, role: 'user' as const, attachments: [...attachments] },
+      stream: true as const,
+    }
+    await stream.start(req)
+    if (currentStream.value.error) lastFailedDraft.value = { content, attachments: attachmentRefs }
+  } catch (e) {
+    lastFailedDraft.value = { content, attachments: attachmentRefs }
+    ElMessage.error(e instanceof Error ? `发送失败：${e.message}` : '发送失败，请重试')
   }
-  chat.appendUserMessage(content, [...attachments])
-  const req = {
-    conversation_id: chat.currentId,
-    message: { content, role: 'user' as const, attachments: [...attachments] },
-    stream: true as const,
-  }
-  await stream.start(req)
 }
 
-function onAttach(id: string) {
-  if (pendingAttachments.length >= 10) {
+function onAttach(attachment: PendingAttachment) {
+  if (pendingAttachments.value.length >= 10) {
     ElMessage.warning('每条消息最多 10 个附件')
     return
   }
-  pendingAttachments.push(id)
+  pendingAttachments.value.push(attachment)
+}
+
+function removeAttachment(id: string) {
+  pendingAttachments.value = pendingAttachments.value.filter((attachment) => attachment.attachment_id !== id)
+}
+
+async function uploadFiles(files: File[]) {
+  if (!attachmentUploader.value || composerDisabled.value) return
+  for (const file of files) {
+    if (pendingAttachments.value.length >= 10) {
+      ElMessage.warning('每条消息最多 10 个附件')
+      break
+    }
+    await attachmentUploader.value.upload(file)
+  }
+}
+
+function onComposerDragOver() {
+  if (!composerDisabled.value) isDragging.value = true
+}
+
+function onComposerDragLeave() {
+  isDragging.value = false
+}
+
+function onComposerDrop(e: DragEvent) {
+  isDragging.value = false
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  void uploadFiles(files)
+}
+
+function onPaste(e: ClipboardEvent) {
+  const files = Array.from(e.clipboardData?.files ?? []).filter((file) => file.type.startsWith('image/'))
+  if (!files.length) return
+  e.preventDefault()
+  void uploadFiles(files)
+}
+
+function restoreDraft() {
+  const draft = lastFailedDraft.value
+  if (!draft) return
+  input.value = draft.content
+  pendingAttachments.value = draft.attachments.map((attachment) => ({ ...attachment }))
+  lastFailedDraft.value = null
+}
+
+async function retryFailed() {
+  const draft = lastFailedDraft.value
+  if (!draft || composerDisabled.value) return
+  await sendWith(draft.content, draft.attachments, false)
 }
 
 // 中断 → 弹窗
@@ -193,69 +256,104 @@ async function onPickModel(p: ProviderConfig) {
         v-show="mode === 'chat'"
         :messages="chat.currentMessages"
         :stream="currentStream"
+        :loading="chat.messagesLoading"
       />
 
-      <div v-show="mode === 'chat'" class="composer">
+      <div v-if="mode === 'chat' && chat.messagesError" class="stream-error" role="alert">
+        <span>消息加载失败：{{ chat.messagesError }}</span>
+        <button type="button" class="recovery-btn" @click="chat.currentId && chat.selectConversation(chat.currentId)">重试加载</button>
+      </div>
+
+      <div v-if="mode === 'chat' && currentStream.error" class="stream-error" role="alert">
+        <span>发送失败：{{ currentStream.error.message }}</span>
+        <span v-if="lastFailedDraft" class="stream-error-actions">
+          <button type="button" class="recovery-btn" @click="restoreDraft">恢复草稿</button>
+          <button v-if="currentStream.error.retryable !== false" type="button" class="recovery-btn primary" @click="retryFailed">
+            重试
+          </button>
+        </span>
+      </div>
+
+      <div
+        v-show="mode === 'chat'"
+        class="composer"
+        :class="{ dragging: isDragging }"
+        @dragover.prevent="onComposerDragOver"
+        @dragleave="onComposerDragLeave"
+        @drop.prevent="onComposerDrop"
+        @paste="onPaste"
+      >
+        <TransitionGroup v-if="pendingAttachments.length" tag="div" name="chip" class="composer-attachments">
+          <span v-for="attachment in pendingAttachments" :key="attachment.attachment_id" class="composer-attachment-chip" :title="attachment.name">
+            <el-icon :size="14"><Picture /></el-icon>
+            <span>{{ attachment.name }}</span>
+            <button type="button" class="chip-remove" :aria-label="`移除附件 ${attachment.name}`" @click="removeAttachment(attachment.attachment_id)">
+              <el-icon :size="12"><Close /></el-icon>
+            </button>
+          </span>
+        </TransitionGroup>
         <div class="composer-input">
-          <AttachmentUploader @add="onAttach" />
+          <AttachmentUploader ref="attachmentUploader" @add="onAttach" />
           <el-input
+            class="composer-textarea"
             v-model="input"
             type="textarea"
             :rows="1"
             resize="none"
-            autosize
+            :autosize="{ minRows: 1, maxRows: 8 }"
             :maxlength="TOKEN_LIMIT"
             placeholder="输入消息，Enter 发送 / Shift+Enter 换行"
             :disabled="composerDisabled"
             @keydown="onKeydown"
           />
-          <el-popover
-            v-if="!providerUnavailable"
-            v-model:visible="modelMenuVisible"
-            placement="top-start"
-            :width="300"
-            trigger="click"
-            popper-class="model-picker"
-            @show="onModelMenuShow"
-          >
-            <template #reference>
-              <el-button class="model-btn" :icon="'Cpu'">
-                <span class="model-btn-label">{{ activeModelLabel }}</span>
-              </el-button>
-            </template>
-            <div v-loading="switchingModel" class="model-menu">
-              <div v-if="activeProvider" class="model-menu-hint">
-                当前：{{ activeProvider.name }} · {{ activeProvider.model || '（未填模型名）' }}
+          <div class="composer-actions">
+            <el-popover
+              v-if="!providerUnavailable"
+              v-model:visible="modelMenuVisible"
+              placement="top-start"
+              :width="300"
+              trigger="click"
+              popper-class="model-picker"
+              @show="onModelMenuShow"
+            >
+              <template #reference>
+                <el-button class="model-btn" :icon="'Cpu'" aria-label="选择模型">
+                  <span class="model-btn-label">{{ activeModelLabel }}</span>
+                </el-button>
+              </template>
+              <div v-loading="switchingModel" class="model-menu">
+                <div v-if="activeProvider" class="model-menu-hint">
+                  当前：{{ activeProvider.name }} · {{ activeProvider.model || '（未填模型名）' }}
+                </div>
+                <div v-else class="model-menu-hint">尚未配置 Provider（到 设置 → Provider 配置 添加）</div>
+                <button
+                  v-for="p in providers"
+                  :key="p.id"
+                  class="model-item"
+                  :class="{ active: p.enabled }"
+                  :disabled="switchingModel"
+                  @click="onPickModel(p)"
+                >
+                  <span class="model-item-name">{{ p.name }}</span>
+                  <span class="model-item-model">{{ p.model }}</span>
+                  <el-tag v-if="p.enabled" size="small" type="success">当前</el-tag>
+                </button>
+                <div v-if="!providers.length && !switchingModel" class="model-menu-empty">
+                  {{ providerUnavailable ? '' : '暂无 Provider 配置' }}
+                </div>
               </div>
-              <div v-else class="model-menu-hint">尚未配置 Provider（到 设置 → Provider 配置 添加）</div>
-              <button
-                v-for="p in providers"
-                :key="p.id"
-                class="model-item"
-                :class="{ active: p.enabled }"
-                :disabled="switchingModel"
-                @click="onPickModel(p)"
-              >
-                <span class="model-item-name">{{ p.name }}</span>
-                <span class="model-item-model">{{ p.model }}</span>
-                <el-tag v-if="p.enabled" size="small" type="success">当前</el-tag>
-              </button>
-              <div v-if="!providers.length && !switchingModel" class="model-menu-empty">
-                {{ providerUnavailable ? '' : '暂无 Provider 配置' }}
-              </div>
-            </div>
-          </el-popover>
-          <el-button
-            v-if="currentStream.streaming"
-            type="danger"
-            :icon="'VideoPause'"
-            @click="stop"
-          >
-            停止
-          </el-button>
-          <el-button v-else type="primary" :icon="'Promotion'" :disabled="composerDisabled || !input.trim()" @click="send">
-            发送
-          </el-button>
+            </el-popover>
+            <el-button v-if="currentStream.streaming" type="danger" :icon="'VideoPause'" @click="stop">停止</el-button>
+            <el-button
+              v-else
+              type="primary"
+              :icon="'Promotion'"
+              :disabled="composerDisabled || (!input.trim() && !pendingAttachments.length)"
+              @click="send"
+            >
+              发送
+            </el-button>
+          </div>
         </div>
         <div class="composer-foot">
           <span class="char-count" :class="{ over: charCount > TOKEN_LIMIT }">{{ charCount }} / {{ TOKEN_LIMIT }}</span>
@@ -316,11 +414,20 @@ async function onPickModel(p: ProviderConfig) {
   border-top: 1px solid var(--app-border);
   background: var(--app-content-bg);
   padding: 10px 16px;
+  transition: border-color 0.15s var(--ease-out), background 0.15s var(--ease-out);
+}
+.composer.dragging {
+  border-top-color: var(--app-primary-fill);
+  background: color-mix(in srgb, var(--app-primary-fill) 4%, var(--app-content-bg));
 }
 .composer-input {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: flex-end;
   gap: 8px;
+}
+.composer-textarea {
+  min-width: 0;
 }
 .composer :deep(.el-input__wrapper) {
   border-radius: var(--app-radius);
@@ -328,18 +435,92 @@ async function onPickModel(p: ProviderConfig) {
 .composer :deep(.el-button) {
   border-radius: var(--app-radius);
 }
+.composer-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.composer-attachments,
+.stream-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.composer-attachments {
+  margin-bottom: 6px;
+}
+.composer-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--app-primary-fill) 28%, var(--app-border));
+  border-radius: var(--app-radius-lg);
+  background: color-mix(in srgb, var(--app-primary-fill) 8%, var(--app-content-bg));
+  color: var(--app-text-secondary);
+  font-size: 12px;
+}
+.composer-attachment-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--app-text-muted);
+  cursor: pointer;
+}
+.chip-remove:hover {
+  color: var(--app-danger);
+  background: var(--app-bg);
+}
+.stream-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 16px;
+  border-top: 1px solid color-mix(in srgb, var(--app-danger) 30%, var(--app-border));
+  background: color-mix(in srgb, var(--app-danger) 5%, var(--app-content-bg));
+  color: var(--app-danger);
+  font-size: 13px;
+}
+.recovery-btn {
+  min-height: var(--app-control-sm);
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--app-danger) 40%, var(--app-border));
+  border-radius: var(--app-radius);
+  background: var(--app-content-bg);
+  color: var(--app-danger);
+  cursor: pointer;
+}
+.recovery-btn.primary {
+  border-color: var(--app-primary-fill);
+  background: var(--app-primary-fill);
+  color: var(--app-on-primary);
+}
 .composer-foot {
   display: flex;
   justify-content: flex-end;
   margin-top: 6px;
 }
 .char-count {
-  font-size: 11px;
-  color: var(--app-text-muted);
-  opacity: 0.7;
+  font-size: 12px;
+  color: var(--app-text-tertiary);
 }
 .char-count.over {
-  color: #ef4444;
+  color: var(--app-danger);
 }
 /* 换模型按钮：弱化为次要操作（发送是主按钮），当前模型名随按钮展示 */
 .model-btn {
@@ -350,6 +531,52 @@ async function onPickModel(p: ProviderConfig) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .chat-toolbar {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+  }
+  .composer {
+    padding: 8px 10px;
+  }
+  .composer-input {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  .composer-textarea {
+    order: 0;
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .composer-input :deep(.uploader),
+  .composer-actions {
+    order: 1;
+  }
+  .composer-actions {
+    flex: 1;
+    justify-content: flex-end;
+  }
+  .composer-input :deep(.el-button) {
+    min-width: var(--app-control-touch);
+    min-height: var(--app-control-touch);
+  }
+  .stream-error {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 8px 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .model-btn-label {
+    display: none;
+  }
+  .model-picker {
+    max-width: calc(100vw - 24px) !important;
+  }
 }
 </style>
 

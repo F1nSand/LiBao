@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useChatStream } from '@/composables/useChatStream'
 import {
@@ -16,7 +16,7 @@ import { NARROW_LAYOUT_MQ } from '@/constants/layout'
 import ResourceManager from './ResourceManager.vue'
 import MessageList from '@/components/business/MessageList.vue'
 import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
-import AttachmentUploader from '@/components/business/AttachmentUploader.vue'
+import AttachmentUploader, { type PendingAttachment } from '@/components/business/AttachmentUploader.vue'
 import InterruptConfirmDialog from '@/components/business/InterruptConfirmDialog.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import WorkspaceConvList from './WorkspaceConvList.vue'
@@ -54,6 +54,8 @@ const conversations = ref<Conversation[]>([])
 const currentId = ref<string | null>(null)
 const messages = ref<Message[]>([])
 const convLoading = ref(false)
+const messageLoading = ref(false)
+const messageError = ref<string | null>(null)
 
 /** 左列（文件树 + 会话）整体折叠：窗口变窄自动收、变宽自动开；用户手动折叠不自动展开 */
 const leftUserCollapsed = ref(false)
@@ -64,7 +66,10 @@ function toggleLeft(): void {
 }
 
 const input = ref('')
-const pendingAttachments = reactive<string[]>([])
+const pendingAttachments = ref<PendingAttachment[]>([])
+const attachmentUploader = ref<InstanceType<typeof AttachmentUploader> | null>(null)
+const isDragging = ref(false)
+const lastFailedDraft = ref<{ content: string; attachments: PendingAttachment[]; refs: FileRef[] } | null>(null)
 const fileRefs = ref<FileRef[]>([])
 const refPickerVisible = ref(false)
 const interruptVisible = ref(false)
@@ -92,9 +97,18 @@ async function loadConversations() {
 async function selectConversation(id: string) {
   currentId.value = id
   stream.setConversation(id)
-  const res = await listMessages(id, { page_size: 100 })
-  if (currentId.value !== id) return // 响应序守卫
-  messages.value = res.items
+  messages.value = []
+  messageError.value = null
+  messageLoading.value = true
+  try {
+    const res = await listMessages(id, { page_size: 100 })
+    if (currentId.value !== id) return // 响应序守卫
+    messages.value = res.items
+  } catch (e) {
+    if (currentId.value === id) messageError.value = e instanceof Error ? e.message : '消息加载失败'
+  } finally {
+    if (currentId.value === id) messageLoading.value = false
+  }
 }
 
 async function createConv(title = '新会话') {
@@ -109,15 +123,53 @@ async function deleteConv(id: string) {
   if (currentId.value === id) {
     currentId.value = null
     messages.value = []
+    messageLoading.value = false
+    messageError.value = null
   }
 }
 
-function onAttach(id: string) {
-  if (pendingAttachments.length >= 10) {
+function onAttach(attachment: PendingAttachment) {
+  if (pendingAttachments.value.length >= 10) {
     ElMessage.warning('每条消息最多 10 个附件')
     return
   }
-  pendingAttachments.push(id)
+  pendingAttachments.value.push(attachment)
+}
+
+function removeAttachment(id: string) {
+  pendingAttachments.value = pendingAttachments.value.filter((attachment) => attachment.attachment_id !== id)
+}
+
+async function uploadFiles(files: File[]) {
+  if (!attachmentUploader.value || composerDisabled.value) return
+  for (const file of files) {
+    if (pendingAttachments.value.length >= 10) {
+      ElMessage.warning('每条消息最多 10 个附件')
+      break
+    }
+    await attachmentUploader.value.upload(file)
+  }
+}
+
+function onComposerDragOver() {
+  if (!composerDisabled.value) isDragging.value = true
+}
+
+function onComposerDragLeave() {
+  isDragging.value = false
+}
+
+function onComposerDrop(e: DragEvent) {
+  isDragging.value = false
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  void uploadFiles(files)
+}
+
+function onPaste(e: ClipboardEvent) {
+  const files = Array.from(e.clipboardData?.files ?? []).filter((file) => file.type.startsWith('image/'))
+  if (!files.length) return
+  e.preventDefault()
+  void uploadFiles(files)
 }
 
 function addFileRefs(refs: FileRef[]) {
@@ -139,35 +191,73 @@ const charCount = computed(() => input.value.length)
 
 async function send() {
   const content = input.value.trim()
-  if (!content || composerDisabled.value) return
-  input.value = ''
-  if (!currentId.value) {
-    await createConv(truncate(content, 20))
-  } else {
-    // 标题兜底：新建按钮创建的「新会话」——后端首条消息落库时已改名，本地列表同步
-    const cur = conversations.value.find((c) => c.id === currentId.value)
-    if (cur && cur.title === '新会话') cur.title = truncate(content, 20)
-  }
-  const attachments = [...pendingAttachments]
+  const attachments = [...pendingAttachments.value]
   const refs = [...fileRefs.value]
-  pendingAttachments.splice(0)
+  if ((!content && !attachments.length && !refs.length) || composerDisabled.value) return
+  input.value = ''
+  pendingAttachments.value = []
   fileRefs.value = []
-  messages.value.push({
-    id: `local_${Date.now()}`,
-    conversation_id: currentId.value ?? '',
-    role: 'user',
-    content,
-    attachments: attachments.map((id) => ({ attachment_id: id })),
-    file_refs: refs.length ? refs : undefined,
-    tool_calls: [],
-    created_at: new Date().toISOString(),
-  })
-  await stream.start({
-    conversation_id: currentId.value,
-    workspace_id: props.workspaceId,
-    message: { content, role: 'user', attachments, file_refs: refs.length ? refs : undefined },
-    stream: true,
-  })
+  await sendWith(content, attachments, refs)
+}
+
+async function sendWith(content: string, attachmentRefs: PendingAttachment[], refs: FileRef[], appendUser = true) {
+  const attachments = attachmentRefs.map((attachment) => attachment.attachment_id)
+  if ((!content && !attachments.length && !refs.length) || composerDisabled.value) return
+  if (content.length > TOKEN_LIMIT) {
+    ElMessage.error(`输入超过 ${TOKEN_LIMIT} 字符上限`)
+    return
+  }
+  lastFailedDraft.value = null
+  try {
+    if (!currentId.value) {
+      await createConv(truncate(content || '附件消息', 20))
+    } else {
+      // 标题兜底：新建按钮创建的「新会话」——后端首条消息落库时已改名，本地列表同步
+      const cur = conversations.value.find((c) => c.id === currentId.value)
+      if (cur && cur.title === '新会话') cur.title = truncate(content || '附件消息', 20)
+    }
+    if (appendUser) {
+      messages.value.push({
+        id: `local_${Date.now()}`,
+        conversation_id: currentId.value ?? '',
+        role: 'user',
+        content,
+        attachments: attachments.map((id) => ({ attachment_id: id })),
+        file_refs: refs.length ? refs : undefined,
+        tool_calls: [],
+        created_at: new Date().toISOString(),
+      })
+    }
+    await stream.start({
+      conversation_id: currentId.value,
+      workspace_id: props.workspaceId,
+      message: { content, role: 'user', attachments, file_refs: refs.length ? refs : undefined },
+      stream: true,
+    })
+    if (currentStream.value.error) lastFailedDraft.value = { content, attachments: attachmentRefs, refs }
+  } catch (e) {
+    lastFailedDraft.value = { content, attachments: attachmentRefs, refs }
+    ElMessage.error(e instanceof Error ? `发送失败：${e.message}` : '发送失败，请重试')
+  }
+}
+
+function restoreDraft() {
+  const draft = lastFailedDraft.value
+  if (!draft) return
+  input.value = draft.content
+  pendingAttachments.value = draft.attachments.map((attachment) => ({ ...attachment }))
+  fileRefs.value = draft.refs.map((fileRef) => ({ ...fileRef }))
+  lastFailedDraft.value = null
+}
+
+async function retryFailed() {
+  const draft = lastFailedDraft.value
+  if (!draft || composerDisabled.value) return
+  await sendWith(draft.content, draft.attachments, draft.refs, false)
+}
+
+function retryMessages() {
+  if (currentId.value) void selectConversation(currentId.value)
 }
 
 function stop() {
@@ -230,39 +320,78 @@ async function onInterruptConfirm(approved: boolean) {
         <StatusTag :status="currentStream.status ?? ''" />
       </div>
 
-      <MessageList v-show="mode === 'chat'" :messages="messages" :stream="currentStream" />
+      <MessageList v-show="mode === 'chat'" :messages="messages" :stream="currentStream" :loading="messageLoading" />
 
-      <div v-show="mode === 'chat'" class="composer">
+      <div v-if="mode === 'chat' && messageError" class="stream-error" role="alert">
+        <span>消息加载失败：{{ messageError }}</span>
+        <button type="button" class="recovery-btn" @click="retryMessages">重试加载</button>
+      </div>
+
+      <div v-if="mode === 'chat' && currentStream.error" class="stream-error" role="alert">
+        <span>发送失败：{{ currentStream.error.message }}</span>
+        <span v-if="lastFailedDraft" class="stream-error-actions">
+          <button type="button" class="recovery-btn" @click="restoreDraft">恢复草稿</button>
+          <button v-if="currentStream.error.retryable !== false" type="button" class="recovery-btn primary" @click="retryFailed">
+            重试
+          </button>
+        </span>
+      </div>
+
+      <div
+        v-show="mode === 'chat'"
+        class="composer"
+        :class="{ dragging: isDragging }"
+        @dragover.prevent="onComposerDragOver"
+        @dragleave="onComposerDragLeave"
+        @drop.prevent="onComposerDrop"
+        @paste="onPaste"
+      >
+        <TransitionGroup v-if="pendingAttachments.length || fileRefs.length" tag="div" name="chip" class="composer-chips">
+          <span v-for="attachment in pendingAttachments" :key="attachment.attachment_id" class="composer-attachment-chip" :title="attachment.name">
+            <el-icon :size="14"><Picture /></el-icon>
+            <span>{{ attachment.name }}</span>
+            <button type="button" class="chip-remove" :aria-label="`移除附件 ${attachment.name}`" @click="removeAttachment(attachment.attachment_id)">
+              <el-icon :size="12"><Close /></el-icon>
+            </button>
+          </span>
+          <span v-for="r in fileRefs" :key="r.path" class="composer-ref-chip" :title="r.path">
+            <el-icon :size="12"><Document /></el-icon>
+            <span class="mono">{{ r.path }}</span>
+            <button type="button" class="chip-remove" :aria-label="`移除文件引用 ${r.path}`" @click="removeFileRef(r.path)">
+              <el-icon :size="12"><Close /></el-icon>
+            </button>
+          </span>
+        </TransitionGroup>
         <div class="composer-input">
-          <AttachmentUploader @add="onAttach" />
+          <AttachmentUploader ref="attachmentUploader" @add="onAttach" />
           <el-input
+            class="composer-textarea"
             v-model="input"
             type="textarea"
             :rows="1"
             resize="none"
-            autosize
+            :autosize="{ minRows: 1, maxRows: 8 }"
             :maxlength="TOKEN_LIMIT"
             placeholder="输入消息，Enter 发送 / Shift+Enter 换行"
             :disabled="composerDisabled"
             @keydown="onKeydown"
           />
-          <el-button :icon="'DocumentAdd'" title="引用工作区文件" :disabled="composerDisabled" @click="refPickerVisible = true">
-            引用
-          </el-button>
-          <el-button v-if="currentStream.streaming" type="danger" :icon="'VideoPause'" @click="stop">
-            停止
-          </el-button>
-          <el-button v-else type="primary" :icon="'Promotion'" :disabled="composerDisabled || !input.trim()" @click="send">
-            发送
-          </el-button>
+          <div class="composer-actions">
+            <el-button :icon="'DocumentAdd'" title="引用工作区文件" aria-label="引用工作区文件" :disabled="composerDisabled" @click="refPickerVisible = true">
+              引用
+            </el-button>
+            <el-button v-if="currentStream.streaming" type="danger" :icon="'VideoPause'" @click="stop">停止</el-button>
+            <el-button
+              v-else
+              type="primary"
+              :icon="'Promotion'"
+              :disabled="composerDisabled || (!input.trim() && !pendingAttachments.length && !fileRefs.length)"
+              @click="send"
+            >
+              发送
+            </el-button>
+          </div>
         </div>
-        <TransitionGroup v-if="fileRefs.length" tag="div" name="chip" class="composer-refs">
-          <span v-for="r in fileRefs" :key="r.path" class="composer-ref-chip" :title="r.path">
-            <el-icon :size="12"><Document /></el-icon>
-            <span class="mono">{{ r.path }}</span>
-            <el-icon :size="12" class="chip-close" @click="removeFileRef(r.path)"><Close /></el-icon>
-          </span>
-        </TransitionGroup>
         <div class="composer-foot">
           <span class="char-count" :class="{ over: charCount > TOKEN_LIMIT }">{{ charCount }} / {{ TOKEN_LIMIT }}</span>
         </div>
@@ -380,11 +509,20 @@ async function onInterruptConfirm(approved: boolean) {
   border-top: 1px solid var(--app-border);
   background: var(--app-content-bg);
   padding: 10px 16px;
+  transition: border-color 0.15s var(--ease-out), background 0.15s var(--ease-out);
+}
+.composer.dragging {
+  border-top-color: var(--app-primary-fill);
+  background: color-mix(in srgb, var(--app-primary-fill) 4%, var(--app-content-bg));
 }
 .composer-input {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: flex-end;
   gap: 8px;
+}
+.composer-textarea {
+  min-width: 0;
 }
 .composer :deep(.el-input__wrapper) {
   border-radius: var(--app-radius);
@@ -392,28 +530,93 @@ async function onInterruptConfirm(approved: boolean) {
 .composer :deep(.el-button) {
   border-radius: var(--app-radius);
 }
-.composer-refs {
+.composer-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.composer-chips {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
-  margin-top: 6px;
+  margin-bottom: 6px;
 }
+.composer-attachment-chip,
 .composer-ref-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 1px 6px;
-  background: color-mix(in srgb, var(--app-primary) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-primary) 28%, transparent);
+  min-height: 28px;
+  padding: 2px 6px;
   border-radius: var(--app-radius-lg);
   font-size: 12px;
-  color: var(--app-primary);
-  max-width: 260px;
 }
-.composer-ref-chip .mono {
+.composer-attachment-chip {
+  max-width: 240px;
+  border: 1px solid color-mix(in srgb, var(--app-primary-fill) 28%, var(--app-border));
+  background: color-mix(in srgb, var(--app-primary-fill) 8%, var(--app-content-bg));
+  color: var(--app-text-secondary);
+}
+.composer-attachment-chip > span,
+.composer-ref-chip > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.composer-ref-chip {
+  background: color-mix(in srgb, var(--app-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-primary) 28%, transparent);
+  color: var(--app-primary);
+  max-width: 260px;
+}
+.chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--app-text-muted);
+  cursor: pointer;
+}
+.chip-remove:hover {
+  color: var(--app-danger);
+  background: var(--app-bg);
+}
+.stream-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 16px;
+  border-top: 1px solid color-mix(in srgb, var(--app-danger) 30%, var(--app-border));
+  background: color-mix(in srgb, var(--app-danger) 5%, var(--app-content-bg));
+  color: var(--app-danger);
+  font-size: 13px;
+}
+.stream-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.recovery-btn {
+  min-height: var(--app-control-sm);
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--app-danger) 40%, var(--app-border));
+  border-radius: var(--app-radius);
+  background: var(--app-content-bg);
+  color: var(--app-danger);
+  cursor: pointer;
+}
+.recovery-btn.primary {
+  border-color: var(--app-primary-fill);
+  background: var(--app-primary-fill);
+  color: var(--app-on-primary);
 }
 /* 引用 chip 增删过渡（emil：0.15s ease-out，可中断） */
 .chip-enter-active,
@@ -431,27 +634,56 @@ async function onInterruptConfirm(approved: boolean) {
 .chip-move {
   transition: transform 0.15s var(--ease-out);
 }
-.chip-close {
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.chip-close:hover {
-  color: var(--app-danger);
-}
 .composer-foot {
   display: flex;
   justify-content: flex-end;
   margin-top: 6px;
 }
 .char-count {
-  font-size: 11px;
-  color: var(--app-text-muted);
-  opacity: 0.7;
+  font-size: 12px;
+  color: var(--app-text-tertiary);
 }
 .char-count.over {
   color: var(--app-danger);
 }
 .mono {
   font-family: var(--app-font-mono);
+}
+
+@media (max-width: 768px) {
+  .ws-toolbar {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+  }
+  .composer {
+    padding: 8px 10px;
+  }
+  .composer-input {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  .composer-textarea {
+    order: 0;
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .composer-input :deep(.uploader),
+  .composer-actions {
+    order: 1;
+  }
+  .composer-actions {
+    flex: 1;
+    justify-content: flex-end;
+  }
+  .composer-input :deep(.el-button) {
+    min-width: var(--app-control-touch);
+    min-height: var(--app-control-touch);
+  }
+  .stream-error {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 8px 10px;
+  }
 }
 </style>

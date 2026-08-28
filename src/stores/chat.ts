@@ -17,6 +17,8 @@ export const useChatStore = defineStore('chat', {
     conversations: [] as Conversation[],
     currentId: null as string | null,
     currentMessages: [] as Message[],
+    messagesLoading: false,
+    messagesError: null as string | null,
     /** 侧栏选中会话的令牌（ChatView 监听以复位流式，创建会话不递增） */
     selectionToken: 0,
     convTotal: 0,
@@ -39,18 +41,29 @@ export const useChatStore = defineStore('chat', {
       this.conversations.unshift(c)
       this.currentId = c.id
       this.currentMessages = []
+      this.messagesLoading = false
+      this.messagesError = null
     },
 
     async selectConversation(id: string) {
       this.currentId = id
       this.selectionToken += 1
+      this.currentMessages = []
+      this.messagesError = null
       await this.loadMessages(id)
     },
 
     async loadMessages(id: string, page = 1) {
-      const res = await listMessages(id, { page, page_size: 50 })
-      if (id !== this.currentId) return // 响应序守卫：快速连点时慢响应不覆盖新选择
-      this.currentMessages = res.items
+      this.messagesLoading = true
+      try {
+        const res = await listMessages(id, { page, page_size: 50 })
+        if (id !== this.currentId) return // 响应序守卫：快速连点时慢响应不覆盖新选择
+        this.currentMessages = res.items
+      } catch (e) {
+        if (id === this.currentId) this.messagesError = e instanceof Error ? e.message : '消息加载失败'
+      } finally {
+        if (id === this.currentId) this.messagesLoading = false
+      }
     },
 
     async deleteConversation(id: string) {
@@ -59,6 +72,7 @@ export const useChatStore = defineStore('chat', {
       if (this.currentId === id) {
         this.currentId = null
         this.currentMessages = []
+        this.messagesError = null
       }
     },
 

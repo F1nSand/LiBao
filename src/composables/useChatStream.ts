@@ -357,6 +357,11 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
   }
 
   function onError(e: Error, ctx: ConvCtx): void {
+    // 用户主动停止或组件卸载触发的 Abort 不应伪装成可重试的业务失败。
+    if (e.name === 'AbortError' || ctx.controller?.signal.aborted) {
+      ctx.state.streaming = false
+      return
+    }
     ctx.state.error = { code: 50001, message: e.message, retryable: true }
     ctx.state.finished = true
     ctx.state.streaming = false
@@ -405,6 +410,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     } finally {
       // 静默关流（无 done/error）兜底：避免 streaming 卡 true 导致输入框永久禁用
       if (!ctx.state.finished) ctx.state.streaming = false
+      ctx.controller = null
     }
   }
 
@@ -433,6 +439,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     } finally {
       // 同上：静默关流兜底
       if (!ctx.state.finished) ctx.state.streaming = false
+      ctx.controller = null
     }
   }
 

@@ -97,7 +97,7 @@ const settingsChildren = computed(() => {
       </router-link>
     </nav>
 
-    <ConversationList v-show="!collapsed" class="sidebar-conv" />
+    <ConversationList v-show="!collapsed" class="sidebar-conv" @click="closeDrawer" />
 
     <nav class="sidebar-nav sidebar-bottom">
       <router-link
