@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.tools.sandbox import SandboxLevel
 
 
 class CreateToolRequest(BaseModel):
@@ -14,9 +16,9 @@ class CreateToolRequest(BaseModel):
     tool_type: str = "execution"
     require_confirm: bool = False
     idempotent: bool = False
-    sandbox: str = "none"
-    timeout_ms: int = 30000
-    max_concurrency: int = 1
+    sandbox: SandboxLevel = SandboxLevel.NONE
+    timeout_ms: int = Field(default=30000, ge=1)
+    max_concurrency: int = Field(default=1, ge=1)
 
 
 class UpdateToolRequest(BaseModel):
@@ -26,9 +28,9 @@ class UpdateToolRequest(BaseModel):
     tool_type: str | None = None
     require_confirm: bool | None = None
     idempotent: bool | None = None
-    sandbox: str | None = None
-    timeout_ms: int | None = None
-    max_concurrency: int | None = None
+    sandbox: SandboxLevel | None = None
+    timeout_ms: int | None = Field(default=None, ge=1)
+    max_concurrency: int | None = Field(default=None, ge=1)
 
 
 class ToolToggleRequest(BaseModel):

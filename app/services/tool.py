@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from app.core.errors import ERR_TOOL_NAME_CONFLICT, ERR_TOOL_NOT_FOUND, AppError
+from app.core.errors import ERR_PARAM_MISSING, ERR_TOOL_NAME_CONFLICT, ERR_TOOL_NOT_FOUND, AppError
 from app.services.serializers import serialize_tool_definition
 from app.storage.file.store import get_store
 from app.storage.models.tool_definition import ToolDefinition
@@ -18,11 +18,20 @@ from app.storage.models.user import User
 from app.storage.repositories.tool_definition import ToolDefinitionRepository
 from app.tools import executor
 from app.tools.registry import get, get_by_name, patch_spec, register, set_enabled
+from app.tools.sandbox import SandboxLevel
 
 
 def resolve_name(tool_id: str) -> str:
     """API id → DB name（registry 约定 tl_ 前缀；无前缀则按 id 直查兜底）。"""
     return tool_id.removeprefix("tl_")
+
+
+def _sandbox_level(value: SandboxLevel | str) -> SandboxLevel:
+    """持久化字符串 → 运行时枚举，旧脏值不得进入 registry。"""
+    try:
+        return value if isinstance(value, SandboxLevel) else SandboxLevel(value)
+    except ValueError as exc:
+        raise AppError(ERR_PARAM_MISSING, f"不支持的沙盒级别: {value}") from exc
 
 
 class ToolService:
@@ -62,7 +71,7 @@ class ToolService:
             enabled=False,  # 默认关闭原则（约束优先）
             require_confirm=req.require_confirm,
             idempotent=req.idempotent,
-            sandbox=req.sandbox or "none",
+            sandbox=_sandbox_level(req.sandbox or SandboxLevel.NONE).value,
             timeout_ms=req.timeout_ms or 30000,
             max_concurrency=req.max_concurrency or 1,
         )
@@ -83,12 +92,13 @@ class ToolService:
             ("tool_type", req.tool_type),
             ("require_confirm", req.require_confirm),
             ("idempotent", req.idempotent),
-            ("sandbox", req.sandbox),
             ("timeout_ms", req.timeout_ms),
             ("max_concurrency", req.max_concurrency),
         ):
             if value is not None:
                 setattr(row, field, value)
+        if req.sandbox is not None:
+            row.sandbox = _sandbox_level(req.sandbox).value
         await db.commit()
         await db.refresh(row)
         # 同步桥：运行时字段同步到 registry spec（require_confirm 等执行即刻生效）
@@ -135,7 +145,9 @@ class ToolService:
         servers_by_id = await self._load_mcp_servers(rows)
         for row in rows:
             spec = get_by_name(row.name)
+            sandbox = _sandbox_level(row.sandbox)
             if spec is not None:
+                patch_spec(spec.id, sandbox=sandbox)
                 set_enabled(spec.id, row.enabled)
             elif row.mcp_source:
                 self._sync_mcp_spec(row, servers_by_id)

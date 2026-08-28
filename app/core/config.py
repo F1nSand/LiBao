@@ -4,9 +4,11 @@ Pydantic Settings 从 settings.json（~/.LiBao，主）与 .env（后备）读�
 2026-08-25：数据目录从项目根迁到用户全局 ~/.LiBao（对齐 Claude Code ~/.claude；打包后源码只读、数据全在用户目录）。
 """
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field, field_validator
 from pydantic_settings import (
     BaseSettings,
     JsonConfigSettingsSource,
@@ -49,6 +51,31 @@ class Settings(BaseSettings):
     # ---- 任务（M2 interrupt/resume）----
     # pending_confirm 载荷 TTL：过期后拒绝 resume（docs 01 §3.4 I8）
     task_confirm_ttl_hours: int = 24
+
+    # ---- Docker 沙箱（仅 tl_bash；不自动拉取、不宿主回退）----
+    sandbox_docker_cli: str = "docker"
+    sandbox_docker_image: str = "libao-sandbox:py312-v1"
+    sandbox_docker_memory: str = "512m"
+    sandbox_docker_cpus: str = "1"
+    sandbox_docker_pids_limit: int = Field(default=128, gt=0)
+    sandbox_docker_tmpfs_mb: int = Field(default=64, gt=0)
+
+    @field_validator("sandbox_docker_memory")
+    @classmethod
+    def _validate_docker_memory(cls, value: str) -> str:
+        if not re.fullmatch(r"[1-9]\d*(?:\.\d+)?(?:b|k|m|g|t)?", value.strip().lower()):
+            raise ValueError("sandbox_docker_memory 必须是正的 Docker 内存值，例如 512m")
+        return value
+
+    @field_validator("sandbox_docker_cpus")
+    @classmethod
+    def _validate_docker_cpus(cls, value: str) -> str:
+        try:
+            if float(value) <= 0:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise ValueError("sandbox_docker_cpus 必须是正数") from exc
+        return value
 
     # ---- MCP（M2.5）----
     # 熔断（I7）：单源连续失败达阈值 → OPEN；冷却后 HALF_OPEN 放行一次

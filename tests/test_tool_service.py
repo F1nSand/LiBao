@@ -7,8 +7,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from pydantic import ValidationError
 
-from app.api.schemas.tools import CreateToolRequest
+from app.api.schemas.tools import CreateToolRequest, UpdateToolRequest
 from app.core.errors import AppError
 from app.orchestration.context_builder import acis_for_tools
 from app.services.serializers import serialize_tool_definition
@@ -16,7 +17,8 @@ from app.services.tool import ToolService
 from app.storage.file.store import get_store
 from app.storage.models import User
 from app.tools.builtin import register_builtin_tools
-from app.tools.registry import get, set_enabled
+from app.tools.registry import ToolSpec, get, register, set_enabled, unregister
+from app.tools.sandbox import SandboxCommand, SandboxLevel
 
 
 @pytest.fixture
@@ -114,3 +116,52 @@ async def test_search_excludes_meta_tools(tool_fixture):
         names = {h["name"] for h in hits}
         assert "kb_search" not in names  # meta 工具排除
         assert "kb_query_regular" in names  # 常规工具保留
+
+
+@pytest.mark.parametrize("sandbox", ["none", "docker", "microvm"])
+def test_tool_request_accepts_supported_sandbox_levels(sandbox):
+    assert CreateToolRequest(name="x", sandbox=sandbox).sandbox is SandboxLevel(sandbox)
+    assert UpdateToolRequest(sandbox=sandbox).sandbox is SandboxLevel(sandbox)
+
+
+def test_tool_request_rejects_unknown_sandbox_level():
+    with pytest.raises(ValidationError):
+        CreateToolRequest(name="x", sandbox="host")
+    with pytest.raises(ValidationError):
+        UpdateToolRequest(sandbox="host")
+
+
+@pytest.mark.parametrize("field", ["timeout_ms", "max_concurrency"])
+def test_tool_request_rejects_non_positive_limits(field):
+    with pytest.raises(ValidationError):
+        CreateToolRequest(name="x", **{field: 0})
+    with pytest.raises(ValidationError):
+        UpdateToolRequest(**{field: 0})
+
+
+async def test_sync_converts_persisted_sandbox_string_to_level(tool_fixture):
+    name = f"docker_sync_{uuid.uuid4().hex[:8]}"
+
+    async def build_command(**kwargs):
+        return SandboxCommand(argv=("bash", "-lc", "true"))
+
+    register(
+        ToolSpec(
+            id=f"tl_{name}",
+            name=name,
+            description="docker sync",
+            sandbox=SandboxLevel.DOCKER,
+            sandbox_command_builder=build_command,
+            enabled=False,
+            handler=lambda: None,
+            builtin=True,
+        )
+    )
+    try:
+        async with get_store().session() as session:
+            await ToolService().create(session, tool_fixture, CreateToolRequest(name=name, sandbox="docker"))
+        assert get(f"tl_{name}").sandbox is SandboxLevel.DOCKER
+        await ToolService().sync_registry_from_file()
+        assert get(f"tl_{name}").sandbox is SandboxLevel.DOCKER
+    finally:
+        unregister(f"tl_{name}")
