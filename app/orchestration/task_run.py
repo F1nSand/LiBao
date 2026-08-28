@@ -15,7 +15,8 @@ from typing import Any
 
 from langgraph.types import Command
 
-from app.orchestration.stream_core import build_initial_state, stream_graph_events
+from app.orchestration.multimodal_input import PreparedImageInput, image_config, prepare_image_input
+from app.orchestration.stream_core import build_initial_state, resolve_effective_model, stream_graph_events
 from app.services.notification import maybe_notify_from_tool_results
 from app.services.task import TaskService, push_event
 from app.services.tool import ToolService
@@ -51,7 +52,14 @@ async def _extract_memory_after_task(
 
 
 async def _run_graph_common(
-    *, graph, task_id: uuid.UUID, initial: Any, trace_id: str, model_override: Any = None
+    *,
+    graph,
+    task_id: uuid.UUID,
+    initial: Any,
+    trace_id: str,
+    model_override: Any = None,
+    image_context: PreparedImageInput | None = None,
+    force_image_context: bool = False,
 ) -> None:
     """共享执行体：跑图 + 中断落自身行 + 终态迁移 + live-tail 事件。"""
     async with get_store().session() as db:
@@ -66,6 +74,7 @@ async def _run_graph_common(
         graph_config: dict[str, Any] = {"configurable": {"thread_id": thread_id, "trace_id": trace_id}}
         if model_override is not None:
             graph_config["configurable"]["model"] = model_override
+        graph_config["configurable"].update(image_config(image_context, force_context=force_image_context))
 
         async def on_interrupt(value: dict[str, Any]) -> None:
             updated = await repo.get_by_id(task_id)
@@ -190,18 +199,32 @@ async def run_task_graph(
             await TaskService().set_running(db, task)
             user_id = str(task.user_id) if task.user_id else None
             enabled_tool_ids = await ToolService().enabled_tool_ids(db, agent.org_id)
-        await _run_graph_common(
-            graph=graph,
-            task_id=task_id,
-            # task 路径暂不接收附件；接法同 chat_stream_events（读盘+b64 → _graph_config configurable + image_refs）
-            initial=build_initial_state(
+            task_input = task.input if isinstance(task.input, dict) else {}
+            attachment_ids = task_input.get("attachment_ids", [])
+            if not isinstance(attachment_ids, list):
+                attachment_ids = []
+            prepared_images = await prepare_image_input(
+                db,
+                user_id=task.user_id,
+                attachment_ids=[str(attachment_id) for attachment_id in attachment_ids],
+                effective_model=resolve_effective_model(agent),
+            )
+            initial = build_initial_state(
                 agent,
                 _task_input_text(task.input),
                 user_id=user_id,
                 enabled_tool_ids=enabled_tool_ids,
-            ),
+                image_refs=list(prepared_images.image_refs) or None,
+                image_candidate_count=prepared_images.candidate_count,
+                image_omitted_count=prepared_images.omitted_count,
+            )
+        await _run_graph_common(
+            graph=graph,
+            task_id=task_id,
+            initial=initial,
             trace_id=trace_id,
             model_override=model_override,
+            image_context=prepared_images,
         )
     except Exception as exc:  # noqa: BLE001
         await _mark_failed(task_id, exc, "task %s failed")
@@ -227,6 +250,7 @@ async def resume_task_graph(
             initial=Command(resume={"approved": True}),
             trace_id=trace_id,
             model_override=model_override,
+            force_image_context=True,
         )
     except Exception as exc:  # noqa: BLE001
         await _mark_failed(task_id, exc, "resume task %s failed")

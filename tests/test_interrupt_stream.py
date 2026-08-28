@@ -11,8 +11,10 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 
+from app.core.config import get_settings
 from app.orchestration.chat_stream import chat_stream_events, resume_stream_events
 from app.orchestration.graph import build_graph
+from app.services.attachment import AttachmentService
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Conversation, User
 from app.storage.repositories.message import MessageRepository
@@ -23,11 +25,13 @@ from app.tools.registry import ToolSpec, register, unregister
 class FakeChatModel:
     def __init__(self) -> None:
         self._n = 0
+        self.seen: list[list] = []
 
     def bind_tools(self, tools, **kwargs):
         return self
 
     async def ainvoke(self, messages):
+        self.seen.append([message.model_copy(deep=True) for message in messages])
         if self._n == 0:
             self._n = 1
             return AIMessage(
@@ -188,3 +192,55 @@ async def test_resume_denied_cancelled(interrupt_fixture):
         assert [m.role for m in msgs] == ["user", "assistant", "assistant"]
         assert msgs[1].round == 1 and msgs[1].tool_calls[0]["status"] == "cancelled"
         assert msgs[2].tool_calls == []
+
+
+async def test_resume_does_not_read_or_replay_images(interrupt_fixture, monkeypatch):
+    """中断恢复显式清空图片上下文：不重读文件，历史 ref 降级为文本。"""
+    user, agent, conv = interrupt_fixture
+    agent.model = "gpt-4o"
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", None)
+    async with get_store().session() as session:
+        att = await AttachmentService().save_upload(session, user, "resume.png", "image/png", b"resume-image")
+        attachment_id = str(att.id)
+
+    graph = build_graph(checkpointer=MemorySaver())
+    fake = FakeChatModel()
+    async with get_store().session() as session:
+        frames = []
+        async for frame in chat_stream_events(
+            db=session,
+            graph=graph,
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="中断后继续看图",
+            attachments=[attachment_id],
+            trace_id="trace-resume-image",
+            model_override=fake,
+        ):
+            frames.append(frame)
+        events = _frames_to_events(frames)
+        task_id = uuid.UUID(next(e for e in events if e["type"] == "interrupt")["payload"]["task_id"])
+
+    async def fail_read(_service, _attachment):
+        raise AssertionError("resume must not re-read attachments")
+
+    monkeypatch.setattr(AttachmentService, "read_file", fail_read)
+    async with get_store().session() as session:
+        task = await TaskRepository(session).get_by_id(task_id)
+        frames = []
+        async for frame in resume_stream_events(
+            db=session,
+            graph=graph,
+            task=task,
+            user=user,
+            approved=True,
+            trace_id="trace-resume-image-2",
+            model_override=fake,
+        ):
+            frames.append(frame)
+        events = _frames_to_events(frames)
+    assert events[-1]["type"] == "done"
+    resumed_human = next(message for message in fake.seen[1] if message.type == "human")
+    assert all(block.get("type") != "image" for block in resumed_human.content)
+    assert "图片已省略" in str(resumed_human.content)

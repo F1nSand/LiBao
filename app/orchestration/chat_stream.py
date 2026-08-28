@@ -81,6 +81,7 @@ def _graph_config(
     current_image_ids: set[str] | None = None,
     vision: bool = False,
     image_context: PreparedImageInput | None = None,
+    force_image_context: bool = False,
 ) -> dict[str, Any]:
     cfg: dict[str, Any] = {
         "configurable": {
@@ -93,7 +94,9 @@ def _graph_config(
         cfg["configurable"]["model"] = model_override
     # 多模态：图片 b64 载荷只进 configurable（不落 checkpoint）。新路径使用共享准备结果；
     # 保留旧参数以兼容测试和少量内部调用。
-    if image_context is not None:
+    if force_image_context:
+        cfg["configurable"].update(image_config(None, force_context=True))
+    elif image_context is not None:
         cfg["configurable"].update(image_config(image_context))
     elif image_payload:
         cfg["configurable"]["image_payload"] = image_payload
@@ -321,6 +324,7 @@ async def resume_stream_events(
         model_override=model_override,
         # resume 续跑：中断轮的图片 b64 载荷已不在进程（configurable 不落盘）→ 不传 payload，
         # 历史 ref 自然降级文本标记；中断轮图片不参与续跑属可接受退化（计划文档记录）
+        force_image_context=True,
     )
 
     async def on_interrupt(value: dict[str, Any]) -> str:

@@ -17,9 +17,12 @@ from app.api.main import create_app
 from app.api.routers.tasks import _task_event_stream
 from app.api.schemas.chat import CONTENT_LIMIT
 from app.api.schemas.tasks import SubmitTaskRequest
+from app.core.config import get_settings
 from app.core.errors import AppError
+from app.orchestration.checkpointer import JsonFileSaver
 from app.orchestration.graph import build_graph
 from app.orchestration.task_run import run_task_graph
+from app.services.attachment import AttachmentService
 from app.services.task import TaskService
 from app.storage.constants import ADMIN_USER, DEFAULT_ORG_ID
 from app.storage.file.store import get_store
@@ -42,6 +45,19 @@ class FakeChatModel:
                 content="", tool_calls=[{"name": "time_now", "args": {}, "id": "call_1", "type": "tool_call"}]
             )
         return AIMessage(content="任务执行完成。")
+
+
+class CapturingTaskModel:
+    def __init__(self, content: str = "任务图片处理完成。") -> None:
+        self.content = content
+        self.seen: list[list] = []
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    async def ainvoke(self, messages):
+        self.seen.append([message.model_copy(deep=True) for message in messages])
+        return AIMessage(content=self.content)
 
 
 @pytest.fixture
@@ -87,6 +103,106 @@ async def test_submit_and_run_to_done(tasks_fixture):
         assert task2.output and task2.output.get("content") == "任务执行完成。"
         n = len(await RunLogRepository().list_by_trace_id("trace-t"))
         assert n > 0  # run_logs 带 trace_id（文件化后按 trace_id 扫描）
+
+
+async def _submit_task_with_image(tasks_fixture, content: str = "描述任务图片"):
+    user, agent = tasks_fixture
+    async with get_store().session() as session:
+        attachment = await AttachmentService().save_upload(
+            session, user, "task.png", "image/png", b"task-image-" + uuid.uuid4().bytes
+        )
+        task = await TaskService().submit(
+            session, user, agent.id, {"message": content, "attachment_ids": [str(attachment.id)]}
+        )
+        return user, agent, task.id, str(attachment.id), attachment.storage_path
+
+
+async def test_task_vision_hydrates_image_and_checkpoint_contains_no_base64(tasks_fixture, tmp_path, monkeypatch):
+    user, agent, task_id, attachment_id, _ = await _submit_task_with_image(tasks_fixture)
+    agent.model = "gpt-4o"
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", None)
+    model = CapturingTaskModel()
+    checkpoint_root = tmp_path / "checkpoints"
+    await run_task_graph(
+        graph=build_graph(checkpointer=JsonFileSaver(checkpoint_root)),
+        task_id=task_id,
+        trace_id="trace-task-vision",
+        model_override=model,
+    )
+
+    human = next(message for message in model.seen[0] if message.type == "human")
+    image = next(block for block in human.content if block.get("type") == "image")
+    assert image["source_type"] == "base64" and image["mime_type"] == "image/png"
+    sentinel = image["data"]
+    async with get_store().session() as session:
+        task = await TaskRepository(session).get_by_id(task_id)
+        assert task.status == "done"
+        assert sentinel not in task.to_dict().__repr__()
+    assert all(sentinel not in path.read_text(encoding="utf-8") for path in checkpoint_root.glob("*.json"))
+    assert attachment_id in task.input["attachment_ids"]
+
+
+async def test_task_non_vision_does_not_read_attachment(tasks_fixture, monkeypatch):
+    user, agent, task_id, _, _ = await _submit_task_with_image(tasks_fixture)
+    agent.model = "deepseek-chat"
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", None)
+    reads = 0
+
+    async def fail_read(_service, _attachment):
+        nonlocal reads
+        reads += 1
+        raise AssertionError("non-vision task must not read image files")
+
+    monkeypatch.setattr(AttachmentService, "read_file", fail_read)
+    model = CapturingTaskModel()
+    await run_task_graph(graph=build_graph(), task_id=task_id, trace_id="trace-task-text", model_override=model)
+    human = next(message for message in model.seen[0] if message.type == "human")
+    assert isinstance(human.content, str)
+    assert "1 张图片" in human.content and "deepseek-chat" in human.content
+    assert reads == 0
+
+
+async def test_task_missing_file_degrades_and_completes(tasks_fixture, monkeypatch):
+    user, agent, task_id, _, _ = await _submit_task_with_image(tasks_fixture)
+    agent.model = "gpt-4o"
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", None)
+
+    async def fail_read(_service, _attachment):
+        raise OSError("file removed after submit")
+
+    monkeypatch.setattr(AttachmentService, "read_file", fail_read)
+    model = CapturingTaskModel()
+    await run_task_graph(graph=build_graph(), task_id=task_id, trace_id="trace-task-missing", model_override=model)
+    human = next(message for message in model.seen[0] if message.type == "human")
+    assert isinstance(human.content, str)
+    assert "1 张图片未能送达" in human.content
+    async with get_store().session() as session:
+        task = await TaskRepository(session).get_by_id(task_id)
+        assert task.status == "done"
+
+
+async def test_task_image_budget_keeps_order_and_reports_omitted_count(tasks_fixture, monkeypatch):
+    user, agent = tasks_fixture
+    agent.model = "gpt-4o"
+    monkeypatch.setattr(get_settings(), "llm_vision_declared", None)
+    monkeypatch.setattr(get_settings(), "image_total_budget_mb", 1)
+    async with get_store().session() as session:
+        first = await AttachmentService().save_upload(session, user, "first.png", "image/png", b"first")
+        second = await AttachmentService().save_upload(
+            session, user, "second.png", "image/png", b"second" * (400 * 1024)
+        )
+        task = await TaskService().submit(
+            session,
+            user,
+            agent.id,
+            {"message": "按顺序处理", "attachment_ids": [str(first.id), str(second.id)]},
+        )
+    model = CapturingTaskModel()
+    await run_task_graph(graph=build_graph(), task_id=task.id, trace_id="trace-task-budget", model_override=model)
+    human = next(message for message in model.seen[0] if message.type == "human")
+    assert [block["data"] for block in human.content if block.get("type") == "image"]
+    text = next(block["text"] for block in human.content if block.get("type") == "text")
+    assert "1 张图片未能送达" in text
 
 
 async def test_cancel_done_returns_40902(tasks_fixture):

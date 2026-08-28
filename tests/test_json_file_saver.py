@@ -119,3 +119,18 @@ async def test_delete_thread(tmp_path):
     saver.put(config, _checkpoint("c1"), {}, {})
     saver.delete_thread("t6")
     assert await saver.aget_tuple(config) is None
+
+
+async def test_configurable_image_payload_is_not_serialized(tmp_path):
+    """图片 payload 只属于运行时 configurable，不得进入 checkpoint 文件。"""
+    saver = _saver(tmp_path)
+    secret = "task-image-base64-sentinel"
+    config = {
+        "configurable": {
+            "thread_id": "t-image",
+            "image_payload": {"att-1": {"data_b64": secret}},
+            "current_image_ids": {"att-1"},
+        }
+    }
+    saver.put(config, _checkpoint("c1"), {}, {})
+    assert secret not in saver._path(config).read_text(encoding="utf-8")
