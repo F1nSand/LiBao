@@ -43,6 +43,24 @@ cd ../FrontEnd && VITE_USE_MOCK=false npm run dev            # http://localhost:
 
 测试：`uv run pytest tests/`（工具/编排/SSE 序列单测 + 需 DB 的集成测试，DB 不可达自动跳过）。
 
+### Task 附件与 Docker bash 沙箱
+
+Task 的 `input` 保持开放结构；可选字段示例：
+
+```json
+{"input":{"message":"描述这些图片","attachment_ids":["<attachment-uuid>"]},"params":{}}
+```
+
+`attachment_ids` 必须属于当前用户且为 UUID，否则提交返回 `40403`；非图片附件仍可随任务保存，但本轮只有图片可能作为模型输入。视觉模型会按请求顺序读取图片并受单轮预算限制；非视觉模型不读图片，只收到忽略说明。interrupt 后 resume 不重读、不重放图片，而是把历史图片引用降级为 `[图片已省略…]` 文本。
+
+`tl_bash` 是当前唯一使用 Docker 沙箱的工具。先构建固定版本镜像：
+
+```bash
+docker build -t libao-sandbox:py312-v1 -f docker/sandbox/Dockerfile docker/sandbox
+```
+
+运行时固定 `--network none`，只挂载当前工作区到容器 `/workspace`，使用只读根文件系统、无特权用户 `65532:65532`、`512m` 内存、`1` CPU、`128` PIDs 和 `64m` `/tmp` tmpfs。Docker daemon 不可用或镜像缺失时返回稳定工具错误，不自动 pull，也不会回退到宿主机 shell；超时、取消和非零退出同样不会留下沙箱容器。配置项见 `.env.example`。
+
 ## 架构（docs 00 五层单向依赖）
 
 ```
@@ -93,7 +111,7 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 | **Cross-Encoder 重排序** | rerank_score 恒 null | `storage/repositories/kb.py::hybrid_search` |
 | **对话自动记忆提取** | 仅手动卡片 + maintenance；context_update 自动提取未做 | `orchestration/nodes/context_update.py` |
 | **PDF/Office 文本提取** | 仅 metadata（reason 标注） | `services/attachment.py`；引入 pypdf 即可 |
-| **Docker 沙盒** | executor 对 `sandbox != none` 返回"暂未实现" | `tools/sandbox.py`（SandboxLevel 已备） |
+| **Docker 沙盒** ✅ | 仅 `tl_bash` 走一次性锁定容器：network none、仅挂载 `/workspace`、无自动 pull/宿主回退 | `tools/sandbox.py` + `docker/sandbox/Dockerfile` |
 | **MCP 会话复用** ✅ M4 完整版 | owner-task 池（连接 cancel scope 常驻 owner 任务，规避跨请求复用报错）+ 请求队列串行；stdio 免每次起子进程 | `tools/mcp_manager.py` |
 | **MCP 资源/提示原语** | 只映射工具（E2） | 资源→RAG 数据源、提示→Skill 库（M6） |
 | **幂等持久化** | 进程内缓存（TTL 1h/1024 条），重启丢失 | `tools/executor.py` `_idem_cache` → M4 换 Redis |

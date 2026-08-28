@@ -1,6 +1,6 @@
 """沙箱运行契约（docs 01 §7.3 D1）。
 
-命令只携带容器内部路径；实际 Docker 进程边界由后续 runner 负责。NONE 保持宿主执行，
+命令只携带容器内部路径；DOCKER 由本模块的一次性 runner 执行，NONE 保持宿主执行，
 DOCKER/MICROVM 的级别可被配置和持久化，其中 MICROVM 暂不提供执行实现。
 """
 

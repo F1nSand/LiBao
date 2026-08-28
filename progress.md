@@ -1,3 +1,18 @@
+# 进度账本 — plan: docs/plans/2026-08-28-task-api-docker-sandbox-task-multimodal.md
+
+执行状态：
+
+- Task 1: complete (commit 3784d3e, tests `.\\.venv\\Scripts\\pytest.exe tests/test_tasks_api.py tests/test_cancel_inflight.py tests/test_placeholder_timeout.py -q` → PASS, 14 passed; ruff → PASS)
+- Task 2: complete (commit b1b449b, tests `.\\.venv\\Scripts\\pytest.exe tests/test_docker_sandbox.py tests/test_tool_service.py tests/test_tools.py -q` → PASS, 29 passed; ruff → PASS)
+- Task 3: complete (commit 5bd1b42, tests `.\\.venv\\Scripts\\pytest.exe tests/test_docker_sandbox.py tests/test_tool_service.py tests/test_tools.py -q` → PASS, 38 passed; ruff → PASS; Docker integration not run)
+- Task 4: complete (commit 0478ecb, tests `.\\.venv\\Scripts\\pytest.exe tests/test_executor_retry_idempotency.py tests/test_file_ops.py tests/test_graph_interrupt.py tests/test_seed_local.py tests/test_docker_sandbox.py -q` → PASS, 105 passed; ruff → PASS; Docker smoke not run)
+- Task 5: complete (commit ce90f92, tests `.\\.venv\\Scripts\\pytest.exe tests/test_tasks_api.py tests/test_attachments_api.py -q` → PASS, 25 passed/2 warnings; ruff → PASS)
+- Task 6: complete (commit d0141c9, tests `.\\.venv\\Scripts\\pytest.exe tests/test_multimodal.py tests/test_chat_attachments.py tests/test_chat_stream.py -q` → PASS, 36 passed/7 warnings; ruff → PASS)
+- Task 7: complete (commit b86a174, tests `.\\.venv\\Scripts\\pytest.exe tests/test_tasks_api.py tests/test_interrupt_stream.py tests/test_json_file_saver.py tests/test_chat_attachments.py tests/test_multimodal.py -q` → PASS, 60 passed/33 warnings; ruff → PASS)
+- Task 8: complete (docs README/.env.example; final tests `.\\.venv\\Scripts\\pytest.exe tests/ -q` → PASS, 580 passed/2 skipped/68 warnings; `.\\.venv\\Scripts\\ruff.exe check .` → PASS; Docker smoke not run: Docker CLI unavailable; review found and fixed sandbox enum sync in commit e9ac5d6; built-in `/verify`/`/code-review`/`/simplify` unavailable, equivalent local gates completed)
+
+---
+
 # 进度账本 — plan: docs/plans/2026-08-27-chat-error-checkpoint-recovery.md
 
 - Task 1: complete (commits pending final archive, tests 2 checkpoint regressions → PASS)
