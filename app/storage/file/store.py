@@ -107,11 +107,8 @@ class FileStore:
     # ---- 上下文 ----
 
     @asynccontextmanager
-    async def session(self, sessionmaker: Any = None) -> AsyncIterator[FileContext]:
-        """请求级文件上下文（sessionmaker 参数为历史兼容，忽略）。
-
-        用法：`async with get_store().session() as db: ...`。
-        """
+    async def session(self) -> AsyncIterator[FileContext]:
+        """请求级文件上下文。用法：`async with get_store().session() as db: ...`。"""
         yield FileContext(self)
 
 

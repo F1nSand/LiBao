@@ -86,7 +86,6 @@ async def submit_task(
     # 本地单机化：直接进程内跑图（spawn_run 注册进 _RUNNING，可取消）
     spawn_run(
         graph=request.app.state.graph,
-        sessionmaker=request.app.state.sessionmaker,
         task_id=task.id,
         trace_id=get_trace_id(),
     )
@@ -172,7 +171,6 @@ async def resume_task(
     # JSON 轨：后台续跑（TaskDetail 非流式）；进程内 spawn_run（注册进 _RUNNING 可取消）
     spawn_run(
         graph=graph,
-        sessionmaker=request.app.state.sessionmaker,
         task_id=task.id,
         approved=approved,
         trace_id=trace_id,

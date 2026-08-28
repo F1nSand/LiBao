@@ -27,7 +27,6 @@ def running_task(task_id: str) -> asyncio.Task | None:
 def spawn_run(
     *,
     graph: Any,
-    sessionmaker: Any,
     task_id: uuid.UUID,
     trace_id: str,
     approved: bool | None = None,
@@ -44,12 +43,12 @@ def spawn_run(
         try:
             if approved is not None:
                 await resume_task_graph(
-                    graph=graph, sessionmaker=sessionmaker, task_id=task_id,
+                    graph=graph, task_id=task_id,
                     approved=approved, trace_id=trace_id, model_override=model_override,
                 )
             else:
                 await run_task_graph(
-                    graph=graph, sessionmaker=sessionmaker, task_id=task_id,
+                    graph=graph, task_id=task_id,
                     trace_id=trace_id, model_override=model_override,
                 )
         finally:

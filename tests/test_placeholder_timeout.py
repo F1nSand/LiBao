@@ -135,7 +135,7 @@ async def test_task_writes_placeholder_events():
         set_dispatch_ctx({"thread_key": str(task_id)})
         try:
             await run_task_graph(
-                graph=graph, sessionmaker=None, task_id=task_id,
+                graph=graph, task_id=task_id,
                 trace_id="trace-pl", model_override=FakeModel(),
             )
         finally:
@@ -149,4 +149,3 @@ async def test_task_writes_placeholder_events():
             assert t.placeholder_events[0]["job_ref"].startswith("job_")
     finally:
         pass
-        

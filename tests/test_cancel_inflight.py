@@ -53,7 +53,7 @@ async def test_cancel_inflight_interrupts_graph(cancel_fixture):
         task_id = task.id
 
     graph = build_graph()
-    fut = spawn_run(graph=graph, sessionmaker=None, task_id=task_id, trace_id="trace-c")
+    fut = spawn_run(graph=graph, task_id=task_id, trace_id="trace-c")
     await asyncio.sleep(0.3)  # 等注册进 _RUNNING 并挂起在慢 LLM 调用中
     assert running_task(str(task_id)) is fut, "任务未注册进 _RUNNING"
 
@@ -77,13 +77,13 @@ async def test_cancel_after_then_next_task_runs(cancel_fixture):
             ids.append(str(t.id))
 
     graph = build_graph()
-    fut1 = spawn_run(graph=graph, sessionmaker=None, task_id=uuid.UUID(ids[0]), trace_id="t1")
+    fut1 = spawn_run(graph=graph, task_id=uuid.UUID(ids[0]), trace_id="t1")
     await asyncio.sleep(0.3)
     fut1.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await fut1
 
-    fut2 = spawn_run(graph=graph, sessionmaker=None, task_id=uuid.UUID(ids[1]), trace_id="t2")
+    fut2 = spawn_run(graph=graph, task_id=uuid.UUID(ids[1]), trace_id="t2")
     await asyncio.sleep(0.3)
     assert running_task(ids[1]) is fut2, "取消后第二个任务未正常注册"
     assert running_task(ids[0]) is None, "已取消任务未从注册表清理"

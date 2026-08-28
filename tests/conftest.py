@@ -18,7 +18,7 @@ from app.tools.registry import all_tools, unregister
 async def _filestore(tmp_path):
     """文件存储隔离：每个测试独立临时目录（本地单机化）。
 
-    sql_sessionmaker 由各测试 fixture（init_db 后）自行注入；集成测试经 lifespan 注入。
+    每个测试使用独立的临时 FileStore。
     """
     from app.storage.file.store import FileStore, set_store
 

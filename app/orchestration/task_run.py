@@ -51,10 +51,10 @@ async def _extract_memory_after_task(
 
 
 async def _run_graph_common(
-    *, graph, sessionmaker, task_id: uuid.UUID, initial: Any, trace_id: str, model_override: Any = None
+    *, graph, task_id: uuid.UUID, initial: Any, trace_id: str, model_override: Any = None
 ) -> None:
     """共享执行体：跑图 + 中断落自身行 + 终态迁移 + live-tail 事件。"""
-    async with get_store().session(sessionmaker) as db:
+    async with get_store().session() as db:
         repo = TaskRepository(db)
         task = await repo.get_by_id(task_id)
         if task is None:
@@ -156,10 +156,10 @@ async def _run_graph_common(
             pass
 
 
-async def _mark_failed(sessionmaker: Any, task_id: uuid.UUID, exc: Exception, log_msg: str) -> None:
+async def _mark_failed(task_id: uuid.UUID, exc: Exception, log_msg: str) -> None:
     """后台任务异常兜底：置 failed + 推 error（Simpl：收敛 run/resume 两处重复）。"""
     logger.exception(log_msg, task_id)
-    async with get_store().session(sessionmaker) as db:
+    async with get_store().session() as db:
         task = await TaskRepository(db).get_by_id(task_id)
         if task is not None:
             await TaskService().set_failed(db, task, str(exc))
@@ -167,11 +167,11 @@ async def _mark_failed(sessionmaker: Any, task_id: uuid.UUID, exc: Exception, lo
 
 
 async def run_task_graph(
-    *, graph: Any, sessionmaker: Any, task_id: uuid.UUID, trace_id: str, model_override: Any = None
+    *, graph: Any, task_id: uuid.UUID, trace_id: str, model_override: Any = None
 ) -> None:
     """POST /tasks 提交后的后台执行。"""
     try:
-        async with get_store().session(sessionmaker) as db:
+        async with get_store().session() as db:
             task = await TaskRepository(db).get_by_id(task_id)
             if task is None:
                 return
@@ -192,7 +192,6 @@ async def run_task_graph(
             enabled_tool_ids = await ToolService().enabled_tool_ids(db, agent.org_id)
         await _run_graph_common(
             graph=graph,
-            sessionmaker=sessionmaker,
             task_id=task_id,
             # task 路径暂不接收附件；接法同 chat_stream_events（读盘+b64 → _graph_config configurable + image_refs）
             initial=build_initial_state(
@@ -205,15 +204,15 @@ async def run_task_graph(
             model_override=model_override,
         )
     except Exception as exc:  # noqa: BLE001
-        await _mark_failed(sessionmaker, task_id, exc, "task %s failed")
+        await _mark_failed(task_id, exc, "task %s failed")
 
 
 async def resume_task_graph(
-    *, graph: Any, sessionmaker: Any, task_id: uuid.UUID, approved: bool, trace_id: str, model_override: Any = None
+    *, graph: Any, task_id: uuid.UUID, approved: bool, trace_id: str, model_override: Any = None
 ) -> None:
     """任务 JSON 轨 resume：approved → 后台续跑图；denied → 直接置 cancelled。"""
     try:
-        async with get_store().session(sessionmaker) as db:
+        async with get_store().session() as db:
             task = await TaskRepository(db).get_by_id(task_id)
             if task is None:
                 return
@@ -224,11 +223,10 @@ async def resume_task_graph(
             await TaskService().set_running(db, task)
         await _run_graph_common(
             graph=graph,
-            sessionmaker=sessionmaker,
             task_id=task_id,
             initial=Command(resume={"approved": True}),
             trace_id=trace_id,
             model_override=model_override,
         )
     except Exception as exc:  # noqa: BLE001
-        await _mark_failed(sessionmaker, task_id, exc, "resume task %s failed")
+        await _mark_failed(task_id, exc, "resume task %s failed")

@@ -6,15 +6,19 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessage
 
+from app.api.main import create_app
 from app.api.routers.tasks import _task_event_stream
 from app.core.errors import AppError
 from app.orchestration.graph import build_graph
 from app.orchestration.task_run import run_task_graph
 from app.services.task import TaskService
+from app.storage.constants import ADMIN_USER, DEFAULT_ORG_ID
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, User
 from app.storage.repositories.run_log import RunLogRepository
@@ -71,7 +75,7 @@ async def test_submit_and_run_to_done(tasks_fixture):
         assert task.status == "pending"
 
     await run_task_graph(
-        graph=graph, sessionmaker=None, task_id=task_id, trace_id="trace-t", model_override=FakeChatModel()
+        graph=graph, task_id=task_id, trace_id="trace-t", model_override=FakeChatModel()
     )
 
     async with get_store().session() as session:
@@ -144,3 +148,136 @@ async def test_events_replay_done(tasks_fixture):
         event = json.loads(data)
         assert event["type"] == "done"
         assert event["payload"]["message"]["content"] == "完成"
+
+
+async def _http_task_app(graph):
+    app = create_app()
+    app.state.graph = graph
+    assert not hasattr(app.state, "sessionmaker")
+    return app
+
+
+async def _create_default_route_agent():
+    uid = uuid.uuid4().hex[:8]
+    async with get_store().session() as session:
+        agent = AgentConfig(
+            org_id=DEFAULT_ORG_ID,
+            name=f"路由测试助手_{uid}",
+            model="fake",
+            system_prompt="你是路由测试助手。",
+            tools=[],
+            max_steps=5,
+            status="published",
+            is_default=True,
+        )
+        session.add(agent)
+        await session.commit()
+    return agent
+
+
+class _ResumeGraph:
+    async def aget_state(self, config):
+        return SimpleNamespace(values={"messages": []}, next=("agent_execute",))
+
+
+async def test_post_tasks_spawns_run_without_sessionmaker_app_state(monkeypatch):
+    """真实 POST 路由只依赖 graph，不应读取已删除的数据库工厂状态。"""
+    await _create_default_route_agent()
+    graph = object()
+    captured = []
+
+    def fake_spawn_run(**kwargs):
+        captured.append(kwargs)
+        return None
+
+    monkeypatch.setattr("app.api.routers.tasks.spawn_run", fake_spawn_run)
+    app = await _http_task_app(graph)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/tasks",
+            headers={"X-Trace-ID": "route-submit-trace"},
+            json={"input": {"message": "hello"}},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    task_id = uuid.UUID(body["data"]["task_id"])
+    assert captured == [{"graph": graph, "task_id": task_id, "trace_id": "route-submit-trace"}]
+    async with get_store().session() as session:
+        task = await TaskRepository(session).get_by_id(task_id)
+        assert task is not None
+        assert task.user_id == ADMIN_USER.id
+        assert task.input == {"message": "hello"}
+
+
+async def test_json_resume_spawns_run_without_sessionmaker_app_state(monkeypatch):
+    agent = await _create_default_route_agent()
+    async with get_store().session() as session:
+        task = await TaskService().create_waiting_confirm(
+            session,
+            user=ADMIN_USER,
+            agent_id=agent.id,
+            input={"message": "resume me"},
+            value={"node_id": "tool_execute"},
+            thread_id="route-resume-thread",
+        )
+        task_id = task.id
+
+    graph = _ResumeGraph()
+    captured = []
+
+    def fake_spawn_run(**kwargs):
+        captured.append(kwargs)
+        return None
+
+    monkeypatch.setattr("app.api.routers.tasks.spawn_run", fake_spawn_run)
+    app = await _http_task_app(graph)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            f"/api/v1/tasks/{task_id}/resume",
+            headers={"Accept": "application/json", "X-Trace-ID": "route-resume-trace"},
+            json={"confirm": {"approved": True}},
+        )
+
+    assert response.status_code == 200, response.text
+    assert captured == [
+        {"graph": graph, "task_id": task_id, "approved": True, "trace_id": "route-resume-trace"}
+    ]
+
+
+async def test_json_resume_denied_preserves_false_approved(monkeypatch):
+    agent = await _create_default_route_agent()
+    async with get_store().session() as session:
+        task = await TaskService().create_waiting_confirm(
+            session,
+            user=ADMIN_USER,
+            agent_id=agent.id,
+            input={"message": "deny me"},
+            value={"node_id": "tool_execute"},
+            thread_id="route-deny-thread",
+        )
+        task_id = task.id
+
+    graph = _ResumeGraph()
+    captured = []
+
+    def fake_spawn_run(**kwargs):
+        captured.append(kwargs)
+        return None
+
+    monkeypatch.setattr("app.api.routers.tasks.spawn_run", fake_spawn_run)
+    app = await _http_task_app(graph)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            f"/api/v1/tasks/{task_id}/resume",
+            headers={"Accept": "application/json", "X-Trace-ID": "route-deny-trace"},
+            json={"confirm": {"approved": False}},
+        )
+
+    assert response.status_code == 200, response.text
+    assert captured == [
+        {"graph": graph, "task_id": task_id, "approved": False, "trace_id": "route-deny-trace"}
+    ]
