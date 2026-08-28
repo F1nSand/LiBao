@@ -1,22 +1,16 @@
 import { test, expect } from '@playwright/test'
-import { gotoChat } from './helpers'
-
-const routes = ['/workspace', '/kb', '/tools', '/skills', '/memory', '/system', '/settings']
+import { gotoChat, PRIMARY_ROUTES, RESPONSIVE_VIEWPORTS } from './helpers'
 
 test.describe('管理台响应式矩阵', () => {
   test('390/800/1440 三档主路由不产生页面级横向滚动', async ({ page }) => {
     await gotoChat(page)
-    for (const viewport of [
-      { width: 390, height: 844 },
-      { width: 800, height: 900 },
-      { width: 1440, height: 900 },
-    ]) {
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
       await page.setViewportSize(viewport)
-      for (const route of routes) {
+      for (const route of PRIMARY_ROUTES) {
         await page.goto(route)
-        await page.locator('.app-page').waitFor({ state: 'visible', timeout: 15_000 })
+        await page.locator('.app-page, .chat-view').first().waitFor({ state: 'visible', timeout: 15_000 })
         const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
-        expect(scrollWidth, `${route} @ ${viewport.width}px`).toBeLessThanOrEqual(viewport.width)
+        expect(scrollWidth, `${route} @ ${viewport.name} ${viewport.width}px`).toBeLessThanOrEqual(viewport.width)
       }
     }
   })

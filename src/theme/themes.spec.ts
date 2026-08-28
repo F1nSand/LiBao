@@ -60,6 +60,19 @@ describe('themes（主题系统）', () => {
     }
   })
 
+  it('每套主题的侧栏普通文字和激活文字满足深浅背景对比度', () => {
+    for (const theme of THEMES) {
+      expect(
+        contrastRatio(theme.vars['--app-sidebar-text'], theme.vars['--app-sidebar-bg']),
+        `${theme.id} sidebar text 对比度不足`,
+      ).toBeGreaterThanOrEqual(4.5)
+      expect(
+        contrastRatio(theme.vars['--app-sidebar-text-active'], theme.vars['--app-sidebar-bg']),
+        `${theme.id} sidebar active text 对比度不足`,
+      ).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
   it('纯色主题 conv-bg 与 sidebar-bg 不同（一深一浅）', () => {
     for (const t of THEMES.filter((x) => x.type === 'solid')) {
       expect(t.vars['--app-sidebar-conv-bg']).not.toBe(t.vars['--app-sidebar-bg'])

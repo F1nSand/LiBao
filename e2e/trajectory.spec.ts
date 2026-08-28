@@ -32,7 +32,8 @@ test.describe('对话轨迹页', () => {
     let requestCount = 0
     await page.route('**/api/v1/conversations/c_001/trajectory**', async (route) => {
       requestCount += 1
-      await new Promise((resolve) => setTimeout(resolve, 160))
+      // 独立 e2e server 首屏加载可能快于短延迟；保留足够窗口观察初始骨架屏。
+      await new Promise((resolve) => setTimeout(resolve, 1000))
       await route.continue()
     })
 

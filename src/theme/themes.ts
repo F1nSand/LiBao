@@ -180,7 +180,7 @@ const contrastThemes: ThemeDef[] = [
       '--app-sidebar-border': '#ef4444',
       '--app-sidebar-logo-bg': '#b91c1c',
       '--app-sidebar-conv-bg': '#ef4444',
-      '--app-sidebar-text': '#ffe4e6',
+      '--app-sidebar-text': '#ffffff',
       '--app-sidebar-text-active': '#ffffff',
       '--app-sidebar-item-hover': 'rgba(255,255,255,0.12)',
       '--app-sidebar-item-active-bg': 'rgba(255,255,255,0.2)',
