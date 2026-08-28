@@ -19,13 +19,36 @@
 
   /* 主色 */
   --app-primary: #6366f1;
-  --app-primary-dark: #4f52c4;
-  --app-danger: #ef4444;
+  --app-primary-fill: #4f46e5;
+  --app-on-primary: #ffffff;
+  --app-link: #4f46e5;
+  --app-focus-ring: #4f46e5;
+  --app-primary-dark: #4338ca;
+  --app-success: #15803d;
+  --app-warning: #b45309;
+  --app-danger: #dc2626;
+  --app-info: #0369a1;
 
   /* 文本 */
   --app-text-main: #1f2329;
   --app-text-secondary: #5f6b7a;
-  --app-text-muted: #8f9bad;
+  --app-text-tertiary: #667085;
+  --app-text-muted: #667085;
+  --app-text-disabled: #98a2b3;
+
+  /* 间距 / 控件 / 层级 */
+  --app-space-1: 4px;
+  --app-space-2: 8px;
+  --app-space-3: 12px;
+  --app-space-4: 16px;
+  --app-space-5: 20px;
+  --app-space-6: 24px;
+  --app-control-sm: 32px;
+  --app-control-md: 36px;
+  --app-control-touch: 44px;
+  --app-z-dropdown: 1000;
+  --app-z-modal: 2000;
+  --app-z-toast: 3000;
 
   /* 布局 */
   --app-topbar-height: 56px;

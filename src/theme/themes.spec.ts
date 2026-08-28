@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_THEME, THEMES, applyTheme, getStoredTheme, getTheme } from './themes'
 
 describe('themes（主题系统）', () => {
+  function contrastRatio(foreground: string, background: string): number {
+    const channel = (hex: string, offset: number) => parseInt(hex.slice(offset, offset + 2), 16) / 255
+    const luminance = (hex: string) => {
+      const rgb = [channel(hex, 1), channel(hex, 3), channel(hex, 5)].map((value) =>
+        value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4,
+      )
+      return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722
+    }
+    const light = Math.max(luminance(foreground), luminance(background))
+    const dark = Math.min(luminance(foreground), luminance(background))
+    return (light + 0.05) / (dark + 0.05)
+  }
+
   it('9 套主题，id 唯一，默认主题存在', () => {
     expect(THEMES).toHaveLength(9)
     expect(new Set(THEMES.map((t) => t.id)).size).toBe(9)
@@ -13,6 +26,16 @@ describe('themes（主题系统）', () => {
   it('每套主题含必需 CSS 变量', () => {
     const required = [
       '--app-primary',
+      '--app-primary-fill',
+      '--app-on-primary',
+      '--app-link',
+      '--app-focus-ring',
+      '--app-success',
+      '--app-warning',
+      '--app-danger',
+      '--app-info',
+      '--app-text-tertiary',
+      '--app-text-disabled',
       '--el-color-primary',
       '--app-sidebar-bg',
       '--app-sidebar-conv-bg',
@@ -21,6 +44,19 @@ describe('themes（主题系统）', () => {
     ]
     for (const t of THEMES) {
       for (const k of required) expect(t.vars[k], `${t.id} 缺 ${k}`).toBeTruthy()
+    }
+  })
+
+  it('每套主题的操作填充色和链接色满足浅色内容区对比度', () => {
+    for (const theme of THEMES) {
+      expect(
+        contrastRatio(theme.vars['--app-on-primary'], theme.vars['--app-primary-fill']),
+        `${theme.id} primary fill 对比度不足`,
+      ).toBeGreaterThanOrEqual(4.5)
+      expect(
+        contrastRatio(theme.vars['--app-link'], '#ffffff'),
+        `${theme.id} link 对比度不足`,
+      ).toBeGreaterThanOrEqual(4.5)
     }
   })
 
@@ -33,6 +69,10 @@ describe('themes（主题系统）', () => {
   it('applyTheme 写 :root 变量；getStoredTheme 默认靛蓝', () => {
     applyTheme('green')
     expect(document.documentElement.style.getPropertyValue('--app-primary')).toBe('#22c55e')
+    expect(document.documentElement.style.getPropertyValue('--app-primary-fill')).toBeTruthy()
+    expect(document.documentElement.style.getPropertyValue('--el-color-primary')).toBe(
+      document.documentElement.style.getPropertyValue('--app-primary-fill'),
+    )
     expect(getStoredTheme()).toBe(DEFAULT_THEME)
   })
 })

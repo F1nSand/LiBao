@@ -20,6 +20,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--app-focus-ring);
+  outline-offset: 2px;
+}
+
+:where(button, a, input, textarea, select):disabled {
+  cursor: not-allowed;
+}
+
 /* 滚动条 */
 ::-webkit-scrollbar {
   width: 8px;
@@ -38,7 +47,7 @@ body {
 
 /* 内容页统一容器 */
 .app-page {
-  padding: 20px;
+  padding: var(--app-space-5);
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -56,6 +65,18 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+}
+
+@media (max-width: 768px) {
+  .app-page {
+    padding: var(--app-space-4);
+  }
+}
+
+@media (max-width: 480px) {
+  .app-page {
+    padding: var(--app-space-3);
+  }
 }
 
 .app-page-title {

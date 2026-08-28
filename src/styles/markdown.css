@@ -99,7 +99,7 @@
 }
 
 .markdown-body a {
-  color: var(--app-primary);
+  color: var(--app-link);
   text-decoration: none;
 }
 .markdown-body a:hover {
@@ -152,6 +152,6 @@
   cursor: pointer;
 }
 .markdown-body .copy-btn:hover {
-  color: var(--app-primary);
-  border-color: var(--app-primary);
+  color: var(--app-link);
+  border-color: var(--app-link);
 }
