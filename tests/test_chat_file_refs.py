@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from app.api.schemas.chat import ChatMessageInput
 from app.core.errors import AppError
 from app.services.serializers import serialize_message
-from app.services.workspace import resolve_file_ref_path
+from app.services.workspace import read_file_ref_bytes, resolve_file_ref_path
 from app.storage.file.store import get_store
 from app.storage.models import Conversation, User
 from app.storage.repositories.message import MessageRepository
@@ -42,6 +42,23 @@ def test_file_ref_path_rejects_absolute_traversal_and_non_files(tmp_path: Path):
         with pytest.raises(AppError) as exc:
             resolve_file_ref_path(root, path)
         assert exc.value.code == 40015
+
+
+def test_file_ref_read_revalidates_before_open(tmp_path: Path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = root / "notes.txt"
+    target.write_bytes(b"nonce")
+    assert read_file_ref_bytes(root, "notes.txt") == b"nonce"
+
+    link = root / "outside.txt"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("当前平台不允许创建测试符号链接")
+    with pytest.raises(AppError) as exc:
+        read_file_ref_bytes(root, "outside.txt")
+    assert exc.value.code == 40015
 
 
 @pytest.mark.asyncio

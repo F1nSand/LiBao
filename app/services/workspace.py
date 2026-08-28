@@ -72,6 +72,30 @@ def resolve_file_ref_path(root: str | Path, raw_path: str) -> tuple[str, Path]:
     return "/".join(parts), target
 
 
+def read_file_ref_bytes(root: str | Path, raw_path: str) -> bytes:
+    """在读取前再次执行 file_ref 校验，并尽量使用 no-follow 打开文件。
+
+    首次校验通常发生在 HTTP 边界；这里不能信任此前返回的 Path，因为工作区
+    文件可能在两次操作之间被替换。第二次 realpath/普通文件校验缩小 TOCTOU
+    窗口；POSIX 上再用 O_NOFOLLOW 防止最终路径跟随软链接，Windows 则依赖
+    同步二次校验（平台没有等价的通用 O_NOFOLLOW 标志）。
+    """
+    canonical, first_target = resolve_file_ref_path(root, raw_path)
+    canonical_again, target = resolve_file_ref_path(root, canonical)
+    if canonical_again != canonical or target != first_target or not target.is_file():
+        raise AppError(ERR_WORKSPACE_FILE_REF_INVALID, "工作区文件引用非法或不可读取")
+
+    root_path = Path(root).resolve()
+    candidate = root_path.joinpath(*PurePosixPath(canonical).parts)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(str(candidate), flags)
+        with os.fdopen(fd, "rb") as stream:
+            return stream.read()
+    except (OSError, ValueError) as exc:
+        raise AppError(ERR_WORKSPACE_FILE_REF_INVALID, "工作区文件引用非法或不可读取") from exc
+
+
 def _slugify_name(name: str) -> str:
     """工作区 name → 文件系统安全 slug（保留 ASCII 字母数字，其余转 -；空/纯中文兜底 workspace）。"""
     s = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower()

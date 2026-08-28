@@ -17,17 +17,30 @@ _DOCUMENT_TYPES = {
 }
 _ALLOWED = _IMAGE_TYPES | _TEXT_TYPES | _DOCUMENT_TYPES
 _TEXT_MAX = 200_000  # 内部抽取缓存上限；模型上下文另由 document_context 预算
+# 持久化到 Attachment.analysis，确保升级正文抽取策略后旧的 metadata-only
+# 缓存不会被误认为 ready 并永久跳过重抽。
+EXTRACTOR_VERSION = "document-context-v2"
+EXTRACTION_STRATEGY = "utf8-pypdf-python-docx-v1"
+
+
+def _analysis_meta(kind: str, **values: object) -> dict:
+    return {
+        "type": kind,
+        "extractor_version": EXTRACTOR_VERSION,
+        "extraction_strategy": EXTRACTION_STRATEGY,
+        **values,
+    }
 
 
 def analyze_content(att: Attachment) -> dict:
     """按类型生成内部抽取缓存；状态不代表模型已经读取附件。"""
     ct = att.content_type
     if ct in _IMAGE_TYPES:
-        return {
-            "type": "image",
-            "text": "无法分析: 当前部署无视觉模型（VLM 为 M4 接缝）",
-            "reason": "no_vision_model",
-        }
+        return _analysis_meta(
+            "image",
+            text="无法分析: 当前部署无视觉模型（VLM 为 M4 接缝）",
+            reason="no_vision_model",
+        )
     if ct in _TEXT_TYPES or ct in _DOCUMENT_TYPES:
         try:
             # 延迟导入避免 storage → orchestration 的模块初始化环；聊天发送和后台预热
@@ -41,14 +54,14 @@ def analyze_content(att: Attachment) -> dict:
                 if text:
                     blocks.append(f"[{label}]\n{text}" if label else text)
             text = "\n\n".join(blocks)[:_TEXT_MAX]
-            return {"type": "document", "text": text, "source_units": len(units)}
+            return _analysis_meta("document", text=text, source_units=len(units))
         except (OSError, UnicodeDecodeError) as exc:
             raise ValueError(f"文本提取失败: {exc}") from exc
         except Exception as exc:  # noqa: BLE001  损坏 PDF/DOCX 保留诊断信息
-            return {
-                "type": "document",
-                "text": None,
-                "summary": {"filename": att.filename, "size": att.size_bytes},
-                "reason": f"文档正文提取失败: {str(exc)[:200]}",
-            }
+            return _analysis_meta(
+                "document",
+                text=None,
+                summary={"filename": att.filename, "size": att.size_bytes},
+                reason=f"文档正文提取失败: {str(exc)[:200]}",
+            )
     raise ValueError("文件类型不支持正文解析")

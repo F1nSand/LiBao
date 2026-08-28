@@ -20,7 +20,13 @@ from app.core.errors import (
     ERR_FILE_TOO_LARGE,
     AppError,
 )
-from app.storage.attachment_analysis import _ALLOWED, _IMAGE_TYPES, analyze_content
+from app.storage.attachment_analysis import (
+    _ALLOWED,
+    _IMAGE_TYPES,
+    EXTRACTION_STRATEGY,
+    EXTRACTOR_VERSION,
+    analyze_content,
+)
 from app.storage.file.store import get_store
 from app.storage.models.attachment import Attachment
 from app.storage.models.user import User
@@ -94,7 +100,12 @@ class AttachmentService:
         ``ready`` 只代表抽取缓存完成，不代表模型已经读过文件。图片不走此方法，
         仍由 vision 流程按当前模型能力读取原始字节。
         """
-        if att.status == "ready" and isinstance(att.analysis, dict):
+        if (
+            att.status == "ready"
+            and isinstance(att.analysis, dict)
+            and att.analysis.get("extractor_version") == EXTRACTOR_VERSION
+            and att.analysis.get("extraction_strategy") == EXTRACTION_STRATEGY
+        ):
             return att.analysis
         att.status = "analyzing"
         await db.commit()

@@ -14,6 +14,11 @@ from typing import Any
 from langgraph.types import Command
 
 from app.core.events import sse_emitter
+from app.orchestration.document_context import (
+    PreparedDocumentContext,
+    prepare_document_context,
+    prepare_resume_document_context,
+)
 from app.orchestration.multimodal_input import PreparedImageInput, image_config, prepare_image_input
 from app.orchestration.stream_core import build_initial_state, stream_graph_events
 from app.services.notification import maybe_notify_from_tool_results
@@ -25,6 +30,7 @@ from app.storage.models.conversation import Conversation
 from app.storage.models.message import Message
 from app.storage.models.task import Task
 from app.storage.models.user import User
+from app.storage.repositories.attachment import AttachmentRepository
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.run_log import RunLogRepository
@@ -82,6 +88,7 @@ def _graph_config(
     vision: bool = False,
     image_context: PreparedImageInput | None = None,
     force_image_context: bool = False,
+    document_context: PreparedDocumentContext | None = None,
 ) -> dict[str, Any]:
     cfg: dict[str, Any] = {
         "configurable": {
@@ -102,6 +109,12 @@ def _graph_config(
         cfg["configurable"]["image_payload"] = image_payload
         cfg["configurable"]["current_image_ids"] = set(current_image_ids or [])
         cfg["configurable"]["vision"] = vision
+    if document_context is not None:
+        # 文档正文只存在于本次运行的 configurable；state/checkpoint 仅保存 refs。
+        cfg["configurable"]["document_context"] = {
+            "index": document_context.index,
+            "current_ids": set(document_context.index),
+        }
     return cfg
 
 
@@ -123,6 +136,7 @@ async def chat_stream_events(
     user: User,
     content: str,
     attachments: list[str] | None = None,
+    file_refs: list[str] | None = None,
     workspace: dict[str, Any] | None = None,
     trace_id: str,
     model_override: Any = None,
@@ -143,6 +157,14 @@ async def chat_stream_events(
         attachment_ids=list(attachments or []),
         effective_model=resolve_effective_model(agent),
     )
+    prepared_documents = await prepare_document_context(
+        db,
+        user_id=user.id,
+        user_content=content,
+        attachment_ids=list(attachments or []),
+        file_refs=list(file_refs or []),
+        workspace=workspace,
+    )
 
     async def _persist_round(round_msg: dict[str, Any]) -> None:
         """即时落库（docs 03 §3）：每轮工具结果齐后同步写该轮 Message（任务中 DB 已有已完成轮次）。"""
@@ -162,9 +184,34 @@ async def chat_stream_events(
 
     # ---- ① 开头持久化用户消息（message-as-log，刷新可回放）----
     # C8：用户消息 + 附件回填 + touch 合并为单事务（原 3 次独立 commit，D10 同事务偏差）
-    att_refs = [{"attachment_id": aid} for aid in (attachments or [])] or None
+    att_refs: list[dict[str, Any]] = []
+    att_repo = AttachmentRepository(db)
+    for aid in attachments or []:
+        try:
+            row = await att_repo.get(user.id, uuid.UUID(str(aid)))
+        except (AttributeError, ValueError):
+            row = None
+        if row is None:
+            att_refs.append({"attachment_id": str(aid)})
+        else:
+            att_refs.append(
+                {
+                    "attachment_id": str(row.id),
+                    "name": row.filename,
+                    "mime_type": row.content_type,
+                    "size": row.size_bytes,
+                    "status": row.status,
+                }
+            )
+    att_refs = att_refs or []
+    persisted_file_refs = [{"path": path} for path in (file_refs or [])]
     user_msg = await msg_repo.create(
-        conversation_id=conversation.id, role="user", content=content, attachments=att_refs, trace_id=trace_id
+        conversation_id=conversation.id,
+        role="user",
+        content=content,
+        attachments=att_refs,
+        file_refs=persisted_file_refs,
+        trace_id=trace_id,
     )
     await db.flush()  # uuid4 default 在 flush 应用——回填需 user_msg.id（C8 单事务内不 commit）
     if att_refs:
@@ -191,6 +238,7 @@ async def chat_stream_events(
         assistant_msg_id=assistant_msg_id,
         model_override=model_override,
         image_context=prepared_images,
+        document_context=prepared_documents,
     )
 
     async def on_interrupt(value: dict[str, Any]) -> str:
@@ -198,7 +246,12 @@ async def chat_stream_events(
             db,
             user=user,
             agent_id=agent.id,
-            input={"message": content, "attachment_ids": list(attachments or [])},
+            input={
+                "message": content,
+                "attachment_ids": list(attachments or []),
+                "file_refs": persisted_file_refs,
+                "document_refs": list(prepared_documents.refs),
+            },
             value=value,
             conversation_id=conversation.id,
             thread_id=str(conversation.id),
@@ -260,6 +313,7 @@ async def chat_stream_events(
             image_refs=list(prepared_images.image_refs) or None,
             image_candidate_count=prepared_images.candidate_count,
             image_omitted_count=prepared_images.omitted_count,
+            document_refs=list(prepared_documents.refs) or None,
         ),
         graph_config=graph_config,
         emit=emit,
@@ -291,6 +345,16 @@ async def resume_stream_events(
     thread_id = TaskService.resolve_resume_thread(task)
     conversation_id = uuid.UUID(pending["conversation_id"]) if pending.get("conversation_id") else None
     task_service = TaskService()
+
+    # checkpoint 只保存轻量 document_ref；恢复时按 task input 重新读取当前轮正文，
+    # 并以原 ref_id 绑定，避免 document_ref 原样落到模型 provider。
+    resume_documents = await prepare_resume_document_context(
+        db,
+        user_id=user.id,
+        org_id=user.org_id,
+        conversation_id=conversation_id,
+        task_input=task.input,
+    )
 
     if approved:
         await task_service.set_running(db, task)
@@ -325,6 +389,7 @@ async def resume_stream_events(
         # resume 续跑：中断轮的图片 b64 载荷已不在进程（configurable 不落盘）→ 不传 payload，
         # 历史 ref 自然降级文本标记；中断轮图片不参与续跑属可接受退化（计划文档记录）
         force_image_context=True,
+        document_context=resume_documents,
     )
 
     async def on_interrupt(value: dict[str, Any]) -> str:

@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.services.attachment import AttachmentService, analyze_attachment
 from app.services.serializers import serialize_attachment
+from app.storage.attachment_analysis import EXTRACTION_STRATEGY, EXTRACTOR_VERSION
 from app.storage.file.store import get_store
 from app.storage.models import Attachment, User
 
@@ -95,6 +96,36 @@ async def test_analyze_txt_extracts(att_fixture):
         att = await svc.get_attachment(session, user, att_id)
         assert att.status == "ready"
         assert att.analysis["text"] == "这是笔记内容"
+        assert att.analysis["extractor_version"] == EXTRACTOR_VERSION
+        assert att.analysis["extraction_strategy"] == EXTRACTION_STRATEGY
+
+
+async def test_legacy_ready_analysis_is_recomputed(att_fixture, monkeypatch):
+    """旧的 metadata-only ready 缓存不能阻止新正文解析策略生效。"""
+    user, _other, _tmp = att_fixture
+    svc = AttachmentService()
+    async with get_store().session() as session:
+        att = await svc.save_upload(session, user, "legacy.txt", "text/plain", b"new text")
+        att.status = "ready"
+        att.analysis = {"type": "document", "summary": {"filename": "legacy.txt"}}
+        await session.commit()
+        called = False
+
+        def fresh_analysis(_att):
+            nonlocal called
+            called = True
+            return {
+                "type": "document",
+                "text": "new text",
+                "extractor_version": EXTRACTOR_VERSION,
+                "extraction_strategy": EXTRACTION_STRATEGY,
+            }
+
+        monkeypatch.setattr("app.services.attachment.analyze_content", fresh_analysis)
+        result = await svc.ensure_extracted(session, att)
+        assert called
+        assert result["text"] == "new text"
+        assert result["extractor_version"] == EXTRACTOR_VERSION
 
 
 async def test_analyze_pdf_unreadable_is_failed(att_fixture):

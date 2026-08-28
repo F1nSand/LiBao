@@ -14,7 +14,9 @@ from app.orchestration.document_context import (
     CHUNK_SIZE,
     SOURCE_CHAR_LIMIT,
     TOTAL_CHAR_LIMIT,
+    PreparedDocumentContext,
     extract_document_units,
+    rebind_document_context,
     render_document_content,
     select_source_text,
 )
@@ -61,6 +63,42 @@ def test_document_ref_renders_source_marker_and_does_not_leak_when_not_current()
     historical = render_document_content([ref], index={}, current_ids=set())
     assert "内容不可用" in historical[0]["text"]
     assert "nonce" not in historical[0]["text"]
+
+
+def test_repeated_source_only_hydrates_the_current_turn_ref():
+    """稳定 source_id 可重复引用，但正文只绑定本轮 opaque ref_id。"""
+    first_ref = {
+        "type": "document_ref",
+        "ref_id": "turn-1",
+        "source_id": "workspace:README.md",
+        "kind": "workspace",
+        "display_name": "README.md",
+        "path": "README.md",
+    }
+    second_ref = {**first_ref, "ref_id": "turn-2"}
+    rendered = render_document_content(
+        [first_ref, second_ref],
+        index={
+            "turn-2": {
+                "display_name": "README.md", "kind": "workspace", "path": "README.md", "text": "new nonce"
+            }
+        },
+        current_ids={"turn-2"},
+    )
+    assert "内容不可用" in rendered[0]["text"]
+    assert "new nonce" not in rendered[0]["text"]
+    assert "new nonce" in rendered[1]["text"]
+
+
+def test_resume_context_rebinds_newly_read_text_to_persisted_ref_id():
+    fresh = {"type": "document_ref", "ref_id": "fresh", "source_id": "attachment:a"}
+    persisted = {"type": "document_ref", "ref_id": "persisted", "source_id": "attachment:a"}
+    rebound = rebind_document_context(
+        PreparedDocumentContext((fresh,), {"fresh": {"display_name": "a.txt", "kind": "attachment", "text": "nonce"}}),
+        [persisted],
+    )
+    assert rebound.refs[0]["ref_id"] == "persisted"
+    assert rebound.index["persisted"]["text"] == "nonce"
 
 
 @pytest.mark.parametrize(

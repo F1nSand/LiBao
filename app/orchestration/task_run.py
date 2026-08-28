@@ -15,6 +15,7 @@ from typing import Any
 
 from langgraph.types import Command
 
+from app.orchestration.document_context import prepare_resume_document_context
 from app.orchestration.multimodal_input import PreparedImageInput, image_config, prepare_image_input
 from app.orchestration.stream_core import build_initial_state, resolve_effective_model, stream_graph_events
 from app.services.notification import maybe_notify_from_tool_results
@@ -71,10 +72,27 @@ async def _run_graph_common(
         # F1：中断任务（chat/invoke 来源）的 thread 在 pending_confirm 里（conversation.id / uuid4），
         # 不能硬编码 task.id——否则 JSON 轨 resume 打到无 checkpoint 的线程报 EmptyInputError
         thread_id = TaskService.resolve_resume_thread(task)
+        conversation_id = (task.pending_confirm or {}).get("conversation_id")
+        try:
+            conversation_uuid = uuid.UUID(str(conversation_id)) if conversation_id else None
+        except (AttributeError, ValueError):
+            conversation_uuid = None
+        agent = await AgentRepository(db).get_by_id(task.agent_id)
+        document_context = await prepare_resume_document_context(
+            db,
+            user_id=task.user_id,
+            org_id=getattr(agent, "org_id", None),
+            conversation_id=conversation_uuid,
+            task_input=task.input,
+        )
         graph_config: dict[str, Any] = {"configurable": {"thread_id": thread_id, "trace_id": trace_id}}
         if model_override is not None:
             graph_config["configurable"]["model"] = model_override
         graph_config["configurable"].update(image_config(image_context, force_context=force_image_context))
+        graph_config["configurable"]["document_context"] = {
+            "index": document_context.index,
+            "current_ids": set(document_context.index),
+        }
 
         async def on_interrupt(value: dict[str, Any]) -> None:
             updated = await repo.get_by_id(task_id)

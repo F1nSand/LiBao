@@ -17,7 +17,7 @@ from typing import Any
 
 from app.core.errors import ERR_WORKSPACE_FILE_REF_INVALID, AppError
 from app.services.attachment import AttachmentService
-from app.services.workspace import resolve_file_ref_path
+from app.services.workspace import read_file_ref_bytes, resolve_file_ref_path
 from app.storage.attachment_analysis import _IMAGE_TYPES
 from app.storage.repositories.attachment import AttachmentRepository
 
@@ -57,9 +57,54 @@ class PreparedDocumentContext:
     index: dict[str, dict[str, str]]
 
 
-def make_document_ref(source: PreparedSource) -> dict[str, str]:
+def rebind_document_context(
+    context: PreparedDocumentContext,
+    persisted_refs: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+) -> PreparedDocumentContext:
+    """把重新读取的正文绑定回 checkpoint 中的本轮 ref_id。
+
+    中断恢复必须重新读取正文（正文不进 checkpoint），但 checkpoint 里的
+    ``document_ref`` 仍携带原始本轮 ref_id。按稳定 source_id 对齐正文后，只
+    替换 index 的键，不改变 ref_id；这样恢复时只 hydrate 中断的当前轮。
+    缺少旧 ref（旧版本 checkpoint）时保留新 ref，历史引用仍会因 current_ids
+    不匹配而安全降级为 omission。
+    """
+    old_by_source: dict[str, dict[str, Any]] = {}
+    for raw in persisted_refs or ():
+        if not isinstance(raw, dict):
+            continue
+        source_id = str(raw.get("source_id") or "")
+        ref_id = str(raw.get("ref_id") or "")
+        if source_id and ref_id:
+            old_by_source.setdefault(source_id, raw)
+
+    refs: list[dict[str, str]] = []
+    index: dict[str, dict[str, str]] = {}
+    for ref in context.refs:
+        source_id = str(ref.get("source_id") or "")
+        previous = old_by_source.get(source_id)
+        ref_id = str(previous.get("ref_id")) if previous else str(ref.get("ref_id") or "")
+        if not ref_id:
+            continue
+        rebound = dict(ref)
+        rebound["ref_id"] = ref_id
+        refs.append(rebound)
+        current_ref_id = str(ref.get("ref_id") or "")
+        if current_ref_id in context.index:
+            index[ref_id] = context.index[current_ref_id]
+    return PreparedDocumentContext(tuple(refs), index)
+
+
+def make_document_ref(source: PreparedSource, *, ref_id: str | None = None) -> dict[str, str]:
+    """创建本轮来源的轻量引用。
+
+    ``source_id`` 是可读的稳定来源身份；``ref_id`` 是本轮唯一 token。正文
+    hydrate 只允许通过 ref_id 命中，避免后续轮再次引用同一文件时把正文填回
+    历史消息中的同名 document_ref。
+    """
     ref = {
         "type": DOCUMENT_REF_TYPE,
+        "ref_id": ref_id or uuid.uuid4().hex,
         "source_id": source.source_id,
         "kind": source.kind,
         "display_name": source.display_name,
@@ -243,13 +288,13 @@ async def prepare_document_context(
             raise AppError(ERR_WORKSPACE_FILE_REF_INVALID, "工作区文件引用非法或不可读取")
         root = workspace.get("root_path")
         for raw_path in file_refs:
-            canonical, target = resolve_file_ref_path(root, raw_path)
+            canonical, _ = resolve_file_ref_path(root, raw_path)
             source_id = f"workspace:{canonical}"
             if source_id in seen:
                 continue
             seen.add(source_id)
             try:
-                data = await asyncio.to_thread(target.read_bytes)
+                data = await asyncio.to_thread(read_file_ref_bytes, root, canonical)
                 units = extract_document_units(data, None, canonical)
                 text = _join_units(units)
                 if text:
@@ -267,10 +312,68 @@ async def prepare_document_context(
     index: dict[str, dict[str, str]] = {}
     refs: list[dict[str, str]] = []
     for source in sources:
-        refs.append(make_document_ref(source))
-        index[source.source_id] = _source_index(source, user_content)
+        ref = make_document_ref(source)
+        refs.append(ref)
+        # index/current_ids keyed by per-turn ref_id rather than stable source_id.
+        # This keeps history references lightweight and permanently non-hydratable.
+        index[ref["ref_id"]] = _source_index(source, user_content)
     _trim_total(index)
     return PreparedDocumentContext(tuple(refs), index)
+
+
+async def prepare_resume_document_context(
+    db: Any,
+    *,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID | None,
+    conversation_id: uuid.UUID | None,
+    task_input: Any,
+) -> PreparedDocumentContext:
+    """为中断恢复重建当前轮文档正文，并始终返回安全的 context。
+
+    checkpoint 只保存 document_ref，不保存正文；恢复时从 task input 取附件和
+    工作区相对路径，重新解析当前文件版本。即使没有可重建来源，也返回空
+    context，使旧 checkpoint 中的 document_ref 被明确降级为 omission，而不是
+    原样泄漏到模型 provider。
+    """
+    data = task_input if isinstance(task_input, dict) else {}
+    message = data.get("message") if isinstance(data.get("message"), str) else ""
+    raw_attachment_ids = data.get("attachment_ids")
+    attachment_ids = [str(item) for item in raw_attachment_ids] if isinstance(raw_attachment_ids, list) else []
+    raw_file_refs = data.get("file_refs")
+    file_refs: list[str] = []
+    if isinstance(raw_file_refs, list):
+        for item in raw_file_refs:
+            if isinstance(item, str):
+                file_refs.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("path"), str):
+                file_refs.append(item["path"])
+
+    workspace: dict[str, Any] | None = None
+    if file_refs:
+        # 延迟导入，避免 context 模块与 service/repository 初始化环。
+        from app.services.workspace import WorkspaceService
+        from app.storage.repositories.conversation import ConversationRepository
+
+        if conversation_id is not None and org_id is not None:
+            conversation = await ConversationRepository(db).get_owned(conversation_id, user_id)
+            workspace_id = getattr(conversation, "workspace_id", None) if conversation else None
+            if workspace_id is not None:
+                workspace_row = await WorkspaceService().get_in_org(db, org_id, str(workspace_id))
+                workspace = {"id": str(workspace_row.id), "root_path": workspace_row.root_path}
+
+    context = await prepare_document_context(
+        db,
+        user_id=user_id,
+        user_content=message,
+        attachment_ids=attachment_ids,
+        file_refs=file_refs,
+        workspace=workspace,
+    )
+    persisted_refs = data.get("document_refs")
+    if isinstance(persisted_refs, list):
+        return rebind_document_context(context, persisted_refs)
+    return PreparedDocumentContext((), {}) if not persisted_refs else context
 
 
 def render_document_content(content: Any, *, index: dict[str, dict[str, str]], current_ids: set[str]) -> Any:
@@ -285,7 +388,9 @@ def render_document_content(content: Any, *, index: dict[str, dict[str, str]], c
             out.append(block)
             continue
         source_id = str(block.get("source_id", ""))
-        item = index.get(source_id) if source_id in current_ids else None
+        ref_id = str(block.get("ref_id", ""))
+        lookup_id = ref_id or source_id  # 兼容旧 checkpoint/单元测试中的无 ref_id 引用
+        item = index.get(lookup_id) if lookup_id in current_ids else None
         display = block.get("display_name") or (item or {}).get("display_name") or source_id
         if item and item.get("text"):
             marker = "附件" if block.get("kind") == "attachment" else "工作区引用"
