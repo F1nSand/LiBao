@@ -261,7 +261,7 @@ async function onPickModel(p: ProviderConfig) {
 
       <div v-if="mode === 'chat' && chat.messagesError" class="stream-error" role="alert">
         <span>消息加载失败：{{ chat.messagesError }}</span>
-        <button type="button" class="recovery-btn" @click="chat.currentId && chat.selectConversation(chat.currentId)">重试加载</button>
+        <button type="button" class="recovery-btn" @click="chat.currentId && chat.loadMessages(chat.currentId)">重试加载</button>
       </div>
 
       <div v-if="mode === 'chat' && currentStream.error" class="stream-error" role="alert">

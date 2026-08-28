@@ -19,8 +19,8 @@ export const useChatStore = defineStore('chat', {
     currentMessages: [] as Message[],
     messagesLoading: false,
     messagesError: null as string | null,
-    /** 侧栏选中会话的令牌（ChatView 监听以复位流式，创建会话不递增） */
-    selectionToken: 0,
+    /** 消息请求版本：只允许最后一次加载请求提交状态，覆盖 A→B→A 回切竞态。 */
+    messagesRequestVersion: 0,
     convTotal: 0,
     page: 1,
     pageSize: 50,
@@ -39,6 +39,7 @@ export const useChatStore = defineStore('chat', {
     async createConversation(title: string) {
       const c = await apiCreateConversation({ title })
       this.conversations.unshift(c)
+      this.messagesRequestVersion += 1
       this.currentId = c.id
       this.currentMessages = []
       this.messagesLoading = false
@@ -47,22 +48,25 @@ export const useChatStore = defineStore('chat', {
 
     async selectConversation(id: string) {
       this.currentId = id
-      this.selectionToken += 1
       this.currentMessages = []
       this.messagesError = null
       await this.loadMessages(id)
     },
 
     async loadMessages(id: string, page = 1) {
+      const requestVersion = ++this.messagesRequestVersion
       this.messagesLoading = true
+      if (id === this.currentId) this.messagesError = null
       try {
         const res = await listMessages(id, { page, page_size: 50 })
-        if (id !== this.currentId) return // 响应序守卫：快速连点时慢响应不覆盖新选择
+        if (requestVersion !== this.messagesRequestVersion || id !== this.currentId) return
         this.currentMessages = res.items
       } catch (e) {
-        if (id === this.currentId) this.messagesError = e instanceof Error ? e.message : '消息加载失败'
+        if (requestVersion === this.messagesRequestVersion && id === this.currentId) {
+          this.messagesError = e instanceof Error ? e.message : '消息加载失败'
+        }
       } finally {
-        if (id === this.currentId) this.messagesLoading = false
+        if (requestVersion === this.messagesRequestVersion && id === this.currentId) this.messagesLoading = false
       }
     },
 
@@ -70,8 +74,10 @@ export const useChatStore = defineStore('chat', {
       await apiDeleteConversation(id)
       this.conversations = this.conversations.filter((c) => c.id !== id)
       if (this.currentId === id) {
+        this.messagesRequestVersion += 1
         this.currentId = null
         this.currentMessages = []
+        this.messagesLoading = false
         this.messagesError = null
       }
     },

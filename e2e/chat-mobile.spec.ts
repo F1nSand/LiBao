@@ -52,7 +52,7 @@ test.describe('移动端 composer', () => {
   test('切换会话时先隐藏旧消息并显示加载骨架', async ({ page }) => {
     await gotoChat(page)
     await page.getByRole('button', { name: '打开导航菜单' }).click()
-    await page.locator('.conv-item', { hasText: '计算 6*7' }).click()
+    await page.locator('.conv-item[data-conversation-id="c_001"]').click()
     await expect(page.locator('.msg-row')).toHaveCount(2)
 
     let release!: () => void
@@ -65,13 +65,70 @@ test.describe('移动端 composer', () => {
     })
 
     await page.getByRole('button', { name: '打开导航菜单' }).click()
-    await page.locator('.conv-item', { hasText: '什么是 SSE' }).click()
+    await page.locator('.conv-item[data-conversation-id="c_002"]').click()
     await expect(page.locator('.stream-skeleton')).toBeVisible()
     await expect(page.locator('.msg-row')).toHaveCount(0)
 
     release()
     await expect(page.locator('.stream-skeleton')).toBeHidden()
     await expect(page.locator('.msg-row')).toHaveCount(2)
+  })
+
+  test('跨页面切换会话时不等待消息请求才跳转', async ({ page }) => {
+    await gotoChat(page)
+    await page.goto('/kb')
+    await page.getByRole('button', { name: '打开导航菜单' }).click()
+
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route('**/api/v1/conversations/c_002/messages*', async (route) => {
+      await blocked
+      await route.continue()
+    })
+
+    await page.locator('.conv-item[data-conversation-id="c_002"]').click()
+    await expect(page).toHaveURL(/\/chat$/)
+    await expect(page.locator('.conv-item[data-conversation-id="c_002"]')).toHaveClass(/active/)
+    await expect(page.locator('.stream-skeleton')).toBeVisible()
+
+    release()
+    await expect(page.locator('.stream-skeleton')).toBeHidden()
+  })
+
+  test('快速切换时迟到的旧会话响应不覆盖最后一次选择', async ({ page }) => {
+    await gotoChat(page)
+    await page.getByRole('button', { name: '打开导航菜单' }).click()
+
+    let releaseA!: () => void
+    let releaseB!: () => void
+    const blockedA = new Promise<void>((resolve) => {
+      releaseA = resolve
+    })
+    const blockedB = new Promise<void>((resolve) => {
+      releaseB = resolve
+    })
+    await page.route('**/api/v1/conversations/c_001/messages*', async (route) => {
+      await blockedA
+      await route.continue()
+    })
+    await page.route('**/api/v1/conversations/c_002/messages*', async (route) => {
+      await blockedB
+      await route.continue()
+    })
+
+    await page.locator('.conv-item[data-conversation-id="c_001"]').click()
+    await page.getByRole('button', { name: '打开导航菜单' }).click()
+    await page.locator('.conv-item[data-conversation-id="c_002"]').click()
+
+    releaseB()
+    await expect(page.locator('.msg-row')).toHaveCount(2)
+    await expect(page.locator('.msg.user .user-text')).toContainText('什么是 SSE')
+
+    releaseA()
+    await expect(page.locator('.msg.user .user-text')).toContainText('什么是 SSE')
+    await expect(page.locator('.msg.user .user-text')).not.toContainText('计算 6*7')
   })
 
   test('流失败后可恢复草稿，重试不会重复追加用户消息', async ({ page }) => {

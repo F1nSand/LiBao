@@ -56,6 +56,8 @@ const messages = ref<Message[]>([])
 const convLoading = ref(false)
 const messageLoading = ref(false)
 const messageError = ref<string | null>(null)
+/** 消息请求版本：只允许最后一次加载请求提交状态，覆盖工作区内的 A→B→A 回切竞态。 */
+const messageRequestVersion = ref(0)
 
 /** 左列（文件树 + 会话）整体折叠：窗口变窄自动收、变宽自动开；用户手动折叠不自动展开 */
 const leftUserCollapsed = ref(false)
@@ -81,6 +83,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  messageRequestVersion.value += 1
   stream.stop() // 销毁清后台流定时器（useChatStream 第二实例）
 })
 
@@ -100,14 +103,22 @@ async function selectConversation(id: string) {
   messages.value = []
   messageError.value = null
   messageLoading.value = true
+  await loadMessages(id)
+}
+
+async function loadMessages(id: string) {
+  const requestVersion = ++messageRequestVersion.value
+  messageLoading.value = true
   try {
     const res = await listMessages(id, { page_size: 100 })
-    if (currentId.value !== id) return // 响应序守卫
+    if (requestVersion !== messageRequestVersion.value || currentId.value !== id) return
     messages.value = res.items
   } catch (e) {
-    if (currentId.value === id) messageError.value = e instanceof Error ? e.message : '消息加载失败'
+    if (requestVersion === messageRequestVersion.value && currentId.value === id) {
+      messageError.value = e instanceof Error ? e.message : '消息加载失败'
+    }
   } finally {
-    if (currentId.value === id) messageLoading.value = false
+    if (requestVersion === messageRequestVersion.value && currentId.value === id) messageLoading.value = false
   }
 }
 
@@ -121,6 +132,7 @@ async function deleteConv(id: string) {
   await apiDeleteConversation(id)
   conversations.value = conversations.value.filter((c) => c.id !== id)
   if (currentId.value === id) {
+    messageRequestVersion.value += 1
     currentId.value = null
     messages.value = []
     messageLoading.value = false
@@ -257,7 +269,11 @@ async function retryFailed() {
 }
 
 function retryMessages() {
-  if (currentId.value) void selectConversation(currentId.value)
+  const id = currentId.value
+  if (!id) return
+  messages.value = []
+  messageError.value = null
+  void loadMessages(id)
 }
 
 function stop() {

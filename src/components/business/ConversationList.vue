@@ -18,8 +18,8 @@ const filtered = computed(() => {
   return chat.conversations.filter((c) => c.title.toLowerCase().includes(k))
 })
 
-async function onSelect(id: string) {
-  await chat.selectConversation(id)
+function onSelect(id: string) {
+  void chat.selectConversation(id)
   if (router.currentRoute.value.path !== '/chat') void router.push('/chat')
 }
 
