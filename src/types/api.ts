@@ -77,6 +77,9 @@ export interface TrajectoryNode {
   /** epoch ms（消息 created_at） */
   time: number
   content?: string
+  /** 用户消息来源（附件/工作区文件引用）；用于在纯来源消息中生成可读摘要 */
+  attachments?: AttachmentRef[]
+  file_refs?: FileRef[]
   /** assistant 推理（thinking 事件落库，可空） */
   thinking?: string
   /** context/system 更新的前后差异（供 Diff 标签） */
@@ -176,6 +179,17 @@ export interface UpdateWorkspaceRequest {
 }
 
 /** ---------- 任务 ---------- */
+
+/** 后端结构化任务错误（旧后端可能仍是 string，消费方需兼容） */
+export interface TaskError {
+  code: number
+  message: string
+  kind?: string
+  retryable?: boolean
+  recoverable?: boolean
+  details?: unknown
+}
+
 export interface Task {
   id: string
   agent_id: string
@@ -184,7 +198,12 @@ export interface Task {
   input?: unknown
   output?: unknown
   pending_confirm?: unknown
-  error?: string
+  /** 兼容旧后端 string；新后端为结构化 TaskError */
+  error?: string | TaskError | null
+  /** 任务事件游标（跨连接单调 task_seq 水位；长任务断线恢复契约） */
+  last_event_seq?: number
+  /** 手动断点恢复次数（< 3 才可 recover） */
+  recovery_attempts?: number
   created_at: string
   updated_at?: string
 }
@@ -392,14 +411,6 @@ export interface Attachment {
   created_at: string
 }
 
-export interface AttachmentAnalysis {
-  attachment_id: string
-  summary?: string
-  extracted_text?: string
-  status: AttachmentStatus
-  error?: string
-}
-
 /** ---------- 通知 ---------- */
 export interface Notification {
   id: string
@@ -437,4 +448,17 @@ export interface SaveProviderRequest {
   api_key?: string
   model?: string | null
   enabled?: boolean
+}
+
+export type SandboxMode = 'powershell' | 'git_bash' | 'docker'
+
+export interface SandboxBackendStatus {
+  available: boolean
+  detail: string
+}
+
+export interface SandboxSettings {
+  mode: SandboxMode
+  review: { enabled: boolean; configured: boolean }
+  backends: Record<SandboxMode, SandboxBackendStatus>
 }

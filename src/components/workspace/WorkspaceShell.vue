@@ -18,7 +18,7 @@ import MessageList from '@/components/business/MessageList.vue'
 import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
 import AttachmentUploader, { type PendingAttachment } from '@/components/business/AttachmentUploader.vue'
 import InterruptConfirmDialog from '@/components/business/InterruptConfirmDialog.vue'
-import StatusTag from '@/components/common/StatusTag.vue'
+import AgentRunStatus from '@/components/common/AgentRunStatus.vue'
 import WorkspaceConvList from './WorkspaceConvList.vue'
 import WorkspaceFileRefPicker from './WorkspaceFileRefPicker.vue'
 
@@ -46,6 +46,11 @@ const stream = useChatStream({
       created_at: m0.created_at ?? new Date().toISOString(),
     })
   },
+  onTaskSettled: ({ conversationId, status }) => {
+    // 长任务断线恢复收敛 done → reload 会话消息（仅对应当前会话）
+    if (conversationId && conversationId !== currentId.value) return
+    if (status === 'done') void loadMessages(currentId.value ?? '')
+  },
 })
 /** 当前工作区会话的流式状态（computed；切换会话 setConversation 指向对应 entry） */
 const currentStream = stream.state
@@ -54,6 +59,8 @@ const conversations = ref<Conversation[]>([])
 const currentId = ref<string | null>(null)
 const messages = ref<Message[]>([])
 const convLoading = ref(false)
+/** 工作区会话列表请求版本：路由复用时旧工作区响应不得覆盖新列表。 */
+const conversationRequestVersion = ref(0)
 const messageLoading = ref(false)
 const messageError = ref<string | null>(null)
 /** 消息请求版本：只允许最后一次加载请求提交状态，覆盖工作区内的 A→B→A 回切竞态。 */
@@ -83,27 +90,58 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  conversationRequestVersion.value += 1
   messageRequestVersion.value += 1
-  stream.stop() // 销毁清后台流定时器（useChatStream 第二实例）
+  resetDraftForConversationChange()
+  stream.stopAll() // 销毁当前 shell 的所有后台流和定时器
 })
 
+watch(
+  () => props.workspaceId,
+  () => {
+    messageRequestVersion.value += 1
+    stream.stopAll()
+    currentId.value = null
+    messages.value = []
+    conversations.value = []
+    convLoading.value = false
+    messageLoading.value = false
+    messageError.value = null
+    resetDraftForConversationChange()
+    void loadConversations()
+  },
+)
+
 async function loadConversations() {
+  const requestVersion = ++conversationRequestVersion.value
+  const workspaceId = props.workspaceId
   convLoading.value = true
   try {
-    const res = await listConversations({ workspace_id: props.workspaceId, page_size: 100 })
+    const res = await listConversations({ workspace_id: workspaceId, page_size: 100 })
+    if (requestVersion !== conversationRequestVersion.value || workspaceId !== props.workspaceId) return
     conversations.value = res.items
   } finally {
-    convLoading.value = false
+    if (requestVersion === conversationRequestVersion.value && workspaceId === props.workspaceId) convLoading.value = false
   }
 }
 
 async function selectConversation(id: string) {
   currentId.value = id
   stream.setConversation(id)
+  resetDraftForConversationChange()
   messages.value = []
   messageError.value = null
   messageLoading.value = true
   await loadMessages(id)
+}
+
+function resetDraftForConversationChange() {
+  input.value = ''
+  pendingAttachments.value = []
+  fileRefs.value = []
+  lastFailedDraft.value = null
+  refPickerVisible.value = false
+  isDragging.value = false
 }
 
 async function loadMessages(id: string) {
@@ -123,7 +161,9 @@ async function loadMessages(id: string) {
 }
 
 async function createConv(title = '新会话') {
+  const workspaceId = props.workspaceId
   const c = await apiCreateConversation({ title, workspace_id: props.workspaceId })
+  if (workspaceId !== props.workspaceId) return
   conversations.value.unshift(c)
   await selectConversation(c.id)
 }
@@ -134,6 +174,7 @@ async function deleteConv(id: string) {
   if (currentId.value === id) {
     messageRequestVersion.value += 1
     currentId.value = null
+    resetDraftForConversationChange()
     messages.value = []
     messageLoading.value = false
     messageError.value = null
@@ -234,7 +275,7 @@ async function sendWith(content: string, attachmentRefs: PendingAttachment[], re
         conversation_id: currentId.value ?? '',
         role: 'user',
         content,
-        attachments: attachments.map((id) => ({ attachment_id: id })),
+        attachments: attachmentRefs.map((attachment) => ({ ...attachment })),
         file_refs: refs.length ? refs : undefined,
         tool_calls: [],
         created_at: new Date().toISOString(),
@@ -276,8 +317,15 @@ function retryMessages() {
   void loadMessages(id)
 }
 
-function stop() {
-  stream.stop()
+async function stop() {
+  try {
+    const result = await stream.stop()
+    if (result === 'unavailable') {
+      ElMessage.warning('已停止当前页面流；后端未提供可取消任务')
+    }
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? `中断失败：${e.message}` : '中断失败，请重试')
+  }
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -294,7 +342,6 @@ watch(
 )
 
 async function onInterruptConfirm(approved: boolean) {
-  interruptVisible.value = false
   await stream.confirmInterrupt(approved)
 }
 </script>
@@ -333,7 +380,7 @@ async function onInterruptConfirm(approved: boolean) {
           <el-radio-button value="chat">会话</el-radio-button>
           <el-radio-button value="trajectory" :disabled="!currentId">轨迹</el-radio-button>
         </el-radio-group>
-        <StatusTag :status="currentStream.status ?? ''" />
+        <AgentRunStatus :phase="currentStream.phase" :detail="currentStream.phaseDetail" />
       </div>
 
       <MessageList v-show="mode === 'chat'" :messages="messages" :stream="currentStream" :loading="messageLoading" />
@@ -343,12 +390,34 @@ async function onInterruptConfirm(approved: boolean) {
         <button type="button" class="recovery-btn" @click="retryMessages">重试加载</button>
       </div>
 
-      <div v-if="mode === 'chat' && currentStream.error" class="stream-error" role="alert">
+      <div v-if="mode === 'chat' && currentStream.phase === 'reconnecting'" class="stream-error" role="status">
+        <span>连接中断，正在重新连接…</span>
+      </div>
+      <div
+        v-else-if="mode === 'chat' && (currentStream.phase === 'disconnected' || currentStream.phase === 'background_running')"
+        class="stream-error"
+        role="alert"
+      >
+        <span>{{ currentStream.phase === 'disconnected' ? '连接已断开' : '任务仍在后台执行' }}</span>
+        <span class="stream-error-actions">
+          <button type="button" class="recovery-btn primary" @click="stream.reconnect()">重新连接</button>
+        </span>
+      </div>
+      <div v-else-if="mode === 'chat' && currentStream.phase === 'recoverable'" class="stream-error" role="alert">
+        <span>任务执行中断，可从断点继续</span>
+        <span class="stream-error-actions">
+          <button type="button" class="recovery-btn primary" @click="stream.recover()">从断点继续</button>
+          <button v-if="lastFailedDraft" type="button" class="recovery-btn" @click="retryFailed">
+            重新执行（可能重复操作）
+          </button>
+        </span>
+      </div>
+      <div v-else-if="mode === 'chat' && currentStream.error" class="stream-error" role="alert">
         <span>发送失败：{{ currentStream.error.message }}</span>
         <span v-if="lastFailedDraft" class="stream-error-actions">
           <button type="button" class="recovery-btn" @click="restoreDraft">恢复草稿</button>
           <button v-if="currentStream.error.retryable !== false" type="button" class="recovery-btn primary" @click="retryFailed">
-            重试
+            重新执行（可能重复操作）
           </button>
         </span>
       </div>
@@ -396,7 +465,16 @@ async function onInterruptConfirm(approved: boolean) {
             <el-button :icon="'DocumentAdd'" title="引用工作区文件" aria-label="引用工作区文件" :disabled="composerDisabled" @click="refPickerVisible = true">
               引用
             </el-button>
-            <el-button v-if="currentStream.streaming" type="danger" :icon="'VideoPause'" @click="stop">停止</el-button>
+            <el-button
+              v-if="currentStream.streaming"
+              type="danger"
+              :icon="'VideoPause'"
+              :loading="currentStream.cancelling"
+              :disabled="currentStream.cancelling"
+              @click="stop"
+            >
+              {{ currentStream.cancelling ? '中断中…' : '停止' }}
+            </el-button>
             <el-button
               v-else
               type="primary"
@@ -425,9 +503,11 @@ async function onInterruptConfirm(approved: boolean) {
     <InterruptConfirmDialog
       :visible="interruptVisible"
       :info="currentStream.interrupted"
+      :confirming="currentStream.confirming"
       @confirm="onInterruptConfirm"
     />
     <WorkspaceFileRefPicker
+      :key="workspaceId"
       v-model:visible="refPickerVisible"
       :workspace-id="workspaceId"
       @confirm="addFileRefs"

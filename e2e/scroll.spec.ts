@@ -36,4 +36,34 @@ test.describe('对话滚动位置（记忆/恢复 + 新会话贴底，docs/02 §
     expect(pos.top).toBeLessThan(pos.h - pos.c - 100) // 未强制到底
     expect(pos.top).toBeGreaterThan(50) // 恢复到了上滚位置附近
   })
+
+  test('离开底部显示固定倒三角按钮，滚动后位置不随消息滚动并可回底', async ({ page }) => {
+    await gotoChat(page)
+    await page.locator('.conv-item[data-conversation-id="c_scroll"]').click()
+    const list = page.locator('.msg-list')
+    await list.locator('.msg-row').first().waitFor({ timeout: 10_000 })
+    await page.waitForTimeout(400)
+
+    await list.evaluate((el) => {
+      el.scrollTop = 200
+    })
+    const jumpButton = page.locator('.jump-to-latest-btn')
+    await expect(jumpButton).toBeVisible()
+    await expect(jumpButton).toHaveAttribute('aria-label', '回到底部')
+    await expect(jumpButton.locator('.jump-to-latest-icon')).toBeVisible()
+    await expect(jumpButton).not.toContainText('有新内容')
+
+    const before = await jumpButton.boundingBox()
+    await list.evaluate((el) => {
+      el.scrollTop = 400
+    })
+    const after = await jumpButton.boundingBox()
+    expect(before).toBeTruthy()
+    expect(after).toBeTruthy()
+    if (before && after) expect(Math.abs(after.y - before.y)).toBeLessThan(1)
+
+    await jumpButton.click()
+    const pos = await list.evaluate((el) => ({ top: el.scrollTop, h: el.scrollHeight, c: el.clientHeight }))
+    expect(pos.top).toBeGreaterThanOrEqual(pos.h - pos.c - 40)
+  })
 })

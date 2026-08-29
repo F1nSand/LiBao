@@ -5,7 +5,7 @@ import {
   listMessages,
   deleteConversation as apiDeleteConversation,
 } from '@/api/chat'
-import type { Conversation, Message } from '@/types'
+import type { AttachmentRef, Conversation, Message } from '@/types'
 
 /**
  * chat store（docs/02 §7）：只存客户端状态（会话列表/选中态/消息列表），
@@ -83,13 +83,13 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 乐观追加用户消息（stream 由视图负责） */
-    appendUserMessage(content: string, attachmentIds: string[] = []) {
+    appendUserMessage(content: string, attachments: AttachmentRef[] = []) {
       const msg: Message = {
         id: `local_${Date.now()}`,
         conversation_id: this.currentId ?? '',
         role: 'user',
         content,
-        attachments: attachmentIds.map((id) => ({ attachment_id: id })),
+        attachments: attachments.map((attachment) => ({ ...attachment })),
         tool_calls: [],
         created_at: new Date().toISOString(),
       }

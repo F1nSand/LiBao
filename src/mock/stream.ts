@@ -1,12 +1,30 @@
 import type { ChatRequest, Message, SseEnvelope, SseEventType, TokenUsage, ToolCallRecord } from '@/types'
 import { delay, randHex, uid } from './util'
-import { DEFAULT_AGENT_ID, messages } from './db'
+import { DEFAULT_AGENT_ID, messages, uploadedAttachments, workspaceFileContents } from './db'
 
 export interface SseScriptItem {
   type: SseEventType
   payload: unknown
   delayMs: number
+  /** 事件真正写入 SSE 时执行；用于避免取消前预写入终态消息。 */
+  onEmit?: () => void
+  /** 断线模拟：本项正常发出后断开 socket（其后的项仅入事件日志/落库，不写 socket = 后端 checkpoint 续跑） */
+  disconnectAfter?: boolean
+  disconnectKind?: 'destroy' | 'eof'
 }
+
+/** 持久化业务边界事件（token/thinking 不持久化；与真实后端 task JSONL 对齐） */
+export const PERSISTED_TYPES = new Set<SseEventType>([
+  'message_start',
+  'tool_call',
+  'tool_result',
+  'agent_switch',
+  'status',
+  'interrupt',
+  'message',
+  'done',
+  'error',
+])
 
 /** 中断确认上下文：chat/stream 触发 interrupt 时记录，resume 时恢复同一工具卡 */
 export interface ConfirmCtx {
@@ -16,6 +34,7 @@ export interface ConfirmCtx {
   conversationId: string
   expression: string
   content: string
+  sourceContext?: string
 }
 
 const confirmCtxMap = new Map<string, ConfirmCtx>()
@@ -33,11 +52,8 @@ function tok(text: string, ms = 160): SseScriptItem {
 }
 
 function doneEvent(message: Message, tokenUsage?: Record<string, unknown>): SseScriptItem {
-  // 落库：刷新页面/重进会话时从 GET /conversations/{id}/messages 拉取能保留（前端不再 done 后 refresh，改为流式内容补齐 append）
   const usage = (tokenUsage ?? { prompt_tokens: 48, completion_tokens: 36, total_tokens: 84 }) as TokenUsage
   const m = { ...message, token_usage: usage, cost: 0.0012 }
-  if (!messages[m.conversation_id]) messages[m.conversation_id] = []
-  messages[m.conversation_id].push(m)
   return {
     type: 'done',
     payload: {
@@ -47,6 +63,11 @@ function doneEvent(message: Message, tokenUsage?: Record<string, unknown>): SseS
       message: m,
     },
     delayMs: delay(120),
+    // 仅在 done 帧实际发出时落库；取消发生在此之前则不产生迟到的最终消息。
+    onEmit: () => {
+      if (!messages[m.conversation_id]) messages[m.conversation_id] = []
+      messages[m.conversation_id].push(m)
+    },
   }
 }
 
@@ -56,9 +77,15 @@ function sealEvent(message: Message, tokenUsage?: TokenUsage, cost?: number): Ss
   const m = { ...message }
   if (tokenUsage) m.token_usage = tokenUsage
   if (cost != null) m.cost = cost
-  if (!messages[m.conversation_id]) messages[m.conversation_id] = []
-  messages[m.conversation_id].push(m)
-  return { type: 'message', payload: { message: m, token_usage: tokenUsage, cost }, delayMs: delay(120) }
+  return {
+    type: 'message',
+    payload: { message: m, token_usage: tokenUsage, cost },
+    delayMs: delay(120),
+    onEmit: () => {
+      if (!messages[m.conversation_id]) messages[m.conversation_id] = []
+      messages[m.conversation_id].push(m)
+    },
+  }
 }
 
 /** 简单四则运算（demo 用） */
@@ -74,6 +101,33 @@ function calcExpression(expr: string): number {
   return 42
 }
 
+const MAX_SOURCE_CHARS = 12_000
+const MAX_CONTEXT_CHARS = 48_000
+
+function buildSourceContext(req: ChatRequest): string {
+  const blocks: string[] = []
+  let remaining = MAX_CONTEXT_CHARS
+  const append = (block: string) => {
+    if (!block || remaining <= 0) return
+    const clipped = block.slice(0, Math.min(MAX_SOURCE_CHARS, remaining))
+    const omitted = clipped.length < block.length ? '\n（内容已按上下文预算截断）' : ''
+    blocks.push(clipped + omitted)
+    remaining -= clipped.length
+  }
+
+  for (const id of req.message?.attachments ?? []) {
+    const attachment = uploadedAttachments.get(id)
+    if (!attachment || !attachment.bytes.length || !/^text\//.test(attachment.mime_type)) continue
+    append('[附件: ' + attachment.name + ' | ' + id + ']\n' + attachment.bytes.toString('utf-8') + '\n[/附件]')
+  }
+  for (const ref of req.message?.file_refs ?? []) {
+    const key = (req.workspace_id ?? '') + '|' + ref.path
+    const text = workspaceFileContents[key]
+    append('[工作区引用: ' + ref.path + ']\n' + (text ?? '（文件不可用）') + '\n[/工作区引用]')
+  }
+  return blocks.join('\n\n')
+}
+
 /**
  * chat/stream 主脚本：
  * - 危险操作 / 计算类 → calculator（require_confirm）→ interrupt 后关流，等 resume
@@ -84,6 +138,9 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
   const conversationId = req.conversation_id ?? uid('c')
   const taskId = uid('task')
   const messageId = uid('msg')
+
+  const sourceContext = buildSourceContext(req)
+  const contextText = sourceContext ? '\n\n已读取引用内容：\n\n' + sourceContext : ''
 
   const base: SseScriptItem[] = [
     {
@@ -97,10 +154,85 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
   const isDanger = /危险操作|danger|delete|删除/.test(content)
   const isCalc = /\d/.test(content) && /计算|[*x×+/-]/.test(content)
 
+  // ---- 长任务断线恢复演示关键词（优先级最高，供 e2e/手动验证） ----
+  if (content === '[disconnect]' || content === '[disconnect-eof]') {
+    const kind = content === '[disconnect-eof]' ? 'eof' : 'destroy'
+    const finalContent = '断点前已流式输出部分内容，后台继续执行完成。'
+    return [
+      ...base,
+      tok('连接将被中断…\n', 100),
+      {
+        type: 'token',
+        payload: { text: '这是断点前已经流式输出的部分回复。\n' },
+        delayMs: delay(120),
+        disconnectAfter: true,
+        disconnectKind: kind,
+      },
+      tok('任务在后台继续执行…\n'),
+      tok('后端完成落库，等待重连订阅收敛。\n'),
+      doneEvent(
+        {
+          id: uid('msg'),
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: finalContent,
+          attachments: [],
+          tool_calls: [],
+          created_at: new Date().toISOString(),
+        },
+      ),
+    ]
+  }
+  if (content === '[disconnect-first]') {
+    return [
+      {
+        ...base[0],
+        disconnectAfter: true,
+        disconnectKind: 'destroy',
+      },
+      tok('任务在后台继续执行…\n'),
+      doneEvent(
+        {
+          id: uid('msg'),
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: '首帧后即断线，后台继续执行完成。',
+          attachments: [],
+          tool_calls: [],
+          created_at: new Date().toISOString(),
+        },
+      ),
+    ]
+  }
+  if (content === '[fail-recoverable]' || content === '[fail]') {
+    const recoverable = content === '[fail-recoverable]'
+    return [
+      ...base,
+      tok(recoverable ? '任务将因模型传输失败而中断…\n' : '任务将失败…\n'),
+      {
+        type: 'token',
+        payload: { text: '失败前已经流式输出的部分回复。\n' },
+        delayMs: delay(120),
+      },
+      {
+        type: 'error',
+        payload: {
+          code: 60005,
+          message: '模型连接中断，无法继续生成',
+          kind: 'llm_transport',
+          retryable: true,
+          recoverable,
+          details: { stage: 'model_stream' },
+        },
+        delayMs: delay(150),
+      },
+    ]
+  }
+
   if (isDanger || isCalc) {
     const toolCallId = uid('tc')
     const jobRef = uid('job')
-    setConfirmCtx({ taskId, toolCallId, jobRef, conversationId, expression: content, content })
+    setConfirmCtx({ taskId, toolCallId, jobRef, conversationId, expression: content, content, sourceContext })
     return [
       ...base,
       tok(isDanger ? '检测到需要人工确认的操作，正在请求工具…\n' : '我来计算一下，先调用计算器。\n'),
@@ -135,7 +267,7 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
       '```\n',
       '调用 `greet("Claude")` 输出问候语。',
     ]
-    const codeText = codeLines.join('')
+    const codeText = codeLines.join('') + contextText
     return [
       ...base,
       ...codeLines.map((line) => tok(line, 150)),
@@ -231,7 +363,7 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
         id: uid('msg'),
         conversation_id: conversationId,
         role: 'assistant',
-        content: finalText,
+        content: `${finalText}${contextText}`,
         attachments: [],
         tool_calls: [],
         round: 1,
@@ -251,9 +383,10 @@ export function buildResumeScript(taskId: string, approved: boolean): SseScriptI
   const jobRef = ctx?.jobRef ?? uid('job')
   const result = ctx ? calcExpression(ctx.expression) : 42
   const content = ctx?.content ?? ''
+  const contextText = ctx?.sourceContext ? '\n\n已读取引用内容：\n\n' + ctx.sourceContext : ''
 
   if (!approved) {
-    const cancelledText = `已取消该操作（${content || '计算'}）。\n`
+    const cancelledText = `已取消该操作（${content || '计算'}）。\n${contextText}`
     return [
       tok('收到，已取消该操作。\n'),
       tok(cancelledText),
@@ -273,7 +406,7 @@ export function buildResumeScript(taskId: string, approved: boolean): SseScriptI
     ]
   }
 
-  const finalText = `计算结果：**${result}**\n`
+  const finalText = `计算结果：**${result}**\n${contextText}`
   return [
     tok('已确认，正在执行工具…\n'),
     {
@@ -314,8 +447,9 @@ export function buildResumeScript(taskId: string, approved: boolean): SseScriptI
   ]
 }
 
-/** 生成单个 SSE 信封（由 server 写流） */
-export function toEnvelope(item: SseScriptItem, seq: number): SseEnvelope {
-  return { id: `evt_${seq}`, seq, type: item.type, ts: Date.now(), payload: item.payload }
+/** 生成单个 SSE 信封（由 server 写流；带 taskSeq 时 id/task_seq 对齐真实后端游标语义） */
+export function toEnvelope(item: SseScriptItem, seq: number, taskSeq?: number): SseEnvelope {
+  return taskSeq != null
+    ? { id: `task_evt_${taskSeq}`, seq, task_seq: taskSeq, type: item.type, ts: Date.now(), payload: item.payload }
+    : { id: `evt_${seq}`, seq, type: item.type, ts: Date.now(), payload: item.payload }
 }
-

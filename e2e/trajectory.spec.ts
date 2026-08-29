@@ -52,6 +52,39 @@ test.describe('对话轨迹页', () => {
     await expect(page.locator('.tj-cell-label', { hasText: 'TOOL' })).toHaveCount(0)
   })
 
+  test('仅附件/引用的用户消息：USER 摘要显示来源而不是“（空）”', async ({ page }) => {
+    await page.route('**/api/v1/conversations/c_002/trajectory**', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: 0,
+          message: 'ok',
+          data: {
+            conversation_id: 'c_002',
+            nodes: [
+              {
+                seq: 1,
+                kind: 'user',
+                time: Date.now(),
+                content: '',
+                attachments: [{ attachment_id: 'atc_img', name: '截图.png', mime_type: 'image/png' }],
+                file_refs: [{ path: 'docs/readme.md' }],
+              },
+              { seq: 2, kind: 'assistant', time: Date.now() + 1000, content: '已收到' },
+            ],
+            has_more: false,
+          },
+        }),
+      })
+    })
+
+    await gotoChat(page)
+    await page.goto('/trajectory/c_002')
+    await expect(page.locator('.tj-cell-text').first()).toContainText('截图.png')
+    await expect(page.locator('.tj-cell-text').first()).toContainText('docs/readme.md')
+    await expect(page.locator('.tj-cell-text').first()).not.toContainText('（空）')
+  })
+
   test('跨视图定位：?focus=tc_seed 自动选中工具记录并打开详情', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/trajectory/c_001?focus=tc_seed')

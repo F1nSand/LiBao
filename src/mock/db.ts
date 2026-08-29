@@ -253,6 +253,17 @@ export const workspaceFileContents: Record<string, string> = {
   'ws_002|data/input.json': '{\n  "source": "mock",\n  "rows": 128\n}\n',
 }
 
+/** 上传附件注册表（mock 仅用于验证上传元数据、预览和聊天语义；重启即清空） */
+export interface MockAttachmentRecord {
+  attachment_id: string
+  name: string
+  mime_type: string
+  size: number
+  bytes: Buffer
+}
+
+export const uploadedAttachments = new Map<string, MockAttachmentRecord>()
+
 export const tasks: Task[] = [
   {
     id: 'task_done',
@@ -272,6 +283,17 @@ export const tasks: Task[] = [
     input: { message: '批量计算' },
     created_at: isoDate(5),
     updated_at: isoDate(2),
+  },
+  {
+    id: 'task_failed_recoverable',
+    agent_id: DEFAULT_AGENT_ID,
+    status: 'failed',
+    progress: 40,
+    input: { message: '断点恢复演示' },
+    error: { code: 60005, message: '模型连接中断', kind: 'llm_transport', retryable: true, recoverable: true, details: {} },
+    recovery_attempts: 0,
+    created_at: isoDate(3),
+    updated_at: isoDate(1),
   },
 ]
 
@@ -319,4 +341,3 @@ export const systemLogs: SystemLog[] = [
   { id: 'sl_003', trace_id: 'tr_abc', level: 'ERROR', event: 'llm.call', service: 'backend', message: 'LLM 调用超时', duration_ms: 30_010, created_at: isoDate(35) },
   { id: 'sl_004', trace_id: 'tr_abc', level: 'WARNING', event: 'task.retry', service: 'worker', message: '任务重试第 2 次', created_at: isoDate(35) },
 ]
-

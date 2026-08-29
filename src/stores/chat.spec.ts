@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { Message, Paged } from '@/types'
+import type { AttachmentRef, Message, Paged } from '@/types'
 
 const { listMessages } = vi.hoisted(() => ({
   listMessages: vi.fn(),
@@ -113,5 +113,22 @@ describe('chat store conversation loading races', () => {
     await retry
     expect(store.currentMessages.map((item) => item.content)).toEqual(['重试成功'])
     expect(store.messagesLoading).toBe(false)
+  })
+
+  it('乐观用户消息保留附件展示元数据', () => {
+    const store = useChatStore()
+    store.currentId = 'c_a'
+    const attachment: AttachmentRef = {
+      attachment_id: 'atc_1',
+      name: '报告.pdf',
+      mime_type: 'application/pdf',
+      size: 2048,
+      status: 'uploaded',
+    }
+
+    store.appendUserMessage('请阅读附件', [attachment])
+
+    expect(store.currentMessages[0]?.attachments).toEqual([attachment])
+    expect(store.currentMessages[0]?.attachments?.[0]).not.toBe(attachment)
   })
 })

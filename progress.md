@@ -4,6 +4,51 @@
 > 本会话开始先读本节 → 处理 → 划掉。格式：[状态] 日期 · 方向 | 事项 | 期望/实际。
 > 方向：→ 后端（前端发现的契约缺口/后端 bug/需后端配合）；← 后端（后端给前端的事项）。
 
+> [done] 2026-08-29 · ←后端 | **长任务模型流断线恢复契约** | 后端已落地 task 级单调 `task_seq` 事件游标：`GET /tasks/{id}/events?after_seq=N`（亦接受 `Last-Event-ID: task_evt_<N>`），先补发持久化业务边界事件再 live-tail；token/thinking 不持久化，终态请 reload 会话消息。`GET /tasks/{id}` 的 `error` 为 `{code,message,kind,retryable,recoverable,details}`，并返回 `last_event_seq`、`recovery_attempts`；可恢复模型传输失败调用 `POST /tasks/{id}/recover`（body 可选 `{idempotency_key}`），不得重新 POST 原 chat。模型传输自动仅重试一次，SSE 会发 `model_retry(reset_partial=true)`；手动恢复最多 3 次，使用同一 task/thread、显式失败 checkpoint，工具副作用不重复。前端需新增 `reconnecting|disconnected|recoverable|background_running|retrying` 状态：断流且已有 task_id 时轮询/订阅任务状态，不立即标记 failed、不重发原消息；`running/pending` 显示后台执行，`waiting_confirm` 恢复确认，`done` reload 消息/轨迹，`failed+recoverable` 显示“从断点继续”。自动重连 task events 最多 3 次（300/600/1200ms+jitter），跨连接按 task_seq 去重，token 不推进游标。请覆盖半截 body、首帧前断线、已有 task_id 断线、done 收敛、waiting_confirm、recover 调用与危险重试改名。后端门禁：定向恢复/事件/流式测试通过；前端门禁：`npm run typecheck && npm run test:unit && npm run lint:check && npm run build`，构建后同步 `frontend_dist`，勿手改压缩产物。
+>   - **前端落地回执（2026-08-29）**：已实现五态（前端本地阶段，`status` 保留后端原始 6 值）——断流且已有 task_id → `SseTransportError`（sse.ts 包装，带 hadEvents/lastSeq/lastTaskSeq）→ 自动订阅 `GET /tasks/{id}/events?after_seq=cursor`，3 次退避 300/600/1200ms+jitter，耗尽后终局 `GET /tasks/{id}` 对账，对账本身失败才 disconnected；跨连接按 task_seq 去重（`ConvCtx.taskCursor`，<= cursor 丢弃），token 无 task_seq 只当前连接消费不推进游标；`model_retry(reset_partial=true)` 只清未封口 partialText/thinking 段（保留 tool/agent 段与已持久化消息）；对账 running/pending→`background_running`、waiting_confirm→恢复中断弹窗（pending_confirm 重建 InterruptInfo）、done→`onTaskSettled` 回调 reload 会话消息、failed+recoverable→`recoverable` 态（「从断点继续」→ `POST /tasks/{id}/recover`（idempotency_key 幂等）→ 订阅续跑）、其他 failed/cancelled→终态；半截 body（EOF 无 done）与首帧前断线（hadEvents=false）均进重连链，resume 断线对账 running 分支同步升级为 events 订阅；UI 错误条三态分叉（reconnecting 无按钮 / disconnected+background_running「重新连接」/ recoverable「从断点继续」primary+「重新执行（可能重复操作）」次要 / 普通 failed「重新执行（可能重复操作）」改名），原「重试」不再重发原 chat；mock 补 `GET /tasks/:id`（结构化 error+last_event_seq+recovery_attempts）、`GET /tasks/:id/events`（replay+live-tail，连接内 seq 重编）、`POST /tasks/:id/recover`（failed+recoverable 且 attempts<3 才可，否则 40903）+ task 事件日志（PERSISTED_TYPES 排除 token/thinking）+ `[disconnect]`/`[disconnect-first]`/`[fail-recoverable]`/`[fail]` 断线模拟关键词（断点后事件仅入日志=后端 checkpoint 续跑）。门禁：typecheck ✓ / Vitest **43 files / 255 tests** ✓（+33：sse 5、sse-parser 2、task-control 2、mock 7、useChatStream 14、AgentRunStatus 2、既有兼容 1） / lint:check 0 errors（3 既有 any）✓ / build ✓ / 全量 Chromium E2E **60/60** ✓（+3 断线恢复用例）。**踩坑**：mock destroy 需留 100ms flush 窗口且断点后帧不得写 socket（同 tick destroy 会丢弃未发送缓冲致客户端收不到任何帧）；done 后迟到的 SseTransportError 必须忽略（onError 加 finished 守卫），否则已收敛任务被错误打回 reconnecting。构建产物同步 frontend_dist 见 Task 7。
+
+> [done] 2026-08-29 · ←后端 | **工具确认后的即时反馈、顶部运行状态与实时轨迹** | 后端已补 approved resume 的首帧 `accepted=true` running ack；前端确认事务、实时活动轨迹、失败回滚/断线对账已落地。WorkspaceShell 兼容旧测试状态缺少 activities 的情况，前端构建产物已同步到后端 `frontend_dist`。门禁：typecheck、Vitest 43 files/223 tests、lint:check、build 全部通过（仅 3 个既有 any/Element Plus 测试告警）。真实 E2E 仍需用户在重启后的服务上点击一次确认，观察 100ms 内从等待确认切换到“已确认，正在继续/正在执行 shell”。
+>   - **回归调整（2026-08-29）**：按用户要求删除实时执行区（`LiveRunTrace`）及三处页面可见接入；保留中断确认事务、顶部运行状态和失败回滚逻辑。
+>   - **前端 Task 3 已落地（2026-08-29，实时区后按用户要求回滚）**：`SseRequestError`/REST 错误解析、`getTaskStatus` 对账、`resuming + confirming + resume snapshot` 乐观确认事务（ack 前 HTTP 回滚、网络断线按任务状态收敛）、顶部状态/确认弹窗防重复提交保留；`LiveRunTrace` 及三处页面可见实时区已删除。定向 Vitest 4 files/30 tests、typecheck、lint:check 通过；详见 `docs/plans/2026-08-29-interrupt-resume-recovery.frontend.progress.md`。
+>   - **即时状态事务**：`useChatStream` 增加 `resuming` phase、`confirming` 和私有 resume snapshot。点击确认的同一 UI tick 内：关闭弹窗、顶部固定显示“已确认，正在继续”、原工具卡切 `running`；不得等待 `tool_result/token` 才更新。收到后端 ack 后再切“正在执行 · shell”。首个服务端业务帧前若收到明确 HTTP/REST 拒绝，完整恢复原 `taskId/interrupted/waiting_confirm/awaiting_confirm`，自动重开弹窗并允许用同一 task 重试；网络断线按下一条对账。
+>   - **服务端确认帧**：后端将让 approved resume 在执行图/耗时工具前先发 `status`：`{status:'running',phase:'tool',detail:tool_name,tool_call_id,accepted:true,message:'已确认，正在执行'}`。点击后的本地 `resuming` 只负责即时反馈；收到 ack 后唯一切到 `tool`/“正在执行 · shell”，不存在两种文案竞争。前端 `status` handler 要消费可选 `accepted/phase/detail/tool_call_id`；旧后端无可选字段时继续兼容本地乐观状态。
+>   - **失败/断线边界**：明确 HTTP/REST 拒绝发生在服务端接受前，直接回滚 snapshot。ack 前网络断线结果不确定，不能盲目重试：新增 `getTaskStatus(taskId)` 调 `GET /tasks/{id}` 对账；`waiting_confirm` 才恢复弹窗，`running` 显示“执行中（连接已中断）”并禁止重复 resume，`done/failed/cancelled` 收敛到对应终态。`accepted=true` 或后续 `tool_result/token/message/done/error` 均视为已接受；`confirming` 在接受、拒绝或对账完成时复位。
+>   - **实时轨迹**：在 `StreamState` 增加每会话隔离、上限 50 条的 `activities`，从 `status/thinking/tool_call/tool_result/agent_switch/token/message/done/error` 去重派生；同一 `tool_call_id` 更新同一节点，thinking chunks 合并，首个 token 才创建“生成回复”。新增 `LiveRunTrace.vue`，ChatView、WorkspaceShell 以及 TrajectoryPanel 顶部都显示“当前执行（实时）”，至少覆盖启动→思考→工具→等待确认→已确认→执行中→工具完成/失败→生成回复→收尾。live 区域与 REST 持久轨迹分区展示，不做不可靠的逐项合并；终态后首次 REST refresh 成功即隐藏整个 live 区域。TrajectoryPanel 的 2.5s 轮询只同步已落库历史，不再承担当前 phase。
+>   - **组件细节**：`AgentRunStatus` 新增 `resuming` 文案和 active spinner，tool phase 带工具名；`InterruptConfirmDialog` 接收 `confirming`，请求在途禁用确认/拒绝并显示 loading；ChatView/WorkspaceShell 删除 handler 中手工 `interruptVisible=false`，由 stream transaction 单一驱动。保留 `aria-live=polite`、reduced-motion 和错误可重试提示。
+>   - **状态清理与验收**：activities/resume snapshot 必须按 `ConvCtx` 隔离；切换会话不串状态，新 run 的 `resetCtx()` 清旧 activity/snapshot，`stopAll()` 清全部 snapshot/timer。Vitest 覆盖同步 phase/tool-card 更新、后端 ack、HTTP 失败回滚、ack 前断线对账、activity 去重/上限、实时轨迹在聊天与轨迹模式可见、dialog 防重复提交；运行 `npm run typecheck && npm run test:unit && npm run lint:check && npm run build`。真实 E2E：点击确认后 100ms 内顶部离开“等待确认”，长命令执行期间持续显示 shell running 与 elapsed，完成后依次进入生成回复/已完成。
+
+> [open] 2026-08-28 · →后端 | **轨迹 USER 摘要补齐附件/工作区引用元数据** | 前端 `foldTrajectory` 已支持 `TrajectoryNode.attachments/file_refs`：纯来源消息显示「附件：文件名 · 引用：路径」，无元数据时显示「非文本消息」，不再误显示「（空）」。请在 `app/services/serializers.py::serialize_trajectory_node` 将用户消息的 `attachments` 与 `file_refs` 以现有轻量引用格式透传，并同步后端 TrajectoryNode 契约/回归测试；不得携带文件正文或 base64。验收：真实轨迹接口上传图片/文件、发送工作区引用后，USER 行显示文件名/引用路径；旧纯文本轨迹响应保持兼容。
+
+> [done] 2026-08-28 · ←后端 | review follow-up | 后端增量提交 a441a50 已修复历史来源只 hydrate 当前轮、interrupt/resume 文档上下文、抽取缓存版本失效与工作区读取 TOCTOU；目标 pytest 58 passed, 3 skipped，ruff 通过。共享 docs/02 已同步为不展示附件解析状态。
+
+> [done] 2026-08-28 · →后端 | 真实服务重启后复验 | 已重启本机 8000 后端并运行 `npm run test:e2e:real`：真实后端契约、file_refs 越界 40015、工作区 UI 全流程、真实 LLM SSE 共 4/4 通过（30.5s）。
+
+> [done] 2026-08-28 · ←后端 | 前端最终门禁回执 | 收尾修复后前端完整 Vitest 39 files / 206 tests、目标 E2E 11/11、全量 Chromium E2E 53/53、typecheck、lint（0 errors，3 个既有 any warnings）、build 均通过；真实后端 E2E 当前 3/4，唯一未通过项由 8000 旧进程未加载 a441a50 导致，重启后复验。
+
+> [done] 2026-08-28 · ←后端 | 附件/工作区引用实现回执 | 后端已完成文档抽取、来源标记、预算切块、工作区 file_refs 安全校验与持久化；TXT/Markdown/PDF/DOCX 可进入当前轮模型上下文，legacy `.doc` 返回 40012，越界/目录/跨工作区引用返回 40015。前端已移除附件分析误导文案并保留附件元数据。真实后端 E2E 已复验 4/4 通过。
+
+> [superseded] 2026-08-28 · ←后端 | **用户拍板：未知模型改为运行期多模态协商，不在 Provider 增加能力配置** | 已由下方 done 回执取代；保留原始交接内容供审计。
+
+> [done] 2026-08-28 · ←后端 | **运行期多模态协商与附件上下文已落地** | 后端已完成 Tasks 1–5：未知模型直接携图，成功/明确视觉拒绝按 endpoint/model 缓存，明确拒绝返回 60005；图片上传分析改为中性 `analysis_on_send`；TXT/Markdown/代码、文本型 PDF、DOCX 和工作区 `file_refs` 注入当前轮并隔离 checkpoint。最新后端全量 `pytest` `656 passed / 3 skipped`，ruff 全绿；前端附件/工作区改动已通过 typecheck、lint（0 errors，3 个既有 any warnings）、Vitest `40 files / 213 tests`、build；真实后端 E2E `4/4` 通过，原 file_refs 越界场景已复验。
+
+> [done] 2026-08-28 · ←后端 | **纯图片消息 1210 参数错误已修复** | 后端移除纯图片请求中的空 `text` block；`AttachmentBubble` 只负责展示附件，不参与发送。前端无需改气泡组件；新增回归测试与全量后端验证已通过。
+
+> [done] 2026-08-28 · →后端 | **真实后端补齐文档附件上下文 + 工作区 `file_refs`** | 已完成文档抽取、来源标记、预算切块、工作区引用安全校验与持久化；真实后端 E2E 已验证越界引用返回 40015，文本/工作区上下文链路回归通过。
+>   - **契约与安全读取**：新增可选 `ChatMessageInput.file_refs: list[{path}] = []`，仅 workspace 对话接受；相对 `root_path` 做 resolve/realpath 双重边界校验，只读普通文件，拒绝绝对路径、`..`/symlink 逃逸、目录、跨 workspace；Message/serializer 持久化轻量 refs 供刷新回放；attachments 与 file_refs 各服务端限制 10 个。
+>   - **解析策略**：保持图片现有 vision/non-vision 路径；TXT/Markdown 做 UTF-8 正文抽取，PDF 用 pypdf 按页抽取，DOCX 用 python-docx 按段落/表格顺序抽取；legacy `.doc` 从白名单移除并返回 `40012`。后台 `uploaded→analyzing→ready|failed` 仅作为内部抽取缓存，`ready` 不代表模型已读，前端将移除对应 badge/轮询。
+>   - **模型上下文**：小文件全文，大文件按 1,200 字符/120 重叠切块并按用户问题选择；每来源最多 12,000 字符、全轮最多 48,000。以 `[附件: name | id]` / `[工作区引用: path]` 来源块经当前轮消息通道注入，视为不可信内容，绝不进静态 system prompt；单文件失败只注入省略原因，不阻断其它来源。抽取全文、相关块和图片 base64 不得进入 Message/checkpoint。
+>   - **验收证据**：后端单测捕获最终模型入参，用唯一 nonce 证明 TXT/Markdown/PDF/DOCX/file_refs 内容与来源可见；覆盖不存在、目录、越界、symlink、普通对话 file_refs、预算截断、损坏文件、部分失败；旧纯文本/纯图片请求兼容，全量 pytest 通过。完成后在本条追加后端 commit 与测试结果，再由前端跑 real E2E 联调并关闭。
+
+> [superseded] 2026-08-27 · ←后端 | **多模态发图：后端消息适配器已就绪（vision 发图块 / 非 vision 降级注记），前端补发图体验** | 原始静态 `ProviderConfig.capabilities` 方案已由上方“运行期多模态协商与附件上下文”方案取代；图片/文档/工作区引用的当前轮上下文与真实 E2E 已完成，保留本条仅作历史记录。
+>   - **前端请做（ChatView + WorkspaceShell 两处 composer 同步）**：
+>     1. **待发附件可视化**：AttachmentUploader 改 emit 全量 `UploadResponse`（现只 emit id，mime_type/name 丢失）→ composer 加待发缩略图 chip（图片类型 el-image 缩略 + 删除按钮，参照 `.composer-ref-chip` 现成样式）；
+>     2. **粘贴截图**：textarea 加 `@paste`，截取 `clipboardData.files` 图片 blob 走现有 doUpload；
+>     3. **拖拽域扩大**：drop 区域从 Paperclip 按钮扩到整个 composer + dragover 高亮；
+>     4. **纯图空文发送**：守卫放宽为 `content.trim() || pendingAttachments.length`（现纯图会被 `!input.trim()` 拦死）；
+>     5. **可选**：`getActiveProvider()` 的 capabilities 不含 vision（且 pattern 明确不命中）时，图片按钮加 tooltip「当前模型不支持看图」。
+>   - 回放渲染已就绪零改动：`Message.attachments[].attachment_id` → `<img src="/api/v1/attachments/{id}">`（后端 FileResponse 二进制流，mock 下仍会破图，联调用 real 模式）。
+>   - 联调注意：上传 multipart 时 blob 文件名需带扩展名（如 `screenshot.png`）保住 content_type；每条消息附件上限 10、单文件 20MB（后端 40011/40012 已有 toast）；多张图总预算 20MB（超限后端自动剔除并在模型注记中声明，前端无感）。
+
 > [done] 2026-08-27 · ←后端 | **对话页换模型按钮（后端 provider 多配置+唯一激活已就绪，前端补 UI）** | 后端已完成「模型/供应商切换」链路：`ProviderConfig` 字段 = `name`(配置别名，非厂商名) / `website`(官网链接，可选纯展示) / `base_url`(请求地址) / `is_full_url`(是否完整 URL，false 自动拼 `/chat/completions`) / `model`(裸名，如 gpt-4o/deepseek-chat) / `enabled`(唯一激活) / `has_key`。
 >   - 端点已就绪：`GET /settings/providers`（列表）、`POST /settings/providers/{id}/activate`（**设为当前 = 唯一激活 + 即时热切换**，其余自动 `enabled=false`）、`GET /settings/providers/active`（当前生效，无则 `null`）。
 >   - 前端 API 封装已就绪（`src/api/provider.ts` 的 `listProviders`/`getActiveProvider`/`activateProvider` + `types/api.ts` `ProviderConfig`/`SaveProviderRequest` 已含上述字段，**类型层无需改**）。注意 `api_key` 只写不读（响应恒 `has_key`，无明文）。
@@ -633,3 +678,9 @@
 - **D 滚动条根因（移除 content-visibility 估算）**：`.msg-row` 去 content-visibility/contain-intrinsic-size → scrollHeight 真实；scrollToStable 改「设目标→下一帧读回(post-paint)→稳定3帧」追帧 + `activeRun` 守卫（追帧期间不记账，防初始未渲染态把位置记成 0 污染历史恢复）。根因：①记账污染（初始未渲染记 0 → 恢复读 0 滚到顶）；②浏览器 paint commit 重置 scrollTop（同步读回误判稳定）。
 - **E 流式长代码块逃出代码块**：`inOpenFence` 检测未闭合围栏，围栏内整段一起渲染（tail 并入代码块不逃逸）；markdown.spec +5 用例。
 - 验证：typecheck ✓ / lint 0err(3 既有 any) / **151 单测 PASS** / **26 e2e PASS**（删 system-evolution 后 27→26；guards/restructure/scroll 更新）。**本轮改动未提交**。
+
+## 2026-08-28 对话附件气泡与 Agent 运行状态优化（执行交接）
+
+> [done] 2026-08-28 · →后端 | **聊天停止升级为真实任务取消** | 已完成：每次 `/chat/stream` 创建并复用同一 Task，`message_start` 返回 `task_id`；聊天 graph producer 注册到可取消运行表，`POST /tasks/{id}/cancel` 真正中断图；任务级互斥覆盖首帧前取消、模型/工具执行取消及 cancel/done 竞态；取消后不触发迟到 `on_final`，不落库最终助手消息；interrupt/resume 复用同一 Task。后端定向回归通过；全量 pytest `656 passed / 3 skipped`，ruff 全绿。前端 typecheck、lint（0 errors，3 个既有 `any` warnings）、Vitest `40 files / 213 tests`、build 均通过；真实后端 E2E `4/4` 通过；mock 终态消息改为 SSE 写出时才落库，取消不会预写最终回复。
+# 2026-08-29 后端交接：新增 `/settings/sandbox` 三模式（PowerShell/Git Bash/Docker）设置标签。
+# 前端已接入 `src/api/sandbox.ts`、SettingsView 沙箱 tab 与 mock；后端同步完成后运行 typecheck/build。

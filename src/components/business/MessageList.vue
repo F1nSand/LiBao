@@ -27,12 +27,14 @@ const containerRef = ref<HTMLElement | null>(null)
  * 流式气泡：流式中显示；done 时 ChatView 的 onPersistedMessage 同步追加持久化消息，
  * 与气泡隐藏同一帧生效 → 无闪跳、无重复。
  */
-const showStreamBubble = computed(() => !!props.stream && props.stream.segments.length > 0 && !props.stream.finished)
+const showStreamBubble = computed(
+  () => !!props.stream && props.stream.segments.length > 0 && (!props.stream.finished || props.stream.phase === 'cancelled'),
+)
 
 /** 贴底跟随：滚动在最下方（±32px）视为 pinned；用户滚走即失效 */
 const FOLLOW_TOLERANCE = 32
 const pinned = ref(true)
-const showNewContent = ref(false)
+const showJumpToLatest = computed(() => !pinned.value && !props.loading)
 
 /** 当前会话 id（滚动位置记账/恢复用）：messages[0].conversation_id 优先 */
 const conversationId = computed(() => props.messages[0]?.conversation_id ?? props.stream?.conversationId ?? '')
@@ -57,7 +59,6 @@ function updatePinned(): void {
   } else {
     pinned.value = atBottom
   }
-  if (pinned.value) showNewContent.value = false
   // 滚动即记账：切走再回时恢复原位（追帧期间跳过，最终位置由 finalize 记）
   if (activeRun === -1 && conversationId.value) scrollPositions.set(conversationId.value, el.scrollTop)
 }
@@ -142,20 +143,15 @@ const contentVersion = computed(
 // 内容变化（流式/新消息/工具段/完成）：仅当贴底时跟随（保持吸底），滚走则不动
 watch(contentVersion, () => {
   if (pinned.value) scrollToStable('bottom')
-  else if (!props.loading) showNewContent.value = true
 })
 
 // 会话加载/切换（messages 引用替换）：恢复原位或贴底；与吸底跟随 watch 并存
 watch(
   () => props.messages,
-  () => {
-    showNewContent.value = false
-    applyScrollTo()
-  },
+  applyScrollTo,
 )
 
 function jumpToLatest(): void {
-  showNewContent.value = false
   pinned.value = true
   scrollToStable('bottom')
 }
@@ -164,25 +160,40 @@ defineExpose({ containerRef, jumpToLatest })
 </script>
 
 <template>
-  <div ref="containerRef" class="msg-list">
-    <StreamSkeleton :active="loading" />
-    <button v-if="showNewContent && !loading" type="button" class="new-content-btn" @click="jumpToLatest">
-      <el-icon :size="14"><ArrowDown /></el-icon>
-      有新内容 · 回到底部
+  <div class="msg-list-shell">
+    <div ref="containerRef" class="msg-list">
+      <StreamSkeleton :active="loading" />
+      <div v-if="!loading && messages.length === 0 && !showStreamBubble" class="msg-empty">开始对话吧～</div>
+      <template v-if="!loading">
+        <div v-for="msg in messages" :key="msg.id" class="msg-row">
+          <MessageBubble :message="msg" />
+        </div>
+        <div v-if="showStreamBubble" class="msg-row">
+          <MessageBubble :stream="stream" />
+        </div>
+      </template>
+    </div>
+    <button
+      v-if="showJumpToLatest"
+      type="button"
+      class="jump-to-latest-btn"
+      title="回到底部"
+      aria-label="回到底部"
+      @click="jumpToLatest"
+    >
+      <span class="jump-to-latest-icon" aria-hidden="true" />
     </button>
-    <div v-if="!loading && messages.length === 0 && !showStreamBubble" class="msg-empty">开始对话吧～</div>
-    <template v-if="!loading">
-      <div v-for="msg in messages" :key="msg.id" class="msg-row">
-        <MessageBubble :message="msg" />
-      </div>
-      <div v-if="showStreamBubble" class="msg-row">
-        <MessageBubble :stream="stream" />
-      </div>
-    </template>
   </div>
 </template>
 
 <style scoped>
+.msg-list-shell {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
 .msg-list {
   position: relative;
   flex: 1;
@@ -192,27 +203,46 @@ defineExpose({ containerRef, jumpToLatest })
   padding: 8px 0 96px;
   background: var(--app-bg);
 }
-.new-content-btn {
+.jump-to-latest-btn {
   position: absolute;
   z-index: var(--app-z-dropdown);
   left: 50%;
-  bottom: 20px;
+  bottom: 16px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-height: var(--app-control-sm);
-  padding: 4px 10px;
+  justify-content: center;
+  width: var(--app-control-touch);
+  height: var(--app-control-touch);
+  min-width: var(--app-control-touch);
+  min-height: var(--app-control-touch);
+  padding: 0;
   border: 1px solid color-mix(in srgb, var(--app-primary-fill) 36%, var(--app-border));
-  border-radius: 999px;
-  background: var(--app-content-bg);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--app-content-bg) 94%, var(--app-primary) 6%);
   box-shadow: var(--app-shadow-card);
   color: var(--app-link);
-  font-size: var(--app-font-size-sm);
   cursor: pointer;
   transform: translateX(-50%);
+  transition: transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out), background 160ms var(--ease-out);
 }
-.new-content-btn:hover {
-  background: var(--app-bg);
+.jump-to-latest-icon {
+  width: 0;
+  height: 0;
+  border-top: 8px solid currentColor;
+  border-right: 6px solid transparent;
+  border-left: 6px solid transparent;
+}
+.jump-to-latest-btn:hover {
+  background: var(--app-content-bg);
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.14);
+  transform: translateX(-50%) translateY(-2px);
+}
+.jump-to-latest-btn:focus-visible {
+  outline: 2px solid var(--app-focus-ring);
+  outline-offset: 2px;
+}
+.jump-to-latest-btn:active {
+  transform: translateX(-50%) scale(0.94);
 }
 .msg-empty {
   text-align: center;

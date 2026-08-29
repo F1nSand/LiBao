@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { openSseStream } from './sse'
+import { openSseStream, SseRequestError, SseTransportError, streamTaskEvents } from './sse'
 import type { SseHandlers } from './sse'
 import type { SseEnvelope } from '@/types'
 import { resetUnavailable, isUnavailable, FEATURE } from './availability'
@@ -108,6 +108,133 @@ describe('openSseStream', () => {
     // SSE 流与 REST 列表是独立 feature：SSE 404 只标记 stream，不影响 REST 列表
     expect(isUnavailable(FEATURE.notificationsStream)).toBe(true)
     expect(isUnavailable(FEATURE.notifications)).toBe(false)
+  })
+
+  it('REST 错误信封不冒充 SSE 事件，并保留业务 code/message', async () => {
+    const origFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      body: null,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      clone: () => ({ json: async () => ({ code: 40902, message: '当前会话仍有待确认操作', trace_id: 'tr_1' }) }),
+    })
+    const events: SseEnvelope[] = []
+    let error: Error | undefined
+    await openSseStream('/resume', { method: 'POST', headers: {} }, { onEvent: (ev) => events.push(ev), onError: (e) => { error = e } })
+    globalThis.fetch = origFetch
+    expect(events).toHaveLength(0)
+    expect(error).toBeInstanceOf(SseRequestError)
+    expect(error?.message).toContain('待确认')
+    expect((error as SseRequestError).code).toBe(40902)
+  })
+
+  it('干净 EOF 无 done（半截 body）→ onClose 携带已交付信息，不触发 onError', async () => {
+    const frame1 = `event: tool_call\ndata: ${JSON.stringify({ id: 'e1', seq: 1, task_seq: 5, type: 'tool_call', ts: 1, payload: { tool_call_id: 'tc1', tool_name: 'web_search', input: {} } })}\n\n`
+    const frame2 = `event: token\ndata: ${JSON.stringify({ id: 'e2', seq: 2, type: 'token', ts: 2, payload: { text: '半截' } })}\n\n`
+    const origFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: makeStream([frame1 + frame2]),
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+    })
+    let closeInfo: { hadEvents: boolean; lastSeq: number; lastTaskSeq: number | undefined } | undefined
+    const onError = vi.fn()
+    await openSseStream('/x', { method: 'POST', headers: {} }, {
+      onEvent: () => {},
+      onError,
+      onClose: (info) => { closeInfo = info },
+    })
+    globalThis.fetch = origFetch
+    expect(onError).not.toHaveBeenCalled()
+    expect(closeInfo).toEqual({ hadEvents: true, lastSeq: 2, lastTaskSeq: 5 })
+  })
+
+  it('流中断（reader.error）→ SseTransportError 带 hadEvents/lastSeq/lastTaskSeq', async () => {
+    const chunks = [
+      new TextEncoder().encode(sseFrame(1, 'a')),
+      new TextEncoder().encode(`event: token\ndata: ${JSON.stringify({ id: 'e2', seq: 2, task_seq: 9, type: 'token', ts: 2, payload: { text: 'b' } })}\n\n`),
+    ]
+    let i = 0
+    // ReadableStream 的 controller.error 会让后续 read 直接 reject 且丢弃队列，故用 fake reader 精确模拟半路断流
+    const fakeReader = {
+      read: async () => {
+        if (i < chunks.length) return { done: false, value: chunks[i++] } as const
+        throw new Error('net broken')
+      },
+      cancel: async () => {},
+    }
+    const origFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: { getReader: () => fakeReader },
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+    })
+    let error: Error | undefined
+    await openSseStream('/x', { method: 'POST', headers: {} }, { onEvent: () => {}, onError: (e) => { error = e } })
+    globalThis.fetch = origFetch
+    expect(error).toBeInstanceOf(SseTransportError)
+    const te = error as SseTransportError
+    expect(te.kind).toBe('network')
+    expect(te.hadEvents).toBe(true)
+    expect(te.lastSeq).toBe(2)
+    expect(te.lastTaskSeq).toBe(9)
+  })
+
+  it('fetch 拒绝（首帧前断线）→ SseTransportError hadEvents=false', async () => {
+    const origFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('connection refused'))
+    let error: Error | undefined
+    await openSseStream('/x', { method: 'POST', headers: {} }, { onEvent: () => {}, onError: (e) => { error = e } })
+    globalThis.fetch = origFetch
+    expect(error).toBeInstanceOf(SseTransportError)
+    const te = error as SseTransportError
+    expect(te.kind).toBe('network')
+    expect(te.hadEvents).toBe(false)
+    expect(te.lastSeq).toBe(0)
+  })
+
+  it('task_seq 随事件透传', async () => {
+    const frame = `event: status\ndata: ${JSON.stringify({ id: 'e1', seq: 1, task_seq: 42, type: 'status', ts: 1, payload: { status: 'running' } })}\n\n`
+    const origFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: makeStream([frame]),
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+    })
+    const events: SseEnvelope[] = []
+    await openSseStream('/x', { method: 'GET', headers: {} }, { onEvent: (ev) => events.push(ev) })
+    globalThis.fetch = origFetch
+    expect(events).toHaveLength(1)
+    expect(events[0].task_seq).toBe(42)
+  })
+})
+
+describe('streamTaskEvents', () => {
+  it('构造 GET /tasks/{id}/events?after_seq=N', async () => {
+    const origFetch = globalThis.fetch
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: makeStream([sseFrame(1, 'a')]),
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+    })
+    globalThis.fetch = fetchMock
+    await streamTaskEvents('t1', { afterSeq: 7 }, { onEvent: () => {} })
+    globalThis.fetch = origFetch
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/tasks/t1/events?after_seq=7', expect.objectContaining({ method: 'GET' }))
+  })
+
+  it('无 afterSeq 时无 query 参数', async () => {
+    const origFetch = globalThis.fetch
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: makeStream([sseFrame(1, 'a')]),
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+    })
+    globalThis.fetch = fetchMock
+    await streamTaskEvents('t2', {}, { onEvent: () => {} })
+    globalThis.fetch = origFetch
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/tasks/t2/events', expect.objectContaining({ method: 'GET' }))
   })
 })
 

@@ -3,7 +3,7 @@ import type { InterruptInfo } from '@/composables/useChatStream'
 import JsonViewer from '@/components/common/JsonViewer.vue'
 
 /** 中断确认弹窗（docs/02 §5.3）：确认 → resume approved；拒绝 → resume denied */
-defineProps<{ visible: boolean; info: InterruptInfo | null }>()
+const props = defineProps<{ visible: boolean; info: InterruptInfo | null; confirming?: boolean }>()
 const emit = defineEmits<{ confirm: [approved: boolean] }>()
 </script>
 
@@ -34,8 +34,10 @@ const emit = defineEmits<{ confirm: [approved: boolean] }>()
     </div>
 
     <template #footer>
-      <el-button @click="emit('confirm', false)">拒绝</el-button>
-      <el-button type="primary" @click="emit('confirm', true)">确认执行</el-button>
+      <el-button :disabled="props.confirming" @click="emit('confirm', false)">拒绝</el-button>
+      <el-button type="primary" :loading="props.confirming" :disabled="props.confirming" @click="emit('confirm', true)">
+        {{ props.confirming ? '正在继续…' : '确认执行' }}
+      </el-button>
     </template>
   </el-dialog>
 </template>

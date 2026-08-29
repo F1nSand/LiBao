@@ -44,6 +44,39 @@ test.describe('真实后端契约冒烟', () => {
     expect(dj.code).toBe(0)
   })
 
+  test('聊天契约拒绝越界工作区 file_refs', async ({ request }) => {
+    const created = await request.post(`${BASE}/workspaces`, {
+      data: { name: `${WS_NAME}-file-ref`, description: 'file_refs contract', project_instructions: '' },
+    })
+    expect(created.ok()).toBeTruthy()
+    const cj = await created.json()
+    expect(cj.code).toBe(0)
+    const ws = cj.data
+
+    try {
+      // 该请求在建立 SSE 前即完成路径校验，不需要真实 LLM；越界路径必须统一返回 40015。
+      const rejected = await request.post(`${BASE}/chat/stream`, {
+        data: {
+          conversation_id: null,
+          workspace_id: ws.id,
+          message: {
+            content: '',
+            role: 'user',
+            attachments: [],
+            file_refs: [{ path: '../outside.txt' }],
+          },
+          stream: true,
+        },
+      })
+      expect(rejected.ok()).toBeTruthy()
+      const body = await rejected.json()
+      expect(body.code).toBe(40015)
+    } finally {
+      const del = await request.delete(`${BASE}/workspaces/${ws.id}`)
+      expect(del.ok()).toBeTruthy()
+    }
+  })
+
   test('UI 工作区全流程（创建 → .agent 骨架 → 文件操作 → 删除清理）', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/workspace')

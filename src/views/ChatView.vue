@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useChatStream } from '@/composables/useChatStream'
 import { TOKEN_LIMIT } from '@/types'
-import type { Message, ProviderConfig } from '@/types'
+import type { AttachmentRef, Message, ProviderConfig } from '@/types'
 import { listProviders, getActiveProvider, activateProvider } from '@/api/provider'
 import { FEATURE, isUnavailable } from '@/api/availability'
 import { swallowNotImplemented } from '@/utils/http-envelope'
@@ -13,7 +13,7 @@ import MessageList from '@/components/business/MessageList.vue'
 import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
 import AttachmentUploader, { type PendingAttachment } from '@/components/business/AttachmentUploader.vue'
 import InterruptConfirmDialog from '@/components/business/InterruptConfirmDialog.vue'
-import StatusTag from '@/components/common/StatusTag.vue'
+import AgentRunStatus from '@/components/common/AgentRunStatus.vue'
 
 /** 对话工作台（docs/02 §4 / §5）：消息流 + 流式渲染 + 工具卡 + 中断确认 + 会话|轨迹切换（单通用 Agent，无切换） */
 const chat = useChatStore()
@@ -38,6 +38,11 @@ const stream = useChatStream({
       cost: m.cost,
       created_at: m.created_at ?? new Date().toISOString(),
     })
+  },
+  onTaskSettled: ({ conversationId, status }) => {
+    // 长任务断线恢复收敛 done → reload 会话消息/轨迹（仅对应当前会话；背景会话切回时 loadMessages 自会补齐）
+    if (conversationId && conversationId !== chat.currentId) return
+    if (status === 'done') void chat.loadMessages(chat.currentId ?? '')
   },
 })
 
@@ -82,9 +87,16 @@ async function send() {
   await sendWith(content, attachments)
 }
 
-function stop() {
-  stream.stop()
-  resetForNext()
+async function stop() {
+  try {
+    const result = await stream.stop()
+    if (result === 'unavailable') {
+      ElMessage.warning('已停止当前页面流；后端未提供可取消任务')
+    }
+    if (!currentStream.value.streaming) resetForNext()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? `中断失败：${e.message}` : '中断失败，请重试')
+  }
 }
 
 /** send() 的内容注入版 */
@@ -106,7 +118,10 @@ async function sendWith(content: string, attachmentRefs: PendingAttachment[] = [
       const cur = chat.conversations.find((c) => c.id === chat.currentId)
       if (cur && cur.title === '新会话') cur.title = truncate(content || '附件消息', 20)
     }
-    if (appendUser) chat.appendUserMessage(content, [...attachments])
+    if (appendUser) {
+      const refs: AttachmentRef[] = attachmentRefs.map((attachment) => ({ ...attachment }))
+      chat.appendUserMessage(content, refs)
+    }
     const req = {
       conversation_id: chat.currentId,
       message: { content, role: 'user' as const, attachments: [...attachments] },
@@ -185,7 +200,6 @@ watch(
 )
 
 async function onInterruptConfirm(approved: boolean) {
-  interruptVisible.value = false
   await stream.confirmInterrupt(approved)
 }
 
@@ -249,7 +263,7 @@ async function onPickModel(p: ProviderConfig) {
           <el-radio-button value="chat">会话</el-radio-button>
           <el-radio-button value="trajectory" :disabled="!chat.currentId">轨迹</el-radio-button>
         </el-radio-group>
-        <StatusTag :status="currentStream.status ?? ''" />
+        <AgentRunStatus :phase="currentStream.phase" :detail="currentStream.phaseDetail" />
       </div>
 
       <MessageList
@@ -264,12 +278,34 @@ async function onPickModel(p: ProviderConfig) {
         <button type="button" class="recovery-btn" @click="chat.currentId && chat.loadMessages(chat.currentId)">重试加载</button>
       </div>
 
-      <div v-if="mode === 'chat' && currentStream.error" class="stream-error" role="alert">
+      <div v-if="mode === 'chat' && currentStream.phase === 'reconnecting'" class="stream-error" role="status">
+        <span>连接中断，正在重新连接…</span>
+      </div>
+      <div
+        v-else-if="mode === 'chat' && (currentStream.phase === 'disconnected' || currentStream.phase === 'background_running')"
+        class="stream-error"
+        role="alert"
+      >
+        <span>{{ currentStream.phase === 'disconnected' ? '连接已断开' : '任务仍在后台执行' }}</span>
+        <span class="stream-error-actions">
+          <button type="button" class="recovery-btn primary" @click="stream.reconnect()">重新连接</button>
+        </span>
+      </div>
+      <div v-else-if="mode === 'chat' && currentStream.phase === 'recoverable'" class="stream-error" role="alert">
+        <span>任务执行中断，可从断点继续</span>
+        <span class="stream-error-actions">
+          <button type="button" class="recovery-btn primary" @click="stream.recover()">从断点继续</button>
+          <button v-if="lastFailedDraft" type="button" class="recovery-btn" @click="retryFailed">
+            重新执行（可能重复操作）
+          </button>
+        </span>
+      </div>
+      <div v-else-if="mode === 'chat' && currentStream.error" class="stream-error" role="alert">
         <span>发送失败：{{ currentStream.error.message }}</span>
         <span v-if="lastFailedDraft" class="stream-error-actions">
           <button type="button" class="recovery-btn" @click="restoreDraft">恢复草稿</button>
           <button v-if="currentStream.error.retryable !== false" type="button" class="recovery-btn primary" @click="retryFailed">
-            重试
+            重新执行（可能重复操作）
           </button>
         </span>
       </div>
@@ -343,7 +379,16 @@ async function onPickModel(p: ProviderConfig) {
                 </div>
               </div>
             </el-popover>
-            <el-button v-if="currentStream.streaming" type="danger" :icon="'VideoPause'" @click="stop">停止</el-button>
+            <el-button
+              v-if="currentStream.streaming"
+              type="danger"
+              :icon="'VideoPause'"
+              :loading="currentStream.cancelling"
+              :disabled="currentStream.cancelling"
+              @click="stop"
+            >
+              {{ currentStream.cancelling ? '中断中…' : '停止' }}
+            </el-button>
             <el-button
               v-else
               type="primary"
@@ -372,6 +417,7 @@ async function onPickModel(p: ProviderConfig) {
     <InterruptConfirmDialog
       :visible="interruptVisible"
       :info="currentStream.interrupted"
+      :confirming="currentStream.confirming"
       @confirm="onInterruptConfirm"
     />
   </div>

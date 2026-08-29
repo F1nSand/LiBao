@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { ChatRequest, KbCollection, KbDocument, ToolDefinition, Workspace } from '@/types'
+import type { ChatRequest, KbCollection, KbDocument, SseEnvelope, TaskError, ToolDefinition, Workspace } from '@/types'
 import {
   DEFAULT_AGENT_ID,
   tools,
@@ -7,6 +7,7 @@ import {
   workspaces,
   workspaceFiles,
   workspaceFileContents,
+  uploadedAttachments,
   conversations,
   messages,
   tasks,
@@ -17,17 +18,35 @@ import {
   systemLogs,
 } from './db'
 import { ok, fail, json, paginate, uid, randHex, isoDate, fast } from './util'
-import { buildChatScript, buildResumeScript, toEnvelope } from './stream'
+import { buildChatScript, buildResumeScript, toEnvelope, PERSISTED_TYPES, type SseScriptItem } from './stream'
+import { nextTaskSeq, taskLastSeq, pushTaskEvent, replayTaskEvents, subscribeTaskLog } from './task-events'
 import { buildLongConversationNodes, buildTrajectoryNodes, paginateTrajectory } from './trajectory'
 
 /** 单用户本地模式：固定当前用户 = admin（mock 不再校验 token，用户仅用于归属字段） */
 const CURRENT_USER = { id: 'u_admin', org_id: 'org_1' }
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+const MAX_MESSAGE_SOURCES = 10
+const ALLOWED_ATTACHMENT_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'text/plain',
+  'text/markdown',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+])
+const cancelledMockTaskIds = new Set<string>()
+
+function isSafeFileRef(path: string): boolean {
+  return path.length > 0 && path.length <= 1024 && !path.includes('\\') && !path.startsWith('/') && !/^[A-Za-z]:/.test(path) && !path.split('/').includes('..')
+}
 
 /* ---------- 工具函数 ---------- */
 
 interface ParsedBody {
   json?: Record<string, any>
-  files?: Array<{ name: string; filename: string; mimeType: string; size: number }>
+  files?: Array<{ name: string; filename: string; mimeType: string; size: number; bytes: Buffer }>
 }
 
 /** mock provider 配置（内存态；provider 契约见 api/provider.ts） */
@@ -35,6 +54,20 @@ const mockProviders: Array<Record<string, unknown>> = [
   { id: 'pv_001', name: 'OpenAI 生产', website: 'https://openai.com', base_url: 'https://api.openai.com/v1', is_full_url: false, model: 'gpt-4o', enabled: true, has_key: true, created_at: isoDate(200) },
   { id: 'pv_002', name: '我的 DeepSeek', website: 'https://platform.deepseek.com', base_url: 'https://api.deepseek.com', is_full_url: false, model: 'deepseek-chat', enabled: false, has_key: true, created_at: isoDate(100) },
 ]
+
+const mockSandbox: {
+  mode: 'powershell' | 'git_bash' | 'docker'
+  review: { enabled: boolean; configured: boolean }
+  backends: Record<'powershell' | 'git_bash' | 'docker', { available: boolean; detail: string }>
+} = {
+  mode: 'powershell',
+  review: { enabled: true, configured: true },
+  backends: {
+    powershell: { available: true, detail: 'PowerShell 7 可用' },
+    git_bash: { available: true, detail: 'Git Bash 可用' },
+    docker: { available: false, detail: 'Docker daemon 未启动（mock）' },
+  },
+}
 
 /** M7-B 演示「外部写文件」：首次拉取 ws_001 文件列表后延迟注入一个新文件（文件树轮询应自动捕获） */
 let ws001Injected = false
@@ -55,20 +88,35 @@ function readBody(req: IncomingMessage): Promise<ParsedBody> {
         return
       }
       if (ct.includes('multipart/form-data')) {
-        // latin1 逐字节读保位置，再还原 UTF-8：浏览器按 UTF-8 发非 ASCII 文件名（如中文），latin1 直读会乱码
-        const text = raw.toString('latin1')
-        const fileMatch = text.match(/filename="([^"]*)"/)
-        const nameMatch = text.match(/name="([^"]+)"[^\n]*\n\n([\s\S]*?)\n--/)
+        const boundaryMatch = ct.match(/boundary=(?:"([^"]+)"|([^;]+))/i)
+        const boundary = boundaryMatch?.[1] ?? boundaryMatch?.[2]
+        if (!boundary) {
+          resolve({})
+          return
+        }
+        const marker = Buffer.from(`--${boundary}`)
+        const start = raw.indexOf(marker)
+        const headerStart = start >= 0 ? start + marker.length + 2 : -1
+        const headerEnd = headerStart >= 0 ? raw.indexOf(Buffer.from('\r\n\r\n'), headerStart) : -1
+        if (headerStart < 0 || headerEnd < 0) {
+          resolve({})
+          return
+        }
+        const headers = raw.subarray(headerStart, headerEnd).toString('latin1')
+        const bodyStart = headerEnd + 4
+        const bodyEnd = raw.indexOf(Buffer.from(`\r\n${marker.toString('latin1')}`), bodyStart)
+        const bytes = raw.subarray(bodyStart, bodyEnd >= 0 ? bodyEnd : raw.length)
+        const disposition = headers.match(/content-disposition:[^\r\n]*name="([^"]*)"[^\r\n]*filename="([^"]*)"/i)
+        const mimeMatch = headers.match(/content-type:\s*([^\r\n]+)/i)
         const decodeName = (s: string | undefined): string => (s ? Buffer.from(s, 'latin1').toString('utf-8') : '')
         resolve({
-          files: [
-            {
-              name: decodeName(nameMatch?.[1]) || 'file',
-              filename: decodeName(fileMatch?.[1]) || 'upload.bin',
-              mimeType: ct.split(';')[0] ?? 'application/octet-stream',
-              size: raw.byteLength,
-            },
-          ],
+          files: [{
+            name: decodeName(disposition?.[1]) || 'file',
+            filename: decodeName(disposition?.[2]) || 'upload.bin',
+            mimeType: mimeMatch?.[1]?.trim() || 'application/octet-stream',
+            size: bytes.byteLength,
+            bytes: Buffer.from(bytes),
+          }],
         })
         return
       }
@@ -99,11 +147,14 @@ function match(pathname: string, pattern: string): Record<string, string> | null
   return params
 }
 
-/** SSE 写流：逐条 setTimeout，keepalive 保活，close 清理 */
+/** SSE 写流：逐条 setTimeout，keepalive 保活，close 清理。
+ * taskId 存在时每条事件入 task 事件日志（persist 边界事件带 task_seq）；断线 marker 之后只入日志不写 socket。 */
 function sendSse(
   req: IncomingMessage,
   res: ServerResponse,
-  script: Array<{ type: string; payload: unknown; delayMs: number }>,
+  script: SseScriptItem[],
+  taskId?: string,
+  slow = false,
 ): void {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -114,24 +165,68 @@ function sendSse(
   let seq = 1
   const timers: Array<ReturnType<typeof setTimeout>> = []
   let t = 0
+  /** 断线点已过：后续事件只入日志/落库，不再写 socket（真实模拟半路断流） */
+  let disconnected = false
   for (const item of script) {
-    t += item.delayMs
-    const env = toEnvelope(item as any, seq++)
+    t += item.delayMs + (slow ? 150 : 0)
+    const persist = taskId != null && PERSISTED_TYPES.has(item.type)
+    const taskSeq = persist ? nextTaskSeq(taskId) : undefined
+    const env = toEnvelope(item as any, seq++, taskSeq)
+    if (taskId) pushTaskEvent(taskId, env, persist)
     timers.push(
       setTimeout(() => {
-        if (res.writableEnded) return
+        if (taskId && cancelledMockTaskIds.has(taskId)) return
+        if (item.type === 'error' && taskId) {
+          const task = tasks.find((x) => x.id === taskId)
+          if (task) {
+            task.status = 'failed'
+            task.error = item.payload as TaskError
+            task.updated_at = isoDate(0)
+          }
+        }
+        if (item.disconnectAfter) {
+          item.onEmit?.()
+          if (res.writableEnded || res.destroyed || disconnected) return
+          disconnected = true
+          res.write(`event: ${env.type}\ndata: ${JSON.stringify(env)}\n\n`)
+          // 本项是断点前最后数据：先给已写数据送达窗口，再关闭 socket（其后的帧只入日志，客户端感知为传输中断）
+          setTimeout(() => {
+            if (res.writableEnded || res.destroyed) return
+            if (item.disconnectKind === 'eof') res.end()
+            else res.destroy()
+          }, 100)
+          return
+        }
+        if (res.writableEnded || res.destroyed || disconnected) {
+          // 断线后的后续事件：模拟后端 checkpoint 续跑（落库/日志已在上方 pushTaskEvent 完成）
+          item.onEmit?.()
+          return
+        }
+        item.onEmit?.()
         res.write(`event: ${env.type}\ndata: ${JSON.stringify(env)}\n\n`)
       }, t),
     )
   }
   const keepalive = setInterval(() => {
-    if (!res.writableEnded) res.write(': keepalive\n\n')
+    if (!res.writableEnded && !res.destroyed) res.write(': keepalive\n\n')
   }, 15_000)
   timers.push(keepalive as unknown as ReturnType<typeof setTimeout>)
   timers.push(
     setTimeout(() => {
       clearInterval(keepalive)
-      if (!res.writableEnded) res.end()
+      if (taskId && cancelledMockTaskIds.has(taskId)) {
+        if (!res.writableEnded && !res.destroyed) res.end()
+        return
+      }
+      if (taskId && !cancelledMockTaskIds.has(taskId)) {
+        const task = tasks.find((item) => item.id === taskId)
+        if (task && task.status !== 'failed') {
+          task.status = 'done'
+          task.progress = 100
+          task.updated_at = isoDate(0)
+        }
+      }
+      if (!res.writableEnded && !res.destroyed) res.end()
     }, t + 100),
   )
   const cleanup = () => timers.forEach((tm) => clearTimeout(tm))
@@ -180,6 +275,23 @@ export const mockServer = {
     // SSE 端点（无需鉴权前置在路由内处理）
     if (method === 'POST' && pathname === '/chat/stream') {
       const chatReq = (body.json ?? {}) as ChatRequest
+      const attachmentIds = chatReq.message?.attachments ?? []
+      const refs = chatReq.message?.file_refs ?? []
+      if (attachmentIds.length > MAX_MESSAGE_SOURCES || refs.length > MAX_MESSAGE_SOURCES) {
+        return void json(res, fail(40014, '单条消息来源数量超限'))
+      }
+      if (refs.length && !chatReq.workspace_id) {
+        return void json(res, fail(40015, '工作区文件引用非法或不可读取'))
+      }
+      for (const ref of refs) {
+        const key = (chatReq.workspace_id ?? '') + '|' + ref.path
+        if (!isSafeFileRef(ref.path) || !(key in workspaceFileContents)) {
+          return void json(res, fail(40015, '工作区文件引用非法或不可读取'))
+        }
+      }
+      for (const id of attachmentIds) {
+        if (!uploadedAttachments.has(id)) return void json(res, fail(40403, '附件不存在'))
+      }
       // 新会话：先注册 conversation，保证消息可持久化回读（工作区对话带 workspace_id）
       if (!chatReq.conversation_id) {
         const nc = {
@@ -202,12 +314,34 @@ export const mockServer = {
         conversation_id: chatReq.conversation_id,
         role: 'user',
         content: chatReq.message?.content ?? '',
-        attachments: [],
+        attachments: (chatReq.message?.attachments ?? []).map((id) => {
+          const attachment = uploadedAttachments.get(id)
+          return {
+            attachment_id: id,
+            name: attachment?.name,
+            mime_type: attachment?.mime_type,
+            size: attachment?.size,
+            status: 'uploaded' as const,
+          }
+        }),
         file_refs: chatReq.message?.file_refs ?? [],
         tool_calls: [],
         created_at: isoDate(0),
       })
-      return void sendSse(req, res, buildChatScript(chatReq))
+      const script = buildChatScript(chatReq)
+      const taskId = String((script[0]?.payload as { task_id?: string } | undefined)?.task_id ?? '')
+      if (taskId) {
+        tasks.unshift({
+          id: taskId,
+          agent_id: DEFAULT_AGENT_ID,
+          status: 'running',
+          progress: 0,
+          input: { message: chatReq.message?.content ?? '' },
+          created_at: isoDate(0),
+          updated_at: isoDate(0),
+        })
+      }
+      return void sendSse(req, res, script, taskId || undefined, chatReq.message?.content === '[slow]')
     }
 
     /* ===== 会话 / 消息 ===== */
@@ -398,12 +532,126 @@ export const mockServer = {
       return void json(res, ok(null))
     }
 
-    /* ===== 任务（仅中断恢复续流仍由 chat 使用；list/create/detail/events/cancel 已随任务页删除） ===== */
+    /* ===== 任务（聊天流也注册 task_id，停止按钮走同一取消契约） ===== */
+    // GET /tasks/:id/events?after_seq=N —— 长任务断线恢复：先补发持久化边界事件，再 live-tail
+    p = match(pathname, '/tasks/:id/events')
+    if (method === 'GET' && p) {
+      const t = tasks.find((x) => x.id === p!.id)
+      if (!t) return void json(res, fail(40401, '任务不存在'))
+      const afterSeq = Number(query.get('after_seq') ?? 0) || 0
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      })
+      let connSeq = 0
+      const write = (env: SseEnvelope) => {
+        if (res.writableEnded || res.destroyed) return
+        // 连接内 seq 从 1 递增；task_seq 保持原值（跨连接单调）
+        const frame = { ...env, seq: ++connSeq }
+        res.write(`event: ${frame.type}\ndata: ${JSON.stringify(frame)}\n\n`)
+      }
+      const maybeEnd = (env: SseEnvelope) => {
+        if (env.type === 'done' || env.type === 'error') {
+          if (!res.writableEnded && !res.destroyed) res.end()
+        }
+      }
+      const unsub = subscribeTaskLog(t.id, (env) => {
+        write(env)
+        maybeEnd(env)
+      })
+      for (const env of replayTaskEvents(t.id, afterSeq)) {
+        write(env)
+        maybeEnd(env)
+      }
+      const keepalive = setInterval(() => {
+        if (!res.writableEnded && !res.destroyed) res.write(': keepalive\n\n')
+      }, 15_000)
+      const cleanup = () => {
+        unsub()
+        clearInterval(keepalive)
+      }
+      res.on('close', cleanup)
+      req.on('close', cleanup)
+      return
+    }
+    // GET /tasks/:id —— 结构化 error + last_event_seq + recovery_attempts
+    p = match(pathname, '/tasks/:id')
+    if (method === 'GET' && p) {
+      const t = tasks.find((x) => x.id === p!.id)
+      if (!t) return void json(res, fail(40401, '任务不存在'))
+      return void json(res, ok({
+        ...t,
+        error: t.error == null
+          ? undefined
+          : typeof t.error === 'string'
+            ? { code: 50001, message: t.error, kind: 'unknown', retryable: true, recoverable: false, details: {} }
+            : t.error,
+        last_event_seq: taskLastSeq(t.id),
+        recovery_attempts: t.recovery_attempts ?? 0,
+      }))
+    }
+    // POST /tasks/:id/recover —— 仅 failed+recoverable 且 recovery_attempts<3；成功后置 running 并续跑
+    p = match(pathname, '/tasks/:id/recover')
+    if (method === 'POST' && p) {
+      const t = tasks.find((x) => x.id === p!.id)
+      if (!t) return void json(res, fail(40401, '任务不存在'))
+      const attempts = t.recovery_attempts ?? 0
+      const err = typeof t.error === 'object' && t.error !== null ? (t.error as TaskError) : null
+      if (t.status !== 'failed' || !err?.recoverable || attempts >= 3) {
+        return void json(res, fail(40903, '任务当前不可恢复'))
+      }
+      t.recovery_attempts = attempts + 1
+      t.status = 'running'
+      t.error = null
+      t.updated_at = isoDate(0)
+      // 发布恢复事件 + 模拟续跑收敛（供 events 订阅补发/live-tail）
+      const seq1 = nextTaskSeq(t.id)
+      pushTaskEvent(t.id, {
+        id: `task_evt_${seq1}`, seq: 1, task_seq: seq1, type: 'status', ts: Date.now(),
+        payload: { status: 'running', phase: 'tool', detail: 'web_search', message: '已从断点继续' },
+      }, true)
+      setTimeout(() => {
+        const seq2 = nextTaskSeq(t.id)
+        const msgId = uid('msg')
+        pushTaskEvent(t.id, {
+          id: `task_evt_${seq2}`, seq: 1, task_seq: seq2, type: 'done', ts: Date.now(),
+          payload: {
+            message_id: msgId,
+            message: {
+              id: msgId,
+              conversation_id: t.input && typeof t.input === 'object' && 'conversation_id' in t.input
+                ? String((t.input as { conversation_id?: unknown }).conversation_id ?? '')
+                : '',
+              role: 'assistant',
+              content: '已从断点继续执行完成。',
+              attachments: [],
+              tool_calls: [],
+              created_at: new Date().toISOString(),
+            },
+          },
+        }, true)
+        t.status = 'done'
+        t.progress = 100
+        t.updated_at = isoDate(0)
+      }, fast() ? 0 : 800)
+      return void json(res, ok({ task_id: t.id, status: 'running' }))
+    }
+    p = match(pathname, '/tasks/:id/cancel')
+    if (method === 'POST' && p) {
+      const t = tasks.find((x) => x.id === p!.id)
+      if (!t || t.status === 'done' || t.status === 'cancelled') return void json(res, fail(40902, '任务已完成或已取消'))
+      cancelledMockTaskIds.add(p!.id)
+      t.status = 'cancelled'
+      t.updated_at = isoDate(0)
+      return void json(res, ok(null))
+    }
     p = match(pathname, '/tasks/:id/resume')
     if (method === 'POST' && p) {
       const approved = body.json?.confirm?.approved === true
       const t = tasks.find((x) => x.id === p!.id)
-      if (isSseAccept(req)) return void sendSse(req, res, buildResumeScript(p.id, approved))
+      if (isSseAccept(req)) return void sendSse(req, res, buildResumeScript(p.id, approved), p.id)
       if (t) {
         t.status = approved ? 'running' : 'cancelled'
         t.updated_at = isoDate(0)
@@ -608,22 +856,58 @@ export const mockServer = {
       return void json(res, ok(null))
     }
 
+    /* ===== 命令执行沙箱 ===== */
+    if (method === 'GET' && pathname === '/settings/sandbox') return void json(res, ok(mockSandbox))
+    if (method === 'PATCH' && pathname === '/settings/sandbox') {
+      const mode = body.json?.mode as keyof typeof mockSandbox.backends
+      if (!mockSandbox.backends[mode]?.available) return void json(res, fail(60006, '沙箱后端不可用'))
+      mockSandbox.mode = mode
+      return void json(res, ok(mockSandbox))
+    }
+
     /* ===== 附件 ===== */
     if (method === 'POST' && pathname === '/uploads') {
       const f = body.files?.[0]
-      return void json(res, ok({ attachment_id: uid('atc'), mime_type: f?.mimeType ?? 'text/plain', size: f?.size ?? 1024, status: 'uploaded' }))
+      if (!f) return void json(res, fail(40001, '缺少上传文件'))
+      if (f.size > MAX_UPLOAD_BYTES) return void json(res, fail(40011, '文件超过 20MB 限制'))
+      const mimeType = f.mimeType.toLowerCase().split(';', 1)[0].trim()
+      if (!ALLOWED_ATTACHMENT_MIMES.has(mimeType)) return void json(res, fail(40012, '附件类型不支持'))
+      const attachment_id = uid('atc')
+      uploadedAttachments.set(attachment_id, {
+        attachment_id,
+        name: f?.filename ?? 'upload.bin',
+        mime_type: mimeType,
+        size: f?.size ?? 0,
+        bytes: f?.bytes ?? Buffer.alloc(0),
+      })
+      while (uploadedAttachments.size > 100) {
+        const oldest = uploadedAttachments.keys().next().value
+        if (!oldest) break
+        uploadedAttachments.delete(oldest)
+      }
+      return void json(res, ok({ attachment_id, mime_type: mimeType, size: f?.size ?? 0, status: 'uploaded' }))
     }
     p = match(pathname, '/attachments/:id/analysis')
     if (method === 'GET' && p) {
+      const attachment = uploadedAttachments.get(p.id)
       const analyzing = !fast()
       return void json(
         res,
-        ok(analyzing ? { attachment_id: p.id, status: 'analyzing' } : { attachment_id: p.id, status: 'ready', summary: '这是一张示例图片，已识别出主要元素与文字。', extracted_text: '示例文字识别结果。' }),
+        ok(analyzing ? { attachment_id: p.id, status: 'analyzing' } : { attachment_id: p.id, status: 'ready', summary: attachment?.name ? `已读取 ${attachment.name}` : '附件已读取', extracted_text: attachment?.bytes.toString('utf-8') ?? '' }),
       )
     }
     p = match(pathname, '/attachments/:id')
-    if (method === 'GET' && p) return void json(res, ok({ id: p.id, mime_type: 'image/png', size: 2048, status: 'ready', created_at: isoDate(1) }))
-    if (method === 'DELETE' && p) return void json(res, ok(null))
+    if (method === 'GET' && p) {
+      const attachment = uploadedAttachments.get(p.id)
+      if (!attachment) return void json(res, fail(40403, '附件不存在'), 404)
+      res.writeHead(200, { 'Content-Type': attachment.mime_type, 'Content-Length': attachment.bytes.byteLength, 'Cache-Control': 'no-cache' })
+      res.end(attachment.bytes)
+      return
+    }
+    if (method === 'DELETE' && p) {
+      uploadedAttachments.delete(p.id)
+      return void json(res, ok(null))
+    }
 
     /* ===== 通知 ===== */
     if (method === 'GET' && pathname === '/notifications') {

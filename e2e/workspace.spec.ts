@@ -52,11 +52,23 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
     await page.locator('.el-dialog').getByRole('button', { name: '引用', exact: true }).click()
     await expect(page.locator('.composer-ref-chip', { hasText: 'README.md' })).toBeVisible()
 
-    // 发送消息 → 用户气泡出现 file-ref chip
+    const requestBodies: Array<Record<string, unknown>> = []
+    page.on('request', (request) => {
+      if (request.url().endsWith('/api/v1/chat/stream')) {
+        requestBodies.push(request.postDataJSON() as Record<string, unknown>)
+      }
+    })
+
+    // 发送消息 → 用户气泡出现 file-ref chip，同时校验请求字段而不是只看 UI chip
     await page.locator('.composer textarea').fill('请总结 README 内容')
     await page.locator('.composer textarea').press('Enter')
     await expect(page.locator('.msg.user .file-ref-chip', { hasText: 'README.md' })).toBeVisible()
     await expect(page.locator('.msg.user .user-text', { hasText: '请总结 README 内容' })).toBeVisible()
+    await expect.poll(() => requestBodies.at(-1)).toMatchObject({
+      workspace_id: 'ws_001',
+      message: { file_refs: [{ path: 'README.md' }] },
+    })
+    await expect(page.locator('.msg.assistant').filter({ hasText: '这是示例 README' })).toBeVisible()
 
     // 工作区会话列表出现新会话
     await expect(page.locator('.ws-conv-item')).not.toHaveCount(0)

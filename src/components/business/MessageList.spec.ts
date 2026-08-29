@@ -21,6 +21,11 @@ function makeStream(partialText = '', segments: StreamState['segments'] = []): S
     partialText,
     toolCalls: {},
     status: 'running',
+    phase: 'running',
+    phaseDetail: null,
+    cancelling: false,
+    confirming: false,
+    activities: [],
     interrupted: null,
     error: null,
     finished: false,
@@ -28,7 +33,7 @@ function makeStream(partialText = '', segments: StreamState['segments'] = []): S
   }
 }
 
-describe('MessageList 新内容提示', () => {
+describe('MessageList 回到底部按钮', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('用户离底后内容增长显示回到底部按钮，点击后恢复贴底', async () => {
@@ -43,7 +48,6 @@ describe('MessageList 新内容提示', () => {
           MessageBubble: { template: '<div />' },
           StreamSkeleton: { props: ['active'], template: '<div v-if="active" class="stream-skeleton" />' },
           ElIcon: { template: '<span><slot /></span>' },
-          ArrowDown: true,
         },
       },
     })
@@ -52,22 +56,30 @@ describe('MessageList 新内容提示', () => {
       scrollHeight: { configurable: true, value: 1000 },
       clientHeight: { configurable: true, value: 400 },
     })
+    // 先让挂载时的默认贴底追帧完成，避免把测试滚动误判成初始化滚动。
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
     list.scrollTop = 0
     list.dispatchEvent(new Event('scroll'))
-    expect(wrapper.find('.new-content-btn').exists()).toBe(false)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.jump-to-latest-btn').exists()).toBe(true)
 
     await wrapper.setProps({
       stream: makeStream('新增内容', [{ kind: 'text', id: 's1', text: '新增内容' }]),
     })
-    expect(wrapper.find('.new-content-btn').exists()).toBe(true)
+    const jumpButton = wrapper.find('.jump-to-latest-btn')
+    expect(jumpButton.exists()).toBe(true)
+    expect(jumpButton.attributes('aria-label')).toBe('回到底部')
+    expect(jumpButton.text()).toBe('')
+    expect(wrapper.find('.msg-list .jump-to-latest-btn').exists()).toBe(false)
 
-    await wrapper.find('.new-content-btn').trigger('click')
+    await jumpButton.trigger('click')
     expect(list.scrollTop).toBe(600)
-    expect(wrapper.find('.new-content-btn').exists()).toBe(false)
+    expect(wrapper.find('.jump-to-latest-btn').exists()).toBe(false)
 
     await wrapper.setProps({
       stream: makeStream('继续新增', [{ kind: 'text', id: 's1', text: '继续新增' }]),
     })
-    expect(wrapper.find('.new-content-btn').exists()).toBe(false)
+    expect(wrapper.find('.jump-to-latest-btn').exists()).toBe(false)
   })
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { listWorkspaceFiles } from '@/api/workspace'
 import type { FileRef, WorkspaceFile } from '@/types'
 
@@ -25,8 +25,21 @@ function confirm() {
   // 只取叶子文件（目录不是引用对象）
   const leaves = (treeRef.value?.getCheckedNodes(true) ?? []) as WorkspaceFile[]
   emit('confirm', leaves.filter((f) => !f.is_dir).map((f) => ({ path: f.path })))
+  close()
+}
+
+function clearSelection() {
+  treeRef.value?.setCheckedKeys?.([])
+}
+
+function close() {
+  clearSelection()
   emit('update:visible', false)
 }
+
+watch(() => props.visible, (visible) => {
+  if (!visible) clearSelection()
+})
 </script>
 
 <template>
@@ -34,7 +47,7 @@ function confirm() {
     :model-value="visible"
     title="引用工作区文件"
     width="460px"
-    @close="emit('update:visible', false)"
+    @close="close"
   >
     <el-tree
       ref="treeRef"
@@ -54,7 +67,7 @@ function confirm() {
     </el-tree>
     <div class="ws-ref-hint">勾选要引用的文件（目录不参与引用），随消息发送给工作区 Agent 读取内容</div>
     <template #footer>
-      <el-button @click="emit('update:visible', false)">取消</el-button>
+      <el-button @click="close">取消</el-button>
       <el-button type="primary" @click="confirm">引用</el-button>
     </template>
   </el-dialog>

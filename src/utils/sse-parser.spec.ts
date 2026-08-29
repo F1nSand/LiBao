@@ -35,6 +35,13 @@ describe('parseSseFrame', () => {
     const crlf = parseSseFrame(`event: token\r\ndata: ${env('token', 1, 'a')}\r\n`)
     expect(lf).toEqual(crlf)
   })
+
+  it('信封含 task_seq 时透传；缺省为 undefined（旧后端兼容）', () => {
+    const withTs = parseSseFrame(`event: token\ndata: ${JSON.stringify({ id: 'e1', seq: 1, task_seq: 7, type: 'token', ts: 1, payload: { text: 'x' } })}`)
+    expect(withTs!.task_seq).toBe(7)
+    const without = parseSseFrame(`event: token\ndata: ${env('token', 1, 'x')}`)
+    expect(without!.task_seq).toBeUndefined()
+  })
 })
 
 describe('SseParser 增量解析', () => {
@@ -64,5 +71,12 @@ describe('SeqGuard', () => {
     expect(g.accept(0)).toBe(false) // 乱序
     expect(g.accept(2)).toBe(true)
     expect(g.accept(5)).toBe(true)
+  })
+
+  it('current() 返回已接受的最大 seq', () => {
+    const g = new SeqGuard()
+    expect(g.current()).toBe(-1)
+    g.accept(3)
+    expect(g.current()).toBe(3)
   })
 })

@@ -19,11 +19,15 @@ export type SseEventType =
   | 'tool_exec'
   // 通知流（docs/03 §5.11 notifications/stream；事件类型契约未定，mock 用此）
   | 'notification'
+  // 模型传输断线自动重试（后端仅重试一次；长任务断线恢复契约）
+  | 'model_retry'
 
 /** 统一事件信封 */
 export interface SseEnvelope<T = unknown> {
   id: string
   seq: number
+  /** 跨连接单调任务事件游标（后端可选字段；旧后端缺省——缺省时只在当前连接消费，不推进游标） */
+  task_seq?: number
   type: SseEventType
   ts: number
   payload: T
@@ -33,7 +37,7 @@ export interface MessageStartPayload {
   message_id: string
   agent_id: string
   conversation_id: string
-  /** 任务 id（真实契约未含，mock 提供；前端兜底用 conversation_id） */
+  /** 普通聊天运行对应的可取消 Task id；兼容旧后端时仍允许缺省。 */
   task_id?: string
 }
 
@@ -69,6 +73,12 @@ export interface AgentSwitchPayload {
 
 export interface StatusPayload {
   status: string
+  /** resume 首帧确认字段（后端可选，旧服务保持兼容） */
+  phase?: string
+  detail?: string
+  tool_call_id?: string
+  accepted?: boolean
+  message?: string
   context_metrics?: Record<string, unknown>
 }
 
@@ -99,6 +109,21 @@ export interface ErrorPayload {
   code: number
   message: string
   retryable?: boolean
+  /** 错误类别（llm_transport / tool / validation…） */
+  kind?: string
+  /** 可 POST /tasks/{id}/recover 从断点继续（长任务断线恢复契约） */
+  recoverable?: boolean
+  details?: unknown
+}
+
+/** model_retry：模型传输自动重试（后端自动仅重试一次；手动恢复走 /tasks/{id}/recover） */
+export interface ModelRetryPayload {
+  attempt: number
+  max_attempts: number
+  /** true = 清除当前未封口 partialText/thinking 段（保留已持久化消息/工具卡） */
+  reset_partial?: boolean
+  reason?: string
+  message?: string
 }
 
 export interface ThinkingPayload {

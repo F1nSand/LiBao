@@ -34,6 +34,7 @@ export function parseSseFrame(frame: string): SseEnvelope | null {
     return {
       id: (parsed.id as string) ?? id ?? '',
       seq: typeof parsed.seq === 'number' ? parsed.seq : -1,
+      task_seq: typeof parsed.task_seq === 'number' ? parsed.task_seq : undefined,
       type: (parsed.type as SseEventType) ?? (event as SseEventType) ?? 'token',
       ts: typeof parsed.ts === 'number' ? parsed.ts : Date.now(),
       payload: parsed.payload ?? parsed,
@@ -80,5 +81,10 @@ export class SeqGuard {
     if (seq <= this.last) return false
     this.last = seq
     return true
+  }
+
+  /** 本连接内已交付的最大 seq（断线诊断用） */
+  current(): number {
+    return this.last
   }
 }
