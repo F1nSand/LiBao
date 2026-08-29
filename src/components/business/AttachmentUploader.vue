@@ -19,7 +19,7 @@ const emit = defineEmits<{ add: [attachment: PendingAttachment] }>()
 const uploading = ref(false)
 const progress = ref(0)
 
-const ACCEPT = 'image/*,.pdf,.doc,.docx,.txt,.md'
+const ACCEPT = 'image/*,.pdf,.docx,.txt,.md'
 
 async function doUpload(file: File) {
   if (file.size > UPLOAD_MAX_BYTES) {

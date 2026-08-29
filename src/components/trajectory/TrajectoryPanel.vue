@@ -81,7 +81,9 @@ function clampSplitWidth(width: number): number {
 
 async function refresh() {
   const id = props.conversationId
-  if (id) await store.load(id)
+  if (id) {
+    await store.load(id)
+  }
 }
 
 function startPolling() {

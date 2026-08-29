@@ -63,11 +63,43 @@ function safeStringify(v: unknown): string {
   }
 }
 
+function attachmentLabel(attachment: NonNullable<TrajectoryNode['attachments']>[number]): string {
+  const name = attachment.name?.trim()
+  if (name) return name
+
+  const category = attachment.mime_type?.split('/', 1)[0]
+  if (category === 'image') return '图片'
+  if (category === 'audio') return '音频'
+  if (category === 'video') return '视频'
+  return '附件'
+}
+
+function sourceSummary(n: TrajectoryNode): string {
+  const attachments = n.attachments ?? []
+  const fileRefs = n.file_refs ?? []
+  const parts: string[] = []
+
+  if (attachments.length) {
+    const names = attachments.slice(0, 3).map(attachmentLabel)
+    const suffix = attachments.length > names.length ? ` 等 ${attachments.length} 个` : ''
+    parts.push(`附件：${names.join('、')}${suffix}`)
+  }
+  if (fileRefs.length) {
+    const paths = fileRefs.slice(0, 2).map((ref) => ref.path).filter(Boolean)
+    const suffix = fileRefs.length > paths.length ? ` 等 ${fileRefs.length} 个` : ''
+    parts.push(paths.length ? `引用：${paths.join('、')}${suffix}` : `引用文件（${fileRefs.length} 个）`)
+  }
+
+  return parts.join(' · ')
+}
+
 function makeUserCell(n: TrajectoryNode, index: number, kind: 'user' | 'steering'): TrajectoryCell {
+  const content = (n.content ?? '').replace(/\n/g, ' ').trim()
+  const summary = sourceSummary(n)
   return {
     index,
     kind,
-    text: truncate((n.content ?? '').replace(/\n/g, ' ') || (kind === 'steering' ? '（引导）' : '（空）'), 60),
+    text: truncate(content || summary || (kind === 'steering' ? '（引导）' : '非文本消息'), 60),
     previewMarkdown: n.content ?? '',
     content: n.content,
     startedAt: n.time,

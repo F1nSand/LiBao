@@ -131,6 +131,28 @@ describe('foldTrajectory（对话轨迹折叠）', () => {
     expect(turns[0].userCell?.kind).toBe('steering')
   })
 
+  it('仅附件或工作区引用的用户消息不应显示“（空）”，而应显示来源摘要', () => {
+    const turns = foldTrajectory([
+      {
+        seq: 1,
+        kind: 'user',
+        time: 1000,
+        content: '',
+        attachments: [{ attachment_id: 'atc_img', name: '截图.png', mime_type: 'image/png' }],
+        file_refs: [{ path: 'docs/readme.md' }],
+      },
+    ])
+
+    expect(turns[0].userCell?.text).toContain('截图.png')
+    expect(turns[0].userCell?.text).toContain('docs/readme.md')
+    expect(turns[0].userCell?.text).not.toContain('（空）')
+  })
+
+  it('没有正文且来源缺少元数据时也应使用非文本占位，而不是“（空）”', () => {
+    const turns = foldTrajectory([{ seq: 1, kind: 'user', time: 1000, content: '' }])
+    expect(turns[0].userCell?.text).toBe('非文本消息')
+  })
+
   it('compaction 节点建 Compaction 组（单个 compacted cell）', () => {
     const turns = foldTrajectory([user(1, 'q'), { seq: 2, kind: 'compaction', time: 2000, content: '压缩摘要' }])
     expect(turns[0].groups).toHaveLength(1)

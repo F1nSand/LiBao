@@ -42,7 +42,14 @@ export function buildTrajectoryNodes(conversationId: string, list: Message[]): T
       const diff = (m as Message & { diff?: { before: string; after: string } }).diff
       nodes.push({ seq: 0, kind: 'context', time: Date.parse(m.created_at), content: m.content, diff })
     } else if (m.role === 'user') {
-      nodes.push({ seq: 0, kind: 'user', time: Date.parse(m.created_at), content: m.content })
+      nodes.push({
+        seq: 0,
+        kind: 'user',
+        time: Date.parse(m.created_at),
+        content: m.content,
+        attachments: m.attachments,
+        file_refs: m.file_refs,
+      })
     } else if (m.role === 'assistant') {
       nodes.push({
         seq: 0,

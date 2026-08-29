@@ -55,7 +55,7 @@ function partsFromStream(s: StreamState): RenderParts {
   for (const seg of s.segments) {
     if (seg.kind === 'text') {
       // 文本：唯一文本段 → 回复气泡（活动区下方）；done 后无持久化场景切 markdown 渲染
-      text = { kind: 'text', content: seg.text, streaming: !s.finished }
+      text = { kind: 'text', content: seg.text, streaming: s.streaming }
     } else if (seg.kind === 'tool') {
       const card = s.toolCalls[seg.cardId]
       if (card) {
@@ -69,7 +69,7 @@ function partsFromStream(s: StreamState): RenderParts {
     }
   }
   // 工具轮无文本 → 占位消息「调用 [工具]：入参」（流式中即时显示）
-  if (!text && toolCalls.length) text = { kind: 'text', content: toolPlaceholder(toolCalls), streaming: !s.finished }
+  if (!text && toolCalls.length) text = { kind: 'text', content: toolPlaceholder(toolCalls), streaming: s.streaming }
   return { activity, text }
 }
 
@@ -117,6 +117,7 @@ function setThinkingHover(i: number, v: boolean): void {
 }
 
 const role = computed(() => (props.stream ? 'assistant' : props.message?.role ?? 'user'))
+const hasUserText = computed(() => !!props.message?.content?.trim())
 
 /** 逐轮 token_usage/cost footer（docs/03 §3 多消息扩展）：仅持久化消息路径，防御式（无数据即空） */
 const usageText = computed(() => {
@@ -145,7 +146,7 @@ const usageText = computed(() => {
             <span class="mono">{{ fr.path }}</span>
           </span>
         </div>
-        <div class="user-text">{{ message.content }}</div>
+        <div v-if="hasUserText" class="user-text">{{ message.content }}</div>
       </template>
 
       <!-- 助手消息：活动区（工具/切换/思考）在回复气泡上方，往下递进 -->

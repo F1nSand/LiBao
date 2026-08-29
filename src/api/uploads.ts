@@ -1,6 +1,6 @@
-import { httpGet, httpPost } from './http'
+import { httpPost } from './http'
 import type { AxiosProgressEvent } from 'axios'
-import type { UploadResponse, AttachmentAnalysis } from '@/types'
+import type { UploadResponse } from '@/types'
 
 export function uploadAttachment(
   file: File,
@@ -15,8 +15,4 @@ export function uploadAttachment(
     },
     signal,
   })
-}
-
-export function getAttachmentAnalysis(id: string) {
-  return httpGet<AttachmentAnalysis>(`/attachments/${id}/analysis`)
 }

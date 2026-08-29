@@ -26,6 +26,11 @@ const streamState: StreamState = {
     tc1: { tool_call_id: 'tc1', tool_name: 'web_search', input: {}, status: 'done', startedAt: 0 },
   },
   status: 'done',
+  phase: 'done',
+  phaseDetail: null,
+  cancelling: false,
+  confirming: false,
+  activities: [],
   interrupted: null,
   error: null,
   finished: true,
@@ -62,6 +67,37 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     const w = mount(MessageBubble, { props: { message: userMsg } })
     expect(w.find('.msg-activity').exists()).toBe(false)
     expect(w.find('.user-text').text()).toBe('你好')
+  })
+
+  it('纯附件/纯引用消息不渲染空的用户文字气泡', () => {
+    const userMsg: Message = {
+      id: 'u-attachment',
+      conversation_id: 'c1',
+      role: 'user',
+      content: '',
+      attachments: [{ attachment_id: 'atc-1', name: 'report.pdf', mime_type: 'application/pdf', size: 2048, status: 'uploaded' }],
+      file_refs: [{ path: 'docs/readme.md' }],
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const w = mount(MessageBubble, { props: { message: userMsg } })
+    expect(w.find('.user-text').exists()).toBe(false)
+    expect(w.find('.attach-file').exists()).toBe(true)
+    expect(w.find('.file-ref-chip').exists()).toBe(true)
+  })
+
+  it('仅空白正文也不渲染文字气泡', () => {
+    const w = mount(MessageBubble, {
+      props: {
+        message: {
+          id: 'u-whitespace',
+          conversation_id: 'c1',
+          role: 'user',
+          content: '  \n  ',
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      },
+    })
+    expect(w.find('.user-text').exists()).toBe(false)
   })
 
   it('工具轮无文本（content 空但有 tool_calls）→ 气泡占位「调用 [工具]：入参」', () => {
