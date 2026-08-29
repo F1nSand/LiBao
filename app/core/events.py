@@ -22,14 +22,18 @@ SSE_EVENT_TYPES = (
 )
 
 
-def make_event(event_type: str, payload: dict[str, Any], seq: int) -> dict[str, Any]:
-    return {
+def make_event(event_type: str, payload: dict[str, Any], seq: int, *, task_seq: int | None = None) -> dict[str, Any]:
+    event = {
         "id": f"evt_{seq}",
         "seq": seq,
         "type": event_type,
         "ts": int(time.time() * 1000),
         "payload": payload,
     }
+    if task_seq is not None:
+        event["task_seq"] = task_seq
+        event["id"] = f"task_evt_{task_seq}"
+    return event
 
 
 def format_sse(env: dict[str, Any]) -> str:

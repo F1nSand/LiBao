@@ -9,7 +9,15 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from app.orchestration.graph import build_graph
-from app.orchestration.task_worker import running_task, spawn_run
+from app.orchestration.stream_core import stream_graph_events
+from app.orchestration.task_worker import (
+    register_running_task,
+    route_cancel,
+    running_task,
+    spawn_run,
+    task_guard,
+    unregister_running_task,
+)
 from app.services.task import TaskService
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, User
@@ -90,3 +98,123 @@ async def test_cancel_after_then_next_task_runs(cancel_fixture):
     fut2.cancel()  # 清理，避免挂 10s
     with contextlib.suppress(asyncio.CancelledError):
         await fut2
+
+
+async def test_chat_stream_producer_is_cancellable_and_skips_final_callback():
+    """普通聊天 SSE 的 graph producer 也必须登记到统一取消表，取消后不触发 on_final。"""
+
+    class SlowGraph:
+        async def astream(self, initial, config, stream_mode):
+            await asyncio.sleep(10)
+            if False:  # pragma: no cover - 仅让函数保持 async generator 形态
+                yield ("values", {})
+
+    run_id = f"chat-{uuid.uuid4()}"
+    final_called = False
+
+    async def on_final(_state):
+        nonlocal final_called
+        final_called = True
+        return {"content": "不应落库"}
+
+    async def consume():
+        async for _ in stream_graph_events(
+            graph=SlowGraph(),
+            initial={},
+            graph_config={"configurable": {"thread_id": run_id}},
+            emit=lambda event, payload: f"{event}:{payload}",
+            on_final=on_final,
+            run_id=run_id,
+        ):
+            pass
+
+    consumer = asyncio.create_task(consume())
+    for _ in range(20):
+        if running_task(run_id) is not None:
+            break
+        await asyncio.sleep(0.01)
+    assert running_task(run_id) is not None
+
+    await route_cancel(run_id)
+    await asyncio.wait_for(consumer, timeout=1)
+    assert final_called is False
+    assert running_task(run_id) is None
+
+
+async def test_cancel_intent_survives_registration_race():
+    """HTTP cancel 可能先于 chat graph producer 注册，注册后仍必须立即中断。"""
+    run_id = f"chat-race-{uuid.uuid4()}"
+    await route_cancel(run_id)
+    producer = asyncio.create_task(asyncio.sleep(10))
+    register_running_task(run_id, producer)
+    try:
+        await asyncio.wait_for(producer, timeout=1)
+    except asyncio.CancelledError:
+        pass
+    assert producer.cancelled()
+    unregister_running_task(run_id, producer)
+    assert running_task(run_id) is None
+
+
+async def test_task_cancel_waits_for_finalization_guard(cancel_fixture):
+    """取消与最终落库共用 guard；finalization 持锁时 cancel 不得抢先改终态。"""
+    user, agent = cancel_fixture
+    async with get_store().session() as session:
+        task = await TaskService().submit(session, user, agent.id, {"message": "x"})
+        await TaskService().set_running(session, task)
+        task_id = str(task.id)
+
+        lock = task_guard(task_id)
+        await lock.acquire()
+        cancel_job = asyncio.create_task(TaskService().cancel(session, task))
+        await asyncio.sleep(0)
+        assert not cancel_job.done()
+        lock.release()
+        await cancel_job
+        assert task.status == "cancelled"
+
+
+async def test_tool_execution_cancellation_interrupts_graph(cancel_fixture, monkeypatch):
+    """工具执行挂起时取消，graph 不得继续到最终回复。"""
+    from app.tools.builtin import register_builtin_tools
+    from app.tools.executor import ToolResult
+
+    register_builtin_tools()
+
+    async def slow_execute(*_args, **_kwargs):
+        await asyncio.sleep(10)
+        return ToolResult(ok=True, output={}, summary="不应完成", duration_ms=0)
+
+    monkeypatch.setattr("app.tools.executor.execute", slow_execute)
+    user, agent = cancel_fixture
+    agent.tools = ["tl_time_now"]
+    async with get_store().session() as session:
+        task = await TaskService().submit(session, user, agent.id, {"message": "x"})
+        task_id = task.id
+
+    class ToolCallingModel:
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        async def ainvoke(self, messages):
+            return AIMessage(
+                content="",
+                tool_calls=[{"name": "time_now", "args": {}, "id": "slow-call", "type": "tool_call"}],
+            )
+
+    monkeypatch.setattr(
+        "app.orchestration.nodes.agent_execute.LLMService.build_model", lambda *a, **k: ToolCallingModel()
+    )
+    fut = spawn_run(graph=build_graph(), task_id=task_id, trace_id="trace-tool-cancel")
+    await asyncio.sleep(0.5)
+    async with get_store().session() as session:
+        cancelled_task = await TaskRepository(session).get_by_id(task_id)
+        await TaskService().cancel(session, cancelled_task)
+    await route_cancel(str(task_id))
+    with contextlib.suppress(asyncio.CancelledError):
+        await fut
+
+    async with get_store().session() as session:
+        cancelled = await TaskRepository(session).get_by_id(task_id)
+        assert cancelled.status == "cancelled"
+        assert cancelled.output is None

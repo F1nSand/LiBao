@@ -1,4 +1,4 @@
-"""任务实体（docs 04 §3.3）。task.id = LangGraph thread_id（异步模式，M1 对话为主暂不落任务）。"""
+"""任务实体（docs 04 §3.3）。后台任务和普通聊天运行都以 Task 作为取消/恢复载体。"""
 
 import uuid
 from dataclasses import dataclass, field
@@ -17,6 +17,9 @@ class Task(Row):
     error: dict | None = None  # {code, message}
     parent_task_id: uuid.UUID | None = None
     pending_confirm: dict | None = None
+    last_event_seq: int = 0
+    recovery_attempts: int = 0
+    recovery_key: str | None = None
     progress: float = 0.0
     placeholder_events: list | None = None
     started_at: datetime | None = None
