@@ -20,8 +20,6 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
-from langchain_core.load import dumps as lc_dumps
-from langchain_core.load import loads as lc_loads
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
     ChannelVersions,
@@ -31,23 +29,12 @@ from langgraph.checkpoint.base import (
     SerializerProtocol,
 )
 
-SCHEMA_VERSION = 1
+from app.orchestration.checkpoint_codec import JsonCheckpointCodec
+
+SCHEMA_VERSION = 2
 
 
-def _load_pending_write(channel: str, value: str) -> Any:
-    try:
-        return lc_loads(value)
-    except NotImplementedError:
-        if channel != "__error__":
-            raise
-        try:
-            error_id = json.loads(value).get("id") or []
-        except (json.JSONDecodeError, AttributeError):
-            error_id = []
-        return {"error_type": str(error_id[-1]) if error_id else "UnserializableError"}
-
-
-def _checkpoint_before_failed_input(records: dict[str, Any], latest_id: str) -> str | None:
+def _checkpoint_before_failed_input(records: dict[str, Any], latest_id: str, codec: JsonCheckpointCodec) -> str | None:
     latest = records[latest_id]
     has_error = any(
         pair[0] == "__error__"
@@ -58,10 +45,20 @@ def _checkpoint_before_failed_input(records: dict[str, Any], latest_id: str) -> 
         return latest_id
     ids = sorted(records)
     for index in range(ids.index(latest_id), -1, -1):
-        metadata = lc_loads(records[ids[index]]["metadata"])
+        metadata = codec.loads(records[ids[index]]["metadata"], channel="metadata")
         if metadata.get("source") == "input":
             return ids[index - 1] if index > 0 else None
     return latest_id
+
+
+def _latest_failed_checkpoint_id(records: dict[str, Any]) -> str | None:
+    """返回挂有 LangGraph ``__error__`` pending write 的最新节点输入 checkpoint。"""
+
+    for checkpoint_id in sorted(records, reverse=True):
+        writes = records[checkpoint_id].get("writes") or {}
+        if any(channel == "__error__" for task_writes in writes.values() for channel, _ in task_writes):
+            return checkpoint_id
+    return None
 
 
 def _thread_key(config: dict[str, Any]) -> str:
@@ -80,6 +77,7 @@ class JsonFileSaver(BaseCheckpointSaver):
 
     def __init__(self, root: Path, *, serde: SerializerProtocol | None = None) -> None:
         super().__init__(serde=serde)
+        self.codec = JsonCheckpointCodec(self.serde)
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self._locks: dict[str, threading.Lock] = {}
@@ -138,8 +136,8 @@ class JsonFileSaver(BaseCheckpointSaver):
             checkpoint_id = str(checkpoint["id"])
             # LangChain 消息/状态对象经 lc_dumps 安全序列化
             data["checkpoints"][checkpoint_id] = {
-                "checkpoint": lc_dumps(checkpoint),
-                "metadata": lc_dumps(metadata),
+                "checkpoint": self.codec.dumps(checkpoint),
+                "metadata": self.codec.dumps(metadata),
                 "writes": {},
             }
             self._save(path, data)
@@ -165,10 +163,10 @@ class JsonFileSaver(BaseCheckpointSaver):
             rec["writes"][task_id] = [
                 [
                     ch,
-                    lc_dumps(
-                        {"error_type": type(val).__name__}
+                    (
+                        self.codec.dumps({"error_type": type(val).__name__})
                         if ch == "__error__" and isinstance(val, BaseException)
-                        else val
+                        else self.codec.dumps(val)
                     ),
                 ]
                 for ch, val in writes
@@ -186,14 +184,14 @@ class JsonFileSaver(BaseCheckpointSaver):
                 record = recs[str(cid)]
             elif recs:
                 latest_id = max(recs.keys())  # checkpoint_id 可比较 → 最新
-                checkpoint_id = _checkpoint_before_failed_input(recs, latest_id)
+                checkpoint_id = _checkpoint_before_failed_input(recs, latest_id, self.codec)
                 if checkpoint_id is None:
                     return None
                 record = recs[checkpoint_id]
             else:
                 return None
-            checkpoint: Checkpoint = lc_loads(record["checkpoint"])
-            metadata: CheckpointMetadata = lc_loads(record["metadata"])
+            checkpoint: Checkpoint = self.codec.loads(record["checkpoint"], channel="checkpoint")
+            metadata: CheckpointMetadata = self.codec.loads(record["metadata"], channel="metadata")
             parent_id = checkpoint.get("parent_checkpoint_id")
             parent_config = None
             if parent_id:
@@ -201,7 +199,7 @@ class JsonFileSaver(BaseCheckpointSaver):
             pending_writes: list[tuple[str, str, Any]] = []
             for tid, chans in (record.get("writes") or {}).items():
                 for ch, val in chans:
-                    pending_writes.append((tid, ch, _load_pending_write(ch, val)))
+                    pending_writes.append((tid, ch, self.codec.loads(val, channel=ch)))
             return CheckpointTuple(
                 config={"configurable": {**cfg, "checkpoint_id": checkpoint["id"]}},
                 checkpoint=checkpoint,
@@ -209,6 +207,18 @@ class JsonFileSaver(BaseCheckpointSaver):
                 parent_config=parent_config,
                 pending_writes=pending_writes,
             )
+
+    def get_failed_config(self, config: dict[str, Any]) -> dict[str, Any] | None:
+        """显式读取失败节点 checkpoint，避免普通读取为新用户消息回滚失败输入。"""
+
+        path = self._path(config)
+        with self._lock(str(path)):
+            data = self._load(path)
+            checkpoint_id = _latest_failed_checkpoint_id(data.get("checkpoints") or {})
+            if checkpoint_id is None:
+                return None
+            cfg = config.get("configurable", config) or {}
+            return {"configurable": {**cfg, "checkpoint_id": checkpoint_id}}
 
     def list(
         self,
@@ -235,8 +245,8 @@ class JsonFileSaver(BaseCheckpointSaver):
                 tuples.append(
                     CheckpointTuple(
                         config={"configurable": {**config.get("configurable", {}), "checkpoint_id": i}},
-                        checkpoint=lc_loads(rec["checkpoint"]),
-                        metadata=lc_loads(rec["metadata"]),
+                        checkpoint=self.codec.loads(rec["checkpoint"], channel="checkpoint"),
+                        metadata=self.codec.loads(rec["metadata"], channel="metadata"),
                         parent_config=None,
                         pending_writes=[],
                     )
@@ -267,6 +277,9 @@ class JsonFileSaver(BaseCheckpointSaver):
 
     async def aget_tuple(self, config: dict[str, Any]) -> CheckpointTuple | None:
         return await asyncio.to_thread(self.get_tuple, config)
+
+    async def aget_failed_config(self, config: dict[str, Any]) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self.get_failed_config, config)
 
     async def alist(
         self,

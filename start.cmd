@@ -23,9 +23,21 @@ if not exist "%ROOT%.venv" (
 
 rem ---- 2. backend ----
 echo [2/3] backend :8000
+if /I "%~1"=="restart" (
+  echo   restart requested: checking current project instance
+  for /f "delims=" %%S in ('uv run python scripts/check_backend_runtime.py "%BE_URL%" 2^>nul') do set "RUNTIME_STATE=%%S"
+  if /I "!RUNTIME_STATE!"=="current" (
+    echo   backend belongs to this project and is current; no restart needed
+    goto :done
+  )
+  echo   state=!RUNTIME_STATE!; close the verified "Agent Backend" window, then run start.cmd again
+  goto :done
+)
 curl -sf "%BE_URL%" >nul 2>&1
 if not errorlevel 1 (
-  echo   backend already running, skip
+  for /f "delims=" %%S in ('uv run python scripts/check_backend_runtime.py "%BE_URL%" 2^>nul') do set "RUNTIME_STATE=%%S"
+  if /I "!RUNTIME_STATE!"=="current" echo   backend already running (current project/runtime), skip
+  if /I not "!RUNTIME_STATE!"=="current" echo   backend state=!RUNTIME_STATE!; no automatic reuse, inspect/restart explicitly
   goto :done
 )
 start "Agent Backend" cmd /k "cd /d %ROOT% && uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000"

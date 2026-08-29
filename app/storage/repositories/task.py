@@ -69,6 +69,22 @@ class TaskRepository:
             )
         )
 
+    async def get_waiting_confirm_for_conversation(
+        self, user_id: uuid.UUID, conversation_id: uuid.UUID
+    ) -> Task | None:
+        items = await self.table.list(
+            filter_fn=lambda t: (
+                t.user_id == user_id
+                and t.deleted_at is None
+                and t.status == "waiting_confirm"
+                and str((t.pending_confirm or {}).get("conversation_id") or "") == str(conversation_id)
+            ),
+            sort_key=lambda t: t.created_at,
+            desc=True,
+            limit=1,
+        )
+        return items[0] if items else None
+
     async def update_status(self, task: Task, status: str, *, progress: float | None = None) -> None:
         task.status = status
         if progress is not None:

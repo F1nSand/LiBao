@@ -12,6 +12,7 @@ from app.api.deps import get_db, require_admin
 from app.api.envelope import ok
 from app.api.schemas.common import paged
 from app.core.config import get_settings
+from app.core.runtime_info import runtime_info
 from app.services.serializers import serialize_run_log, serialize_trace_event
 from app.services.system import SystemService
 from app.storage.models.user import User
@@ -30,7 +31,15 @@ def _parse_iso(value: str | None) -> datetime | None:
 @router.get("/system/health")
 async def health():
     settings = get_settings()
-    return ok({"status": "ok", "service": "agent-backend", "env": settings.app_env, "time": int(time.time())})
+    return ok(
+        {
+            "status": "ok",
+            "service": "agent-backend",
+            "env": settings.app_env,
+            "time": int(time.time()),
+            "runtime": runtime_info(),
+        }
+    )
 
 
 @router.get("/system/logs")
