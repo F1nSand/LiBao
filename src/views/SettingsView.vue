@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listProviders, createProvider, updateProvider, deleteProvider, activateProvider, getActiveProvider } from '@/api/provider'
+import { getSandboxSettings, updateSandboxSettings } from '@/api/sandbox'
 import { FEATURE, isUnavailable } from '@/api/availability'
 import { swallowNotImplemented } from '@/utils/http-envelope'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -13,15 +14,16 @@ import ThemePane from '@/components/layout/ThemePane.vue'
 import AsyncState from '@/components/common/AsyncState.vue'
 import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 import type { ProviderConfig } from '@/types'
+import type { SandboxMode, SandboxSettings } from '@/api/sandbox'
 
 type ProviderListStatus = 'idle' | 'loading' | 'success-empty' | 'success' | 'error' | 'unavailable'
 
 /** 设置（docs/02 §4 / docs/03 §5.1）：单用户本地模式 → Provider 配置 / 通知 / 主题 三个 pane（tag 切换，非悬浮窗） */
 
 /* ---------- 设置组切换 ---------- */
-const activeTab = ref<'provider' | 'notifications' | 'theme'>('provider')
+const activeTab = ref<'provider' | 'sandbox' | 'notifications' | 'theme'>('provider')
 const pageSubtitle = computed(
-  () => ({ provider: 'Provider 配置', notifications: '通知', theme: '主题配色' })[activeTab.value],
+  () => ({ provider: 'Provider 配置', sandbox: '命令执行沙箱', notifications: '通知', theme: '主题配色' })[activeTab.value],
 )
 
 /* ---------- 主题（themeId 由本页持有，tag 圆点 + ThemePane 同源） ---------- */
@@ -59,9 +61,20 @@ const providerNameError = ref('')
 const providerBaseUrlError = ref('')
 const providerModelError = ref('')
 
+const sandboxSettings = ref<SandboxSettings | null>(null)
+const sandboxLoading = ref(false)
+const sandboxSaving = ref(false)
+const sandboxError = ref<string | null>(null)
+const sandboxModes: Array<{ id: SandboxMode; title: string; detail: string }> = [
+  { id: 'powershell', title: 'PowerShell 7', detail: '宿主工作区 · Windows 原生语法' },
+  { id: 'git_bash', title: 'Git Bash', detail: '宿主工作区 · POSIX shell 语法' },
+  { id: 'docker', title: 'Docker Bash', detail: '容器强隔离 · 无网络、只挂载当前工作区' },
+]
+
 onMounted(() => {
   void loadProviders()
   void loadActiveProvider()
+  void loadSandboxSettings()
   void loadNotifications()
   if (!isUnavailable(FEATURE.notifications)) sse.connect()
 })
@@ -82,6 +95,37 @@ async function loadProviders() {
   } catch (e) {
     providerStatus.value = 'error'
     providerErrorMessage.value = e instanceof Error ? e.message : 'Provider 列表加载失败'
+  }
+}
+
+async function loadSandboxSettings() {
+  sandboxLoading.value = true
+  sandboxError.value = null
+  try {
+    sandboxSettings.value = await getSandboxSettings()
+  } catch (e) {
+    sandboxError.value = e instanceof Error ? e.message : '沙箱设置加载失败'
+  } finally {
+    sandboxLoading.value = false
+  }
+}
+
+async function selectSandboxMode(mode: SandboxMode) {
+  const backend = sandboxSettings.value?.backends[mode]
+  if (!backend?.available) {
+    ElMessage.warning(backend?.detail || '该沙箱后端不可用')
+    return
+  }
+  const previous = sandboxSettings.value
+  sandboxSaving.value = true
+  try {
+    sandboxSettings.value = await updateSandboxSettings(mode)
+    ElMessage.success(`已切换到 ${sandboxModes.find((item) => item.id === mode)?.title}`)
+  } catch (e) {
+    sandboxSettings.value = previous
+    ElMessage.error(e instanceof Error ? e.message : '沙箱切换失败')
+  } finally {
+    sandboxSaving.value = false
   }
 }
 
@@ -214,6 +258,20 @@ async function onDeleteProvider(id: string) {
         </button>
         <button
           type="button"
+          id="settings-sandbox-tab"
+          role="tab"
+          data-tab="sandbox"
+          aria-controls="settings-sandbox-panel"
+          :aria-selected="activeTab === 'sandbox'"
+          class="settings-tag"
+          :class="{ active: activeTab === 'sandbox' }"
+          @click="activeTab = 'sandbox'"
+          @keydown="onTabKeydown"
+        >
+          沙箱
+        </button>
+        <button
+          type="button"
           id="settings-notifications-tab"
           role="tab"
           data-tab="notifications"
@@ -299,6 +357,31 @@ async function onDeleteProvider(id: string) {
             </AsyncState>
           </template>
           <EmptyState v-else text="后端暂未实现 Provider 配置接口（契约已发交接板）" />
+        </div>
+        <div v-else-if="activeTab === 'sandbox'" id="settings-sandbox-panel" key="sandbox" class="settings-pane" role="tabpanel" aria-labelledby="settings-sandbox-tab">
+          <AsyncState :status="sandboxLoading ? 'loading' : (sandboxError ? 'error' : 'success')" :error-message="sandboxError" @retry="loadSandboxSettings">
+            <div class="sandbox-mode-grid">
+              <button
+                v-for="item in sandboxModes"
+                :key="item.id"
+                type="button"
+                class="sandbox-mode-card"
+                :class="{ active: sandboxSettings?.mode === item.id, unavailable: !sandboxSettings?.backends[item.id]?.available }"
+                :disabled="sandboxSaving || !sandboxSettings?.backends[item.id]?.available"
+                @click="selectSandboxMode(item.id)"
+              >
+                <span class="sandbox-mode-title">{{ item.title }}</span>
+                <span class="sandbox-mode-detail">{{ item.detail }}</span>
+                <span class="sandbox-mode-status">
+                  {{ sandboxSettings?.backends[item.id]?.available ? '可用' : (sandboxSettings?.backends[item.id]?.detail || '不可用') }}
+                </span>
+              </button>
+            </div>
+            <p v-if="sandboxSettings" class="sandbox-review-hint">
+              独立命令审查：{{ sandboxSettings.review.enabled ? (sandboxSettings.review.configured ? '已启用' : '未配置，使用规则降级') : '已关闭' }}。
+              依赖安装和远程脚本会额外请求人工确认。
+            </p>
+          </AsyncState>
         </div>
         <div v-else-if="activeTab === 'notifications'" id="settings-notifications-panel" key="notifications" role="tabpanel" aria-labelledby="settings-notifications-tab">
           <NotificationPane />
@@ -452,6 +535,40 @@ async function onDeleteProvider(id: string) {
   border-radius: 50%;
   border: 1px solid var(--app-border-light);
   flex-shrink: 0;
+}
+.sandbox-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.sandbox-mode-card {
+  display: flex;
+  min-height: 132px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--app-border-light);
+  border-radius: var(--app-radius);
+  background: var(--app-content-bg);
+  color: var(--app-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.sandbox-mode-card.active {
+  border-color: var(--app-primary);
+  box-shadow: 0 0 0 1px var(--app-primary);
+}
+.sandbox-mode-card.unavailable {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.sandbox-mode-title { font-weight: 600; }
+.sandbox-mode-detail,
+.sandbox-mode-status,
+.sandbox-review-hint { color: var(--app-text-secondary); font-size: var(--app-font-size-sm); }
+@media (max-width: 768px) {
+  .sandbox-mode-grid { grid-template-columns: 1fr; }
 }
 /* pane 切换过渡（emil：leave 快 60ms、enter 140ms，总 <300ms） */
 .settings-pane-enter-active {
