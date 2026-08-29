@@ -71,7 +71,7 @@ async def test_upload_too_large_40011(att_fixture, monkeypatch):
         assert exc.value.code == 40011
 
 
-async def test_analyze_image_degrades(att_fixture):
+async def test_analyze_image_is_neutral_until_send(att_fixture):
     user, other, tmp = att_fixture
     svc = AttachmentService()
     async with get_store().session() as session:
@@ -81,8 +81,9 @@ async def test_analyze_image_degrades(att_fixture):
     async with get_store().session() as session:
         att = await svc.get_attachment(session, user, att_id)
         assert att.status == "ready"  # 降级是完成态，不是 failed
-        assert att.analysis["reason"] == "no_vision_model"
-        assert "无法分析" in att.analysis["text"]
+        assert att.analysis["type"] == "image"
+        assert att.analysis["reason"] == "analysis_on_send"
+        assert att.analysis["text"] is None
 
 
 async def test_analyze_txt_extracts(att_fixture):

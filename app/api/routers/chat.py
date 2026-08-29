@@ -11,13 +11,14 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import get_current_user, get_db
 from app.api.schemas.chat import ChatRequest
 from app.core.config import get_settings
-from app.core.errors import ERR_WORKSPACE_FILE_REF_INVALID, AppError
+from app.core.errors import ERR_STATE_NOT_CANCELLABLE, ERR_WORKSPACE_FILE_REF_INVALID, AppError
 from app.core.logging import get_trace_id
 from app.orchestration.chat_stream import chat_stream_events
 from app.services.agent import AgentService
 from app.services.attachment import AttachmentService
 from app.services.conversation import ConversationService
 from app.services.skill import discover_workspace_agent
+from app.services.task import TaskService
 from app.services.workspace import WorkspaceService
 from app.storage.models.user import User
 
@@ -97,6 +98,25 @@ async def chat_stream(
         att = await att_service.get_attachment(db, user, aid)
         attachments.append(str(att.id))
 
+    pending = await TaskService().get_waiting_confirm_for_conversation(db, user.id, conversation.id)
+    if pending is not None:
+        raise AppError(ERR_STATE_NOT_CANCELLABLE, "当前会话仍有待确认操作，请先确认或拒绝")
+
+    # 普通聊天也建立 Task：停止按钮必须能路由到正在执行的 graph，而不是只断开 SSE。
+    task_service = TaskService()
+    task = await task_service.submit(
+        db,
+        user,
+        agent.id,
+        {
+            "conversation_id": str(conversation.id),
+            "message": req.message.content,
+            "attachment_ids": attachments,
+            "file_refs": file_refs,
+        },
+    )
+    await task_service.set_running(db, task)
+
     return StreamingResponse(
         chat_stream_events(
             db=db,
@@ -109,6 +129,7 @@ async def chat_stream(
             file_refs=file_refs,
             workspace=workspace,
             trace_id=trace_id,
+            task=task,
         ),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache", "Connection": "keep-alive"},

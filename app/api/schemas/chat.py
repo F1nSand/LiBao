@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.errors import ERR_INPUT_TOO_LONG, AppError
 
@@ -22,6 +22,7 @@ class FileRef(BaseModel):
     """
 
     path: str = Field(min_length=1, max_length=1024)
+    model_config = ConfigDict(extra="forbid")
 
     @field_validator("path")
     @classmethod

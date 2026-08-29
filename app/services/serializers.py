@@ -268,7 +268,10 @@ def serialize_run_log(log: RunLog) -> dict[str, Any]:
 
 
 def serialize_task(t: Task) -> dict[str, Any]:
-    """任务序列化（docs 03 §5.3）。error 序列化为 message 字符串（前端 Task.error?: string）。"""
+    """任务序列化（docs 03 §5.3）。error 保留可恢复分类，兼容旧字符串消费者。"""
+    error = t.error
+    if isinstance(error, str):
+        error = {"code": "task_error", "message": error, "retryable": False, "recoverable": False}
     return {
         "id": str(t.id),
         "agent_id": str(t.agent_id),
@@ -277,7 +280,9 @@ def serialize_task(t: Task) -> dict[str, Any]:
         "input": t.input,
         "output": t.output,
         "pending_confirm": t.pending_confirm,
-        "error": (t.error or {}).get("message") if t.error else None,
+        "error": error,
+        "last_event_seq": getattr(t, "last_event_seq", 0),
+        "recovery_attempts": getattr(t, "recovery_attempts", 0),
         "created_at": _dt(t.created_at),
         "updated_at": _dt(t.updated_at),
     }

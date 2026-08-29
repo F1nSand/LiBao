@@ -21,13 +21,15 @@ def _authorized_specs(tool_ids: list[str], id_set: set[str]) -> list[ToolSpec]:
     return [s for tid in tool_ids if (s := get(tid)) is not None and agent_can_use(s, id_set)]
 
 
-def acis_for_tools(tool_ids: list[str]) -> list[dict]:
+def acis_for_tools(tool_ids: list[str], shell_mode: str | None = None) -> list[dict]:
     """agent_config.tools（工具 id 列表）→ 启用的 ACI，按 id 排序（前缀稳定）。"""
     specs = _authorized_specs(tool_ids, set(tool_ids))
-    return [s.aci() for s in sorted(specs, key=lambda s: s.id)]
+    return [_aci_for_spec(s, shell_mode) for s in sorted(specs, key=lambda s: s.id)]
 
 
-def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = None) -> list[dict]:
+def build_agent_tools(
+    tool_ids: list[str], selected_names: list[str] | None = None, shell_mode: str | None = None
+) -> list[dict]:
     """工具 ACI 注入（M2.5 两段式门控，docs 01 §7.1.1 A2）。
 
     启用工具数 ≤ aci_full_limit → 维持现状全量 ACI（现有场景零行为变化）；
@@ -36,7 +38,7 @@ def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = No
     id_set = set(tool_ids)
     specs = _authorized_specs(tool_ids, id_set)
     if len(specs) <= get_settings().aci_full_limit:
-        return [s.aci() for s in sorted(specs, key=lambda s: s.id)]
+        return [_aci_for_spec(s, shell_mode) for s in sorted(specs, key=lambda s: s.id)]
     # 平台元工具常驻（超限模式）：tool_search 无条件 + specs 内其他 meta（如 kb_search，RAG 始终可见）
     always = []
     tool_search = get("tl_tool_search")
@@ -52,7 +54,18 @@ def build_agent_tools(tool_ids: list[str], selected_names: list[str] | None = No
         and agent_can_use(s, id_set)
         and not s.meta
     ]
-    return [s.aci() for s in always] + [s.aci() for s in sorted(chosen, key=lambda s: s.id)]
+    return [_aci_for_spec(s, shell_mode) for s in always] + [
+        _aci_for_spec(s, shell_mode) for s in sorted(chosen, key=lambda s: s.id)
+    ]
+
+
+def _aci_for_spec(spec: ToolSpec, shell_mode: str | None) -> dict:
+    aci = spec.aci()
+    if spec.id == "tl_shell":
+        from app.tools.builtin.file_ops import shell_description
+
+        aci["function"]["description"] = shell_description(shell_mode)
+    return aci
 
 
 def build_context(

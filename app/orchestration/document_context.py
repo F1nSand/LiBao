@@ -26,6 +26,7 @@ SOURCE_CHAR_LIMIT = 12_000
 TOTAL_CHAR_LIMIT = 48_000
 CHUNK_SIZE = 1_200
 CHUNK_OVERLAP = 120
+WORKSPACE_READ_LIMIT = 1_048_576
 
 _TEXT_MIMES = {"text/plain", "text/markdown", "text/x-markdown"}
 _TEXT_SUFFIXES = {
@@ -155,18 +156,16 @@ def _extract_docx(data: bytes) -> list[tuple[str, str]]:
 
 def extract_document_units(data: bytes, mime_type: str | None, filename: str = "") -> list[tuple[str, str]]:
     """按 MIME/扩展名抽取正文，返回带来源单元的顺序列表。"""
-    mime = (mime_type or "").lower()
-    suffix = Path(filename).suffix.lower()
-    if mime in _IMAGE_TYPES:
+    if (mime_type or "").lower() in _IMAGE_TYPES:
         return []
-    if mime in _TEXT_MIMES or suffix in _TEXT_SUFFIXES or mime.startswith("text/"):
-        text = _decode_text(data)
-        return [("", text)] if text else []
-    if mime == _PDF_MIME or suffix == ".pdf":
-        return _extract_pdf(data)
-    if mime == _DOCX_MIME or suffix == ".docx":
-        return _extract_docx(data)
-    raise ValueError("文件类型不支持正文解析")
+    from app.services.document_extraction import DocumentExtractionError
+    from app.services.document_extraction import extract_document_units as _extract
+
+    try:
+        _kind, units = _extract(data, content_type=mime_type or "", filename=filename)
+    except DocumentExtractionError as exc:
+        raise ValueError(str(exc)) from exc
+    return units
 
 
 def _join_units(units: list[tuple[str, str]]) -> str:
@@ -294,7 +293,7 @@ async def prepare_document_context(
                 continue
             seen.add(source_id)
             try:
-                data = await asyncio.to_thread(read_file_ref_bytes, root, canonical)
+                data = await asyncio.to_thread(read_file_ref_bytes, root, canonical, WORKSPACE_READ_LIMIT)
                 units = extract_document_units(data, None, canonical)
                 text = _join_units(units)
                 if text:

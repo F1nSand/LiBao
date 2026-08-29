@@ -25,6 +25,10 @@ def test_chat_message_accepts_file_refs_and_limits_sources():
         ChatMessageInput(content="x", file_refs=[{"path": ""}])
     with pytest.raises(ValidationError):
         ChatMessageInput(content="x", file_refs=[{"path": "x"}] * 11)
+    with pytest.raises(ValidationError):
+        ChatMessageInput(content="x", file_refs=[{"path": "x", "extra": "forbidden"}])
+    with pytest.raises(ValidationError):
+        ChatMessageInput(content="x", file_refs=[{"path": "x" * 1025}])
 
 
 def test_file_ref_path_rejects_absolute_traversal_and_non_files(tmp_path: Path):

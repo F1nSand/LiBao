@@ -127,6 +127,19 @@ async def test_metadata_failure_and_unknown_model_stay_unknown():
     assert second.state is VisionCapability.UNKNOWN
 
 
+@pytest.mark.asyncio
+async def test_discovery_or_catalog_exception_stays_unknown():
+    async def discovery(*args, **kwargs):
+        raise TimeoutError("metadata timeout")
+
+    def catalog(_model):
+        raise RuntimeError("catalog unavailable")
+
+    resolver = ModelCapabilityResolver(discovery=discovery, catalog_lookup=catalog)
+    decision = await resolver.resolve_vision(_key())
+    assert decision.state is VisionCapability.UNKNOWN
+
+
 def test_capability_cache_is_scoped_and_has_ttl(monkeypatch):
     resolver = ModelCapabilityResolver(clock=lambda: 100.0)
     first = _key()

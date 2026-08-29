@@ -1,7 +1,7 @@
 """附件领域服务（docs 01 §7.6 / docs 03 §5.9）。本地磁盘存储 MVP（MinIO 为 M4 接缝）。
 
 状态机：uploaded → analyzing → ready | failed（内部抽取缓存；不表示模型已读取）。
-分析链：图片保留 vision 兼容诊断；txt/md → utf-8 提取；pdf/docx → 正文抽取；legacy .doc 拒绝上传。
+分析链：图片只记录中性 `analysis_on_send`；txt/md → utf-8 提取；pdf/docx → 正文抽取；legacy .doc 拒绝上传。
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ class AttachmentService:
         conversation_id: uuid.UUID | None = None,
     ) -> Attachment:
         """校验（40012/40011）→ 落盘 {upload_dir}/{attachment_id} → uploaded → 触发分析链。"""
-        if content_type not in _ALLOWED:
+        if content_type not in _ALLOWED or Path(filename).suffix.lower() == ".doc":
             raise AppError(ERR_ATTACH_TYPE_UNSUPPORTED, f"附件类型不支持: {content_type}")
         if len(data) > get_settings().max_upload_mb * 1024 * 1024:
             raise AppError(ERR_FILE_TOO_LARGE, f"文件超过 {get_settings().max_upload_mb}MB 限制")

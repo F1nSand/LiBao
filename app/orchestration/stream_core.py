@@ -19,14 +19,15 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from app.core.config import get_settings
-from app.core.errors import ERR_LLM_FAILURE
+from app.core.errors import ERR_LLM_FAILURE, AppError, LLMTransportError
 from app.core.messages import message_text  # 独立模块（memory_extract/memory 共用，防导入环）
+from app.core.model_capabilities import VisionCapability
 from app.core.multimodal import human_message_with_images
-from app.core.vision import supports_vision
 from app.services.skill import discover_global_skills, merge_skill_routes
 from app.tools.builtin.file_ops import FILE_TOOL_IDS
 from app.tools.context import set_dispatch_ctx
 from app.tools.registry import get, get_by_name
+from app.tools.shell_state import get_shell_mode
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +37,33 @@ KEEPALIVE_INTERVAL = 15
 _DRAIN_TASKS: set[asyncio.Task] = set()
 
 
+def _error_payload(exc: Exception, *, retryable: bool = False) -> dict[str, Any]:
+    """将业务异常保持为 typed SSE envelope；普通异常沿用 LLM failure。"""
+    if isinstance(exc, AppError):
+        payload: dict[str, Any] = {
+            "code": exc.code,
+            "message": exc.message,
+            "retryable": exc.retryable,
+        }
+        if getattr(exc, "kind", None) is not None:
+            payload["kind"] = exc.kind
+        if hasattr(exc, "recoverable"):
+            payload["recoverable"] = bool(exc.recoverable)
+        if getattr(exc, "details", None):
+            payload["details"] = exc.details
+        return payload
+    return {"code": ERR_LLM_FAILURE, "message": str(exc), "retryable": retryable}
+
+
 def spawn_drain(
     queue: asyncio.Queue,
     producer_task: asyncio.Task,
     on_error: Callable[[Exception], Any] | None,
     on_final: Callable[[dict[str, Any]], dict[str, Any] | None] | None,
+    on_complete: Callable[[], None] | None = None,
 ) -> None:
     """客户端断开后后台收尾：排空队列直到 graph 跑完，执行 on_final 正常落库（帧丢弃）。"""
-    task = asyncio.create_task(_drain_until_done(queue, producer_task, on_error, on_final))
+    task = asyncio.create_task(_drain_until_done(queue, producer_task, on_error, on_final, on_complete))
     _DRAIN_TASKS.add(task)
     task.add_done_callback(_DRAIN_TASKS.discard)
 
@@ -53,6 +73,7 @@ async def _drain_until_done(
     producer_task: asyncio.Task,
     on_error: Callable[[Exception], Any] | None,
     on_final: Callable[[dict[str, Any]], dict[str, Any] | None] | None,
+    on_complete: Callable[[], None] | None = None,
 ) -> None:
     """断流收尾：graph 继续跑完（producer 已无消费者，本函数排空队列防积压），
     values 模式收集 final_state，eof 后执行 on_final（消息/任务状态正常落库）。"""
@@ -66,6 +87,8 @@ async def _drain_until_done(
                 if on_error is not None:
                     with contextlib.suppress(Exception):
                         await on_error(payload)
+                if on_complete is not None:
+                    on_complete()
                 return
             if kind in ("keepalive", "frame"):
                 continue
@@ -73,15 +96,23 @@ async def _drain_until_done(
             if mode == "values":
                 final_state = item
     except asyncio.CancelledError:
+        if on_complete is not None:
+            on_complete()
         return  # 服务关停：放弃收尾
     except Exception:  # noqa: BLE001  收尾故障不影响已完成的 graph
         logger.exception("drain after disconnect failed")
+        if on_complete is not None:
+            on_complete()
         return
-    if final_state is not None and on_final is not None:
-        try:
-            await on_final(final_state)
-        except Exception:  # noqa: BLE001  落库故障已由 on_final 内部/此处兜底
-            logger.exception("drain on_final failed")
+    try:
+        if final_state is not None and on_final is not None:
+            try:
+                await on_final(final_state)
+            except Exception:  # noqa: BLE001  落库故障已由 on_final 内部/此处兜底
+                logger.exception("drain on_final failed")
+    finally:
+        if on_complete is not None:
+            on_complete()
 
 
 def _chunk_text(chunk: Any) -> str:
@@ -138,6 +169,7 @@ def build_initial_state(
     image_candidate_count: int = 0,
     image_omitted_count: int = 0,
     document_refs: list[dict[str, str]] | None = None,
+    image_capability: VisionCapability | str | None = None,
 ) -> dict[str, Any]:
     """图初始状态（chat/invoke/task 共用）：messages + agent_config + LastValue 轮次通道重置。
 
@@ -147,9 +179,9 @@ def build_initial_state(
     单通用 Agent 有效工具集 = seed 精选（agent.tools）∪ 本组织已启用工具（enabled_tool_ids）——
     MCP/自定义工具启用后即对通用助手开放（约束优先：仍要求 spec.enabled，tool_execute 守卫同源）。
 
-    image_refs（2026-08-27 多模态）：本轮图片引用块列表——vision 判定在此分支：
-    视觉模型 → 文本块+ref 块的 list content（b64 由 graph_config.configurable 载荷水合，见 core/multimodal）；
-    非视觉模型 → 注记前缀纯文本；无图 → 与原行为逐字节相同。
+    image_refs（2026-08-27 多模态）：本轮图片引用块列表——仅明确 unsupported 才生成纯文本注记；
+    supported/unknown → 文本块+ref 块的 list content（b64 由 graph_config.configurable 载荷水合，见 core/multimodal）；
+    无图 → 与原行为逐字节相同。
     """
     seed_tools = set(agent.tools or [])
     if enabled_tool_ids:
@@ -183,9 +215,18 @@ def build_initial_state(
     if index_blocks:
         project_memory_index = "\n\n".join(index_blocks)
     # 多模态（2026-08-27）：vision 判定 + 三分支消息构造（core/multimodal 唯一收口）
-    effective_model = resolve_effective_model(agent)
     refs = list(image_refs or [])
-    vision = supports_vision(effective_model, get_settings().llm_vision_declared)
+    effective_model = resolve_effective_model(agent)
+    if image_capability is None:
+        # Direct callers that do not use the shared preparation path are deliberately optimistic:
+        # UNKNOWN is not UNSUPPORTED, so the first real request is the capability probe.
+        capability = VisionCapability.UNKNOWN
+    else:
+        try:
+            capability = VisionCapability(image_capability)
+        except ValueError:
+            capability = VisionCapability.UNKNOWN
+    vision = capability is not VisionCapability.UNSUPPORTED
     first_message = human_message_with_images(
         content,
         refs,
@@ -215,6 +256,8 @@ def build_initial_state(
             "org_id": org_id or str(getattr(agent, "org_id", "") or ""),
             "workspace_id": workspace.get("id") if workspace else None,
             "workspace_root": workspace_root,
+            # 设置在每轮开始时快照；切换模式不会改变已在 checkpoint 中运行的轮次。
+            "shell_mode": get_shell_mode(),
         },
         "user_id": user_id,
         # 工作区/项目级叠加（build_context 渲染为历史后 SystemMessage；随 checkpoint 保留）
@@ -238,8 +281,10 @@ async def stream_graph_events(
     on_final: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
     on_error: Callable[[Exception], Any] | None = None,
     keepalive_interval: int = KEEPALIVE_INTERVAL,
+    task_event_sink: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     round_sink: list[dict[str, Any]] | None = None,
     on_round_message: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    run_id: str | None = None,
 ) -> AsyncIterator[str]:
     """驱动 graph.astream → SSE 帧。
 
@@ -267,14 +312,64 @@ async def stream_graph_events(
     set_dispatch_ctx({"push": _push, "main_name": _main_name, "thread_key": _thread_key})
 
     async def producer() -> None:
+        nonlocal attempt_metrics
+        current_initial = initial
+        current_config = graph_config
+        retry_limit = get_settings().llm_transport_auto_retries
+        retry_count = 0
         try:
-            async for item in graph.astream(initial, graph_config, stream_mode=["messages", "updates", "values"]):
-                await queue.put(("item", item))
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("graph stream failed")
-            await queue.put(("graph_error", exc))
+            # 手动恢复以 initial=None 进入图时必须显式选取失败节点 checkpoint；
+            # JsonFileSaver 的默认读取策略会回滚到失败输入之前，不能用于 retry。
+            if current_initial is None:
+                checkpointer = getattr(graph, "checkpointer", None)
+                resolver = getattr(checkpointer, "aget_failed_config", None)
+                if resolver is not None:
+                    current_config = await resolver(current_config) or current_config
+            while True:
+                try:
+                    async for item in graph.astream(
+                        current_initial, current_config, stream_mode=["messages", "updates", "values"]
+                    ):
+                        await queue.put(("item", item))
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except LLMTransportError as exc:
+                    checkpointer = getattr(graph, "checkpointer", None)
+                    resolver = getattr(checkpointer, "aget_failed_config", None)
+                    retry_config = await resolver(current_config) if resolver is not None else None
+                    if retry_count >= retry_limit or retry_config is None:
+                        logger.exception("graph stream failed after transport retry", exc_info=exc)
+                        await queue.put(("graph_error", exc))
+                        break
+                    retry_count += 1
+                    attempt_metrics = {
+                        "attempt": retry_count + 1,
+                        "chunk_count": 0,
+                        "text_chars": 0,
+                        "reasoning_chars": 0,
+                        "started_at": time.time(),
+                        "first_chunk_at": None,
+                        "last_chunk_at": None,
+                    }
+                    await queue.put(
+                        (
+                            "model_retry",
+                            {
+                                "attempt": retry_count + 1,
+                                "max_attempts": retry_limit + 1,
+                                "reset_partial": True,
+                                "reason": "llm_transport",
+                                "message": "模型连接中断，正从最近断点重试",
+                            },
+                        )
+                    )
+                    current_initial = None
+                    current_config = retry_config
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("graph stream failed")
+                    await queue.put(("graph_error", exc))
+                    break
         finally:
             await queue.put(("eof", None))
 
@@ -287,11 +382,36 @@ async def stream_graph_events(
             pass
 
     producer_task = asyncio.create_task(producer())
+    unregister_running_task: Callable[[str, asyncio.Task | None], None] | None = None
+    cancel_requested: Callable[[str], bool] | None = None
+    if run_id:
+        # 局部导入避免 task_worker → task_run → stream_core 的模块环。
+        from app.orchestration.task_worker import cancel_requested as _cancel_requested
+        from app.orchestration.task_worker import register_running_task
+        from app.orchestration.task_worker import unregister_running_task as _unregister_running_task
+
+        register_running_task(run_id, producer_task)
+        unregister_running_task = _unregister_running_task
+        cancel_requested = _cancel_requested
+
+    def unregister() -> None:
+        if run_id and unregister_running_task is not None:
+            unregister_running_task(run_id, producer_task)
     keepalive_task = asyncio.create_task(keepalive())
     final_state: dict[str, Any] | None = None
     # 逐轮消息（docs 03 §3）：round_seq 计数；pending_round = 本轮 agent_execute 的 AIMessage（有 tool_calls）
     round_seq = 0
     pending_round: dict[str, Any] | None = None
+    attempt_metrics: dict[str, Any] = {
+        "attempt": 1,
+        "chunk_count": 0,
+        "text_chars": 0,
+        "reasoning_chars": 0,
+        "started_at": time.time(),
+        "first_chunk_at": None,
+        "last_chunk_at": None,
+    }
+    last_status_event_at = 0.0
 
     async def _emit_round(round_msg: dict[str, Any]) -> str:
         """逐轮消息封口：生成 id → append sink → 即时落库（on_round_message）→ 发 `message` 事件。"""
@@ -301,37 +421,85 @@ async def stream_graph_events(
             round_sink.append(round_msg)
         if on_round_message is not None:
             await on_round_message(round_msg)
-        return emit("message", {"message_id": msg_id, "message": round_msg, "cost": round_msg.get("cost", 0.0)})
+        payload = {"message_id": msg_id, "message": round_msg, "cost": round_msg.get("cost", 0.0)}
+        if task_event_sink is not None:
+            await task_event_sink("message", payload)
+        return emit("message", payload)
 
     drained = False
     try:
         while True:
             kind, payload = await queue.get()
             if kind == "keepalive":
+                now = time.time()
+                if task_event_sink is not None and now - last_status_event_at >= keepalive_interval:
+                    last_status_event_at = now
+                    last_chunk_at = attempt_metrics.get("last_chunk_at")
+                    await task_event_sink(
+                        "status",
+                        {
+                            "status": "running",
+                            "phase": "model_streaming",
+                            "attempt": attempt_metrics["attempt"],
+                            "chunks_received": attempt_metrics["chunk_count"],
+                            "elapsed_ms": int((now - attempt_metrics["started_at"]) * 1000),
+                            "last_chunk_age_ms": (
+                                int((now - last_chunk_at) * 1000) if last_chunk_at is not None else None
+                            ),
+                        },
+                    )
                 yield ": keepalive\n\n"
                 continue
             if kind == "frame":
                 # subagent 派发事件帧（dispatch_subagent push 进队列）
                 yield payload
                 continue
+            if kind == "model_retry":
+                pending_round = None
+                yield emit("model_retry", payload)
+                if task_event_sink is not None:
+                    await task_event_sink("model_retry", payload)
+                continue
             if kind == "eof":
                 break
             if kind == "graph_error":
+                now = time.time()
+                last_chunk_at = attempt_metrics.get("last_chunk_at")
+                attempt_metrics["elapsed_ms"] = int((now - attempt_metrics["started_at"]) * 1000)
+                attempt_metrics["last_chunk_age_ms"] = (
+                    int((now - last_chunk_at) * 1000) if last_chunk_at is not None else None
+                )
+                if isinstance(getattr(payload, "details", None), dict):
+                    payload.details.update(
+                        {
+                            "chunks_received": attempt_metrics["chunk_count"],
+                            "text_chars": attempt_metrics["text_chars"],
+                            "reasoning_chars": attempt_metrics["reasoning_chars"],
+                            "elapsed_ms": attempt_metrics["elapsed_ms"],
+                            "last_chunk_age_ms": attempt_metrics["last_chunk_age_ms"],
+                        }
+                    )
                 if on_error is not None:
                     await on_error(payload)
-                yield emit("error", {"code": ERR_LLM_FAILURE, "message": str(payload), "retryable": False})
+                yield emit("error", _error_payload(payload))
                 return
 
             mode, item = payload
             if mode == "messages":
                 chunk, meta = item
                 if meta.get("langgraph_node") == "agent_execute":
+                    now = time.time()
+                    attempt_metrics["chunk_count"] += 1
+                    attempt_metrics["first_chunk_at"] = attempt_metrics["first_chunk_at"] or now
+                    attempt_metrics["last_chunk_at"] = now
                     text = _chunk_text(chunk)
+                    attempt_metrics["text_chars"] += len(text)
                     if text:
                         yield emit("token", {"text": text})
                     # 推理增量（DeepSeek reasoning_content；docs 03 §3 thinking 事件，前端累积到一轮一条）
                     rc = (getattr(chunk, "additional_kwargs", {}) or {}).get("reasoning_content")
                     if rc:
+                        attempt_metrics["reasoning_chars"] += len(rc)
                         yield emit("thinking", {"text": rc, "ts": int(time.time() * 1000)})
             elif mode == "updates":
                 for node, update in item.items():
@@ -353,33 +521,35 @@ async def stream_graph_events(
                                 }
                             for tc in tcs:
                                 spec = get_by_name(tc["name"]) or get(tc["name"])
-                                yield emit(
-                                    "tool_call",
-                                    {
-                                        "tool_call_id": tc["id"],
-                                        "tool_name": tc["name"],
-                                        "input": tc.get("args", {}),
-                                        "require_confirm": bool(spec is not None and spec.require_confirm),
-                                    },
-                                )
+                                payload = {
+                                    "tool_call_id": tc["id"],
+                                    "tool_name": tc["name"],
+                                    "input": tc.get("args", {}),
+                                    "require_confirm": bool(spec is not None and spec.require_confirm),
+                                }
+                                if task_event_sink is not None:
+                                    await task_event_sink("tool_call", payload)
+                                yield emit("tool_call", payload)
                     elif node == "tool_execute":
                         for r in update.get("tool_results", []):
                             if r.get("status") == "cancelled":
                                 continue  # 拒绝分支不发 tool_result（前端卡片停留 awaiting_confirm）
-                            yield emit(
-                                "tool_result",
-                                {
-                                    "tool_call_id": r.get("tool_call_id"),
-                                    "tool_name": r.get("tool_name"),
-                                    "ok": r.get("ok"),
-                                    "summary": r.get("summary", ""),
-                                    "structured": r.get("output"),
-                                    # M4 完整版：透出占位/回填真值（initiate_* 占位卡 → 回填真值卡）
-                                    "placeholder": bool(r.get("placeholder", False)),
-                                    "job_ref": r.get("job_ref"),
-                                    "duration_ms": r.get("duration_ms", 0),
-                                },
-                            )
+                            payload = {
+                                "tool_call_id": r.get("tool_call_id"),
+                                "tool_name": r.get("tool_name"),
+                                "ok": r.get("ok"),
+                                "summary": r.get("summary", ""),
+                                "summary_truncated": bool(r.get("summary_truncated", False)),
+                                "summary_original_chars": int(r.get("summary_original_chars", 0) or 0),
+                                "structured": r.get("output"),
+                                # M4 完整版：透出占位/回填真值（initiate_* 占位卡 → 回填真值卡）
+                                "placeholder": bool(r.get("placeholder", False)),
+                                "job_ref": r.get("job_ref"),
+                                "duration_ms": r.get("duration_ms", 0),
+                            }
+                            if task_event_sink is not None:
+                                await task_event_sink("tool_result", payload)
+                            yield emit("tool_result", payload)
                         # 逐轮消息封口（docs 03 §3）：本轮工具结果齐后发 `message` 事件（前端追加独立消息 + sealRound）
                         if pending_round is not None:
                             round_seq += 1
@@ -418,21 +588,30 @@ async def stream_graph_events(
     except asyncio.CancelledError:
         # 断流（客户端刷新/关闭页面）：不杀 graph——后台排空队列让当前轮跑完、on_final 正常落库。
         # 否则最终 assistant 消息不落库 + checkpoint 停中间 → 刷新后会话残缺、重发重放旧轮（断线重连缺陷）
+        if run_id and cancel_requested is not None and cancel_requested(run_id):
+            # 真实取消：不启动 drain，不让图继续跑完并触发 on_final。
+            drained = False
+            unregister()
+            raise
         drained = True
         set_dispatch_ctx(None)
         keepalive_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await keepalive_task
-        spawn_drain(queue, producer_task, on_error, on_final)
+        spawn_drain(queue, producer_task, on_error, on_final, on_complete=unregister)
         raise
     except GeneratorExit:
         # uvicorn 断开 SSE 用 aclose() → GeneratorExit（非 CancelledError）：同样走收尾（不能 raise）
+        if run_id and cancel_requested is not None and cancel_requested(run_id):
+            drained = False
+            unregister()
+            return
         drained = True
         set_dispatch_ctx(None)
         keepalive_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await keepalive_task
-        spawn_drain(queue, producer_task, on_error, on_final)
+        spawn_drain(queue, producer_task, on_error, on_final, on_complete=unregister)
         return
     finally:
         set_dispatch_ctx(None)  # 清事件汇（task-local，防串）
@@ -442,6 +621,7 @@ async def stream_graph_events(
             with contextlib.suppress(asyncio.CancelledError):
                 await producer_task
                 await keepalive_task
+            unregister()
 
     if final_state is not None and on_final is not None:
         # C3：on_final（落库）失败不得穿出——否则 assistant 消息 + done 帧丢失、resume 任务卡 running。
@@ -453,7 +633,7 @@ async def stream_graph_events(
             if on_error is not None:
                 with contextlib.suppress(Exception):
                     await on_error(exc)
-            yield emit("error", {"code": ERR_LLM_FAILURE, "message": str(exc), "retryable": True})
+            yield emit("error", _error_payload(exc, retryable=True))
             return
         if payload:
             yield emit("done", payload)

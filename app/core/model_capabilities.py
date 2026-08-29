@@ -196,13 +196,19 @@ class ModelCapabilityResolver:
         if cached is not None:
             return cached
 
-        discovered = await self._discover(key, api_key)
+        try:
+            discovered = await self._discover(key, api_key)
+        except Exception:  # noqa: BLE001 - discovery is advisory; a timeout must remain UNKNOWN
+            discovered = None
         if discovered is not None:
             return self._remember(key, discovered, "metadata")
 
-        info = self._catalog_lookup(key.model)
-        if inspect.isawaitable(info):
-            info = await info
+        try:
+            info = self._catalog_lookup(key.model)
+            if inspect.isawaitable(info):
+                info = await info
+        except Exception:  # noqa: BLE001 - an unavailable catalog cannot veto a real request
+            info = None
         if isinstance(info, dict) and info.get("supports_vision") is True:
             return self._remember(key, VisionCapability.SUPPORTED, "catalog")
         return self._remember(key, VisionCapability.UNKNOWN, "unknown")

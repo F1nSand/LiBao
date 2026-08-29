@@ -188,7 +188,7 @@ def test_session_workspace_injects_file_tools(tmp_path, monkeypatch):
     )
     ac = st["agent_config"]
     assert ac["workspace_root"] == ws["root_path"]
-    for tid in ("tl_bash", "tl_read_file", "tl_write_file"):
+    for tid in ("tl_shell", "tl_read_file", "tl_write_file"):
         assert tid in ac["tools"]
     # 无 skills/项目 overlay（隐式工作区不叠加）
     assert "可用 Skills" not in (st["project_overlay"] or "")

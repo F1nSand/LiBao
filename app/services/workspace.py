@@ -72,7 +72,7 @@ def resolve_file_ref_path(root: str | Path, raw_path: str) -> tuple[str, Path]:
     return "/".join(parts), target
 
 
-def read_file_ref_bytes(root: str | Path, raw_path: str) -> bytes:
+def read_file_ref_bytes(root: str | Path, raw_path: str, max_bytes: int | None = None) -> bytes:
     """在读取前再次执行 file_ref 校验，并尽量使用 no-follow 打开文件。
 
     首次校验通常发生在 HTTP 边界；这里不能信任此前返回的 Path，因为工作区
@@ -91,7 +91,14 @@ def read_file_ref_bytes(root: str | Path, raw_path: str) -> bytes:
     try:
         fd = os.open(str(candidate), flags)
         with os.fdopen(fd, "rb") as stream:
-            return stream.read()
+            if max_bytes is None:
+                return stream.read()
+            if max_bytes <= 0:
+                raise AppError(ERR_WORKSPACE_FILE_REF_INVALID, "工作区文件引用非法或不可读取")
+            data = stream.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise AppError(ERR_WORKSPACE_FILE_REF_INVALID, "工作区文件超过本轮读取上限")
+            return data
     except (OSError, ValueError) as exc:
         raise AppError(ERR_WORKSPACE_FILE_REF_INVALID, "工作区文件引用非法或不可读取") from exc
 

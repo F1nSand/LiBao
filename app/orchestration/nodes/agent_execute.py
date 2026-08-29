@@ -13,8 +13,22 @@ from typing import Any, Optional
 from langchain_core.runnables import RunnableConfig
 
 from app.core.cost import estimate_cost
+from app.core.errors import (
+    ERR_MULTIMODAL_UNSUPPORTED,
+    AppError,
+    LLMFailureKind,
+    classify_llm_exception,
+    normalize_llm_exception,
+)
 from app.core.llm import LLMService
+from app.core.model_capabilities import (
+    ModelCapabilityKey,
+    VisionCapability,
+    get_model_capability_resolver,
+    is_explicit_vision_rejection,
+)
 from app.orchestration.context_builder import build_agent_tools, build_context
+from app.orchestration.context_metrics import measure_context
 from app.orchestration.state_schema import AgentState
 from app.orchestration.stream_core import message_text
 
@@ -35,13 +49,36 @@ def _image_ctx(config: Optional[RunnableConfig]) -> Optional[dict[str, Any]]:  #
     if config is None:
         return None
     cfg = config.get("configurable", {}) or {}
-    image_keys = {"image_payload", "current_image_ids", "vision"}
+    image_keys = {
+        "image_payload",
+        "current_image_ids",
+        "vision",
+        "image_capability_state",
+        "image_capability_key",
+    }
     if not image_keys.intersection(cfg):
         return None
+    # Legacy callers only supplied ``vision``. Treat their explicit false as an
+    # authoritative compatibility decision; the new preparation path always carries
+    # the tri-state key explicitly and therefore remains optimistic for UNKNOWN.
+    default_state = VisionCapability.UNKNOWN.value if cfg.get("vision") else VisionCapability.UNSUPPORTED.value
+    state_raw = cfg.get("image_capability_state", default_state)
+    try:
+        capability = VisionCapability(state_raw)
+    except (TypeError, ValueError):
+        capability = VisionCapability.UNKNOWN
+    key = cfg.get("image_capability_key")
+    if isinstance(key, dict):
+        try:
+            key = ModelCapabilityKey(**key)
+        except (TypeError, ValueError):
+            key = None
     return {
         "index": cfg.get("image_payload") or {},
         "current_ids": set(cfg.get("current_image_ids") or []),
         "vision": bool(cfg.get("vision")),
+        "capability": capability,
+        "capability_key": key if isinstance(key, ModelCapabilityKey) else None,
     }
 
 
@@ -66,7 +103,9 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
     # M2.5：两段式门控（≤ aci_full_limit 全量；超过 → tool_search + 选中注入）。
     # 每轮强制重算（不读 state.active_tools 缓存）——选中注入依赖本轮 selected_tool_names，
     # 复用旧 active_tools 会让 tool_search 结果永远进不了下一轮 bind_tools（实测坑）。
-    active_tools = build_agent_tools(agent.get("tools", []), state.get("selected_tool_names", []))
+    active_tools = build_agent_tools(
+        agent.get("tools", []), state.get("selected_tool_names", []), agent.get("shell_mode")
+    )
 
     model = _resolve_model(state, config).bind_tools(active_tools)
 
@@ -81,14 +120,53 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
     )
 
     start = time.perf_counter()
-    response = await model.ainvoke(
-        build_context(
-            state,
-            prompt_note,
-            image_ctx=_image_ctx(config),
-            document_ctx=_document_ctx(config),
-        )
+    image_ctx = _image_ctx(config)
+    messages = build_context(
+        state,
+        prompt_note,
+        image_ctx=image_ctx,
+        document_ctx=_document_ctx(config),
     )
+    context_metrics = measure_context(messages, active_tools)
+    flags["context_metrics"] = context_metrics
+    try:
+        response = await model.ainvoke(
+            messages
+        )
+    except Exception as exc:  # noqa: BLE001 - only explicit multimodal rejections become a typed app error
+        has_current_images = bool(image_ctx and image_ctx.get("current_ids") and image_ctx.get("index"))
+        capability = image_ctx.get("capability") if image_ctx else None
+        key = image_ctx.get("capability_key") if image_ctx else None
+        if (
+            has_current_images
+            and capability is not VisionCapability.UNSUPPORTED
+            and isinstance(key, ModelCapabilityKey)
+            and is_explicit_vision_rejection(exc)
+        ):
+            get_model_capability_resolver().record_unsupported(key)
+            raise AppError(
+                ERR_MULTIMODAL_UNSUPPORTED,
+                "当前模型接口明确拒绝图片输入；图片未被分析，请更换模型或检查该接口的多模态请求格式。",
+                retryable=False,
+            ) from exc
+        normalized = normalize_llm_exception(
+            exc,
+            model=str(agent.get("model") or ""),
+            context_metrics=context_metrics,
+        )
+        # 兼容非传输调用方的异常类型；只有明确的流传输错误
+        # 才转为可自动/手动恢复的 LLMTransportError。
+        if classify_llm_exception(exc) is LLMFailureKind.TRANSPORT:
+            raise normalized from exc
+        raise exc
+    if (
+        image_ctx
+        and image_ctx.get("capability") is VisionCapability.UNKNOWN
+        and image_ctx.get("current_ids")
+        and isinstance(image_ctx.get("capability_key"), ModelCapabilityKey)
+    ):
+        # A successful real request is stronger evidence than any name pattern or provider catalog.
+        get_model_capability_resolver().record_success(image_ctx["capability_key"])
     duration_ms = int((time.perf_counter() - start) * 1000)
 
     # token 统计累计（totals 为 LastValue，读旧值再加）
@@ -118,7 +196,11 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
                 "node": "agent_execute",
                 "type": "llm",
                 "trace_id": trace_id,
-                "input": {"model": agent.get("model"), "tool_count": len(active_tools)},
+                "input": {
+                    "model": agent.get("model"),
+                    "tool_count": len(active_tools),
+                    "context_metrics": context_metrics,
+                },
                 "output": {"content": message_text(getattr(response, "content", ""))[:500]},
                 "token_usage": token_usage,
                 "duration_ms": duration_ms,

@@ -1,8 +1,7 @@
 """视觉能力判定（2026-08-27 多模态适配，docs 01 §6）。
 
-两层：provider 显式声明（capabilities=["vision"] → Settings.llm_vision_declared）优先；
-未声明回落内置 pattern 表（default-deny，只收高置信多模态名——把图发给纯文本模型的
-API 400 比漏判降级的破坏大）。
+兼容旧调用方的模型名称/声明辅助函数。聊天和 Task 的附件路径使用
+``app.core.model_capabilities`` 的运行期三态解析；这里的布尔结果不再作为未知模型的请求门禁。
 """
 
 from __future__ import annotations

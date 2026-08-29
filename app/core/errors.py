@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
+from typing import Any
+
 # ---- 请求 400xx ----
 ERR_PARAM_MISSING = 40001
 ERR_FILE_TOO_LARGE = 40011
@@ -71,16 +74,180 @@ ERR_LLM_FAILURE = 60001
 ERR_TOOL_FAILURE = 60002
 ERR_CIRCUIT_BREAK = 60003
 ERR_ATTACH_ANALYSIS_FAILURE = 60004
+ERR_MULTIMODAL_UNSUPPORTED = 60005  # 当前 endpoint 明确拒绝图片输入
+ERR_SANDBOX_UNAVAILABLE = 60006  # 选择的 shell/docker 后端不可用
+ERR_CHECKPOINT_INVALID = 60007  # 断点损坏或无法安全解码
+ERR_LLM_TRANSPORT = 60008  # 模型流式连接中断，可从失败节点恢复
+
+
+class LLMFailureKind(StrEnum):
+    """模型边界错误分类；只有 transport 允许节点级恢复。"""
+
+    TRANSPORT = "llm_transport"
+    CONTEXT_LENGTH = "context_length"
+    AUTHENTICATION = "authentication"
+    RATE_LIMIT = "rate_limit"
+    INVALID_REQUEST = "invalid_request"
+    UNKNOWN = "unknown"
 
 
 class AppError(Exception):
     """业务错误：全局异常处理器统一转成 {code, message, data, trace_id} 信封。"""
 
-    def __init__(self, code: int, message: str, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        code: int,
+        message: str,
+        retryable: bool = False,
+        *,
+        kind: str | None = None,
+        recoverable: bool = False,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         self.code = code
         self.message = message
         self.retryable = retryable
+        self.kind = kind
+        self.recoverable = recoverable
+        self.details = details or {}
         super().__init__(message)
+
+
+class LLMTransportError(AppError):
+    """模型流式连接中断；只允许在 agent_execute 节点边界重跑。"""
+
+    def __init__(self, *, model: str, details: dict[str, Any] | None = None) -> None:
+        safe_details = _safe_llm_details(model=model, details=details or {})
+        super().__init__(
+            ERR_LLM_TRANSPORT,
+            "模型流式连接中断，可从最近断点继续",
+            retryable=True,
+            kind=LLMFailureKind.TRANSPORT.value,
+            recoverable=True,
+            details=safe_details,
+        )
+
+
+_TRANSPORT_TEXT = (
+    "incomplete chunked read",
+    "peer closed",
+    "no streaming chunk received",
+    "remote protocol",
+    "read timed out",
+    "connection reset",
+    "connection aborted",
+)
+_CONTEXT_TEXT = (
+    "maximum context",
+    "context length",
+    "too many tokens",
+    "prompt is too long",
+    "上下文长度",
+    "上下文超限",
+)
+
+
+def classify_llm_exception(exc: Exception) -> LLMFailureKind:
+    """以异常链、状态码和稳定关键词分类，不把任意 5xx/文本当作可恢复传输错误。"""
+
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+
+    statuses: list[int] = []
+    for item in chain:
+        response = getattr(item, "response", None)
+        for candidate in (getattr(item, "status_code", None), getattr(response, "status_code", None)):
+            if isinstance(candidate, int):
+                statuses.append(candidate)
+    if any(status in (401, 403) for status in statuses):
+        return LLMFailureKind.AUTHENTICATION
+    if 429 in statuses:
+        return LLMFailureKind.RATE_LIMIT
+
+    names = " ".join(type(item).__name__.lower() for item in chain)
+    text = " ".join(str(item).lower()[:4000] for item in chain)
+    if any(marker in text for marker in _CONTEXT_TEXT):
+        return LLMFailureKind.CONTEXT_LENGTH
+    if any(marker in names for marker in ("authentication", "permission", "unauthorized")):
+        return LLMFailureKind.AUTHENTICATION
+    if any(marker in text for marker in ("invalid request", "invalid_parameter", "bad request", "参数有误")):
+        return LLMFailureKind.INVALID_REQUEST
+    if any(marker in text for marker in _TRANSPORT_TEXT) or any(
+        marker in names for marker in ("remoteprotocol", "readtimeout", "connecterror", "apiconnection", "apitimeout")
+    ):
+        return LLMFailureKind.TRANSPORT
+    return LLMFailureKind.UNKNOWN
+
+
+def _safe_llm_details(*, model: str, details: dict[str, Any]) -> dict[str, Any]:
+    """只保留可观测数字/枚举字段，避免错误载荷携带请求正文或凭证。"""
+
+    allowed = {
+        "chunks_received",
+        "text_chars",
+        "reasoning_chars",
+        "attempt",
+        "max_attempts",
+        "idle_seconds",
+        "last_chunk_age_ms",
+        "elapsed_ms",
+        "context_metrics",
+    }
+    safe: dict[str, Any] = {"model": str(model)[:128]}
+    for key in allowed:
+        value = details.get(key)
+        if key == "context_metrics" and isinstance(value, dict):
+            safe[key] = {
+                name: value[name]
+                for name in (
+                    "message_count",
+                    "text_chars",
+                    "tool_schema_chars",
+                    "image_count",
+                    "document_chars",
+                    "estimated_prompt_tokens",
+                    "estimated",
+                    "estimate_method",
+                )
+                if name in value
+            }
+        elif isinstance(value, (int, float, bool, str)):
+            safe[key] = value
+    return safe
+
+
+def normalize_llm_exception(
+    exc: Exception,
+    *,
+    model: str,
+    context_metrics: dict[str, Any] | None = None,
+    details: dict[str, Any] | None = None,
+) -> AppError:
+    """将底层异常转换为不泄露原始响应的业务错误。"""
+
+    kind = classify_llm_exception(exc)
+    safe_details = _safe_llm_details(model=model, details={**(details or {}), "context_metrics": context_metrics or {}})
+    if kind is LLMFailureKind.TRANSPORT:
+        return LLMTransportError(model=model, details=safe_details)
+    message = {
+        LLMFailureKind.CONTEXT_LENGTH: "模型请求超过接口上下文限制",
+        LLMFailureKind.AUTHENTICATION: "模型接口认证失败",
+        LLMFailureKind.RATE_LIMIT: "模型接口触发限流",
+        LLMFailureKind.INVALID_REQUEST: "模型接口拒绝了请求参数",
+    }.get(kind, "模型调用失败")
+    return AppError(
+        ERR_LLM_FAILURE,
+        message,
+        retryable=False,
+        kind=kind.value,
+        recoverable=False,
+        details=safe_details,
+    )
 
 
 def http_status_for(code: int) -> int:
