@@ -19,11 +19,12 @@ from app.tools import executor
 from app.tools.builtin.tool_search import selected_names
 from app.tools.context import (
     set_tool_org,
+    set_tool_shell_mode,
     set_tool_user_id,
     set_tool_workspace_id,
     set_tool_workspace_root,
 )
-from app.tools.registry import agent_can_use, get, get_by_name
+from app.tools.registry import ToolGateAction, ToolGateDecision, agent_can_use, get, get_by_name
 
 
 def _result(
@@ -34,6 +35,8 @@ def _result(
     ok: bool,
     output: Any,
     summary: str = "",
+    summary_truncated: bool = False,
+    summary_original_chars: int = 0,
     duration_ms: int = 0,
     placeholder: bool = False,
     job_ref: str | None = None,
@@ -48,6 +51,8 @@ def _result(
         "ok": ok,
         "status": status,
         **({"summary": summary} if summary else {}),
+        "summary_truncated": summary_truncated,
+        "summary_original_chars": summary_original_chars,
         "duration_ms": duration_ms,
         # M4 完整版：占位/回填透出（initiate_* → stream_core → SSE）
         "placeholder": placeholder,
@@ -80,8 +85,35 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
             results.append(_result(tc, position, status="error", ok=False, output=None))
             continue
 
+        agent_cfg = state.get("agent_config", {})
+        try:
+            gate_decision = (
+                spec.preflight(tc.get("args") or {}, {"shell_mode": agent_cfg.get("shell_mode")})
+                if spec.preflight
+                else None
+            )
+        except Exception as exc:  # noqa: BLE001 - policy failures fail closed per tool contract
+            gate_decision = ToolGateDecision(ToolGateAction.BLOCK, f"策略预检失败: {exc}", "high")
+        if gate_decision is not None and gate_decision.action == ToolGateAction.BLOCK:
+            content = f"工具 {spec.name} 被安全策略拦截：{gate_decision.reason}"
+            tool_msgs.append(ToolMessage(content=content, tool_call_id=tc["id"]))
+            results.append(
+                _result(
+                    tc,
+                    position,
+                    status="error",
+                    ok=False,
+                    output={"verdict": "block", "reason": gate_decision.reason, "risk": gate_decision.risk},
+                )
+            )
+            continue
+
+        approved_for_call = False
         # M2：预检-确认两段式（docs 01 §7.3 层③）——不可逆操作需人工确认
-        if spec.require_confirm and not confirmed_once:
+        needs_confirm = spec.require_confirm or (
+            gate_decision is not None and gate_decision.action == ToolGateAction.CONFIRM
+        )
+        if needs_confirm and not confirmed_once:
             confirmed_once = True
             decision = interrupt(
                 {
@@ -89,7 +121,11 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                     "tool_call_id": tc["id"],
                     "tool_name": spec.name,
                     "input": tc.get("args", {}),
-                    "reason": f"工具 {spec.name} 为危险/不可逆操作，需人工确认后执行",
+                    "reason": (
+                        gate_decision.reason
+                        if gate_decision is not None and gate_decision.reason
+                        else f"工具 {spec.name} 为危险/不可逆操作，需人工确认后执行"
+                    ),
                     "confirm_required": True,
                 }
             )
@@ -110,20 +146,27 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                     }
                 )
                 continue
+            approved_for_call = True
 
         # M3/M7-B/P4：请求级 org + 工作区根/ID + user 上下文（kb_search/文件/记忆工具直连存储层）
-        agent_cfg = state.get("agent_config", {})
         set_tool_org(agent_cfg.get("org_id"))
         set_tool_workspace_root(agent_cfg.get("workspace_root"))
         set_tool_workspace_id(agent_cfg.get("workspace_id"))
         set_tool_user_id(state.get("user_id"))
+        set_tool_shell_mode(agent_cfg.get("shell_mode"))
         try:
-            result = await executor.execute(spec, tc.get("args") or {})
+            result = await executor.execute(
+                spec,
+                tc.get("args") or {},
+                approved=approved_for_call,
+                context={"shell_mode": agent_cfg.get("shell_mode")},
+            )
         finally:
             set_tool_org(None)
             set_tool_workspace_root(None)
             set_tool_workspace_id(None)
             set_tool_user_id(None)
+            set_tool_shell_mode(None)
 
         # M2.5：LLM 调用元工具（tool_search）后 → 选中写入 selected_tool_names（两段式 ACI 注入）。
         # M1：空结果 → [] 清空旧选中；一轮内多次调用合并（去重保序）。契约见 tool_search.selected_names。
@@ -138,6 +181,8 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                 ok=result.ok,
                 output=result.output,
                 summary=result.summary,
+                summary_truncated=result.summary_truncated,
+                summary_original_chars=result.summary_original_chars,
                 duration_ms=result.duration_ms,
                 placeholder=result.placeholder,
                 job_ref=result.job_ref,

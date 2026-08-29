@@ -15,9 +15,31 @@ from pydantic import BaseModel
 from app.api.deps import get_db, require_admin
 from app.api.envelope import ok
 from app.services.provider import ProviderService, serialize_provider
+from app.services.sandbox import SandboxService
 from app.storage.models.user import User
 
 router = APIRouter()
+
+
+class SandboxPatchRequest(BaseModel):
+    mode: str
+
+
+@router.get("/settings/sandbox")
+async def get_sandbox_settings(
+    user: User = Depends(require_admin),
+    db: Any = Depends(get_db),
+):
+    return ok(await SandboxService().get(db, user))
+
+
+@router.patch("/settings/sandbox")
+async def patch_sandbox_settings(
+    req: SandboxPatchRequest,
+    user: User = Depends(require_admin),
+    db: Any = Depends(get_db),
+):
+    return ok(await SandboxService().set_mode(db, user, req.mode))
 
 
 class ProviderWriteRequest(BaseModel):

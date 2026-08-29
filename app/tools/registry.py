@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from app.tools.sandbox import SandboxCommand, SandboxLevel
+from app.tools.sandbox import SandboxCommand, SandboxLevel, WorkspaceCommand
 
 
 class ToolType(enum.StrEnum):
@@ -22,6 +22,19 @@ class ToolType(enum.StrEnum):
     USER_COMMS = "user_comms"
     EVENT = "event"
     AGENT_CONTROL = "agent_control"  # 主 Agent 派发 subagent（tl_dispatch_subagent）
+
+
+class ToolGateAction(enum.StrEnum):
+    ALLOW = "allow"
+    CONFIRM = "confirm"
+    BLOCK = "block"
+
+
+@dataclass(frozen=True)
+class ToolGateDecision:
+    action: ToolGateAction
+    reason: str = ""
+    risk: str = "medium"
 
 
 @dataclass(frozen=True)
@@ -41,7 +54,10 @@ class ToolSpec:
     max_retries: int = 0  # 失败静默重试次数（docs 01 §5.4；0=不重试）
     allowlist: list[str] | None = None
     handler: Callable[..., Any] | None = None
-    sandbox_command_builder: Callable[..., SandboxCommand | Awaitable[SandboxCommand]] | None = None
+    sandbox_command_builder: Callable[
+        ..., SandboxCommand | WorkspaceCommand | Awaitable[SandboxCommand | WorkspaceCommand]
+    ] | None = None
+    preflight: Callable[[dict[str, Any], dict[str, Any]], ToolGateDecision] | None = None
     meta: bool = False  # 平台元工具（tool_search）：超限模式常驻注入 ACI + 执行守卫放行（M2.5）
     builtin: bool = False  # 内置工具（平台拥有）：DB 行可绑定（I4 查重豁免 tl_ 前缀的显式表达）
 
@@ -62,8 +78,8 @@ _NAME_INDEX: dict[str, str] = {}  # name → id 反向索引（name 唯一性不
 
 
 def register(spec: ToolSpec) -> None:
-    if spec.sandbox == SandboxLevel.DOCKER and spec.sandbox_command_builder is None:
-        raise ValueError("docker 沙箱工具必须提供 sandbox_command_builder")
+    if spec.sandbox in (SandboxLevel.DOCKER, SandboxLevel.WORKSPACE) and spec.sandbox_command_builder is None:
+        raise ValueError("命令沙箱工具必须提供 sandbox_command_builder")
     if spec.id in _REGISTRY:
         raise ValueError(f"工具 id 冲突：{spec.id}")
     if spec.name in _NAME_INDEX:

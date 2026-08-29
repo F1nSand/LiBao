@@ -2,7 +2,7 @@
 
 执行安全四层之①输入校验（params_schema JSON Schema）+ 通用超时（OC3：asyncio.wait_for）
 + 失败静默重试（指数退避+抖动，docs 01 §5.4）+ 幂等去重（仅 idempotent 工具，进程内缓存）。
-沙盒守卫：MICROVM 明确返回不支持；DOCKER 通过命令构建器和一次性锁定容器执行。
+沙盒守卫：MICROVM 明确返回不支持；WORKSPACE/DOCKER 通过命令构建器分别走宿主 runner 或一次性容器执行。
 """
 
 from __future__ import annotations
@@ -20,14 +20,16 @@ from jsonschema import ValidationError, validate
 
 from app.core.config import get_settings
 from app.tools.context import get_tool_workspace_root
-from app.tools.registry import ToolSpec
+from app.tools.registry import ToolGateAction, ToolSpec
 from app.tools.sandbox import (
     SandboxCommand,
     SandboxErrorCode,
     SandboxFailure,
     SandboxLevel,
     SandboxResult,
+    WorkspaceCommand,
     run_docker_command,
+    run_workspace_command,
 )
 
 # ---- 重试/幂等常量 ----
@@ -61,6 +63,8 @@ class ToolResult:
     placeholder: bool = False
     job_ref: str | None = None
     retries: int = 0
+    summary_truncated: bool = False
+    summary_original_chars: int = 0
 
 
 def _fingerprint(spec: ToolSpec, input: dict[str, Any]) -> str:
@@ -87,6 +91,8 @@ def _serialize_result(result: ToolResult) -> str | None:
                 "placeholder": result.placeholder,
                 "job_ref": result.job_ref,
                 "retries": result.retries,
+                "summary_truncated": result.summary_truncated,
+                "summary_original_chars": result.summary_original_chars,
             },
             ensure_ascii=False,
         )
@@ -120,7 +126,13 @@ async def _cache_put(key: str, result: ToolResult) -> None:
     _idem_cache[key] = (time.monotonic() + _IDEMPOTENCY_TTL_S, result)
 
 
-async def execute(spec: ToolSpec, input: dict[str, Any]) -> ToolResult:
+async def execute(
+    spec: ToolSpec,
+    input: dict[str, Any],
+    *,
+    approved: bool = False,
+    context: dict[str, Any] | None = None,
+) -> ToolResult:
     """校验参数 → 沙盒守卫 → 幂等去重 → 重试循环（仅 handler 异常可重试）→ ToolResult。"""
     start = time.perf_counter()
 
@@ -129,6 +141,34 @@ async def execute(spec: ToolSpec, input: dict[str, Any]) -> ToolResult:
         validate(instance=input, schema=spec.params_schema)
     except ValidationError as exc:
         return ToolResult(ok=False, output=None, summary="", duration_ms=0, error=f"参数校验失败: {exc.message}")
+
+    if spec.preflight is not None:
+        try:
+            decision = spec.preflight(input, context or {})
+        except Exception as exc:  # noqa: BLE001 - policy failures fail closed
+            return ToolResult(
+                ok=False,
+                output=None,
+                summary="",
+                duration_ms=0,
+                error=f"{SandboxErrorCode.POLICY_BLOCKED.value}: 策略预检失败: {exc}",
+            )
+        if decision.action == ToolGateAction.BLOCK:
+            return ToolResult(
+                ok=False,
+                output={"verdict": "block", "reason": decision.reason, "risk": decision.risk},
+                summary=decision.reason,
+                duration_ms=0,
+                error=f"{SandboxErrorCode.POLICY_BLOCKED.value}: {decision.reason}",
+            )
+        if decision.action == ToolGateAction.CONFIRM and not approved:
+            return ToolResult(
+                ok=False,
+                output={"verdict": "confirm", "reason": decision.reason, "risk": decision.risk},
+                summary=decision.reason,
+                duration_ms=0,
+                error=f"{SandboxErrorCode.CONFIRM_REQUIRED.value}: {decision.reason}",
+            )
 
     if spec.sandbox == SandboxLevel.MICROVM:
         return ToolResult(
@@ -139,7 +179,7 @@ async def execute(spec: ToolSpec, input: dict[str, Any]) -> ToolResult:
             error=f"{SandboxErrorCode.UNSUPPORTED_TOOL.value}: microvm 沙箱暂不支持",
         )
 
-    if spec.sandbox == SandboxLevel.DOCKER and spec.sandbox_command_builder is None:
+    if spec.sandbox in (SandboxLevel.DOCKER, SandboxLevel.WORKSPACE) and spec.sandbox_command_builder is None:
         return ToolResult(
             ok=False,
             output=None,
@@ -170,30 +210,45 @@ async def _execute_with_retries(
         try:
             output = await _call_with_timeout(spec, input, timeout_sec)
             duration = int((time.perf_counter() - start) * 1000)
+            summary, summary_truncated, original_chars = _summarize_with_meta(output)
             result = ToolResult(
-                ok=True, output=output, summary=_summarize(output), duration_ms=duration, retries=attempt
+                ok=True,
+                output=output,
+                summary=summary,
+                duration_ms=duration,
+                retries=attempt,
+                summary_truncated=summary_truncated,
+                summary_original_chars=original_chars,
             )
             # M4 完整版：handler 返回 {"placeholder":true, "job_ref":...} 的占位契约 → 透出到 ToolResult
             # （initiate_* 异步工具：立即返回占位，后台回填真值，docs 01 §5.5）
             if isinstance(output, dict) and output.get("job_ref"):
+                placeholder_summary = _bounded_text(str(output.get("summary") or result.summary))
                 result = replace(
                     result,
                     placeholder=bool(output.get("placeholder")),
                     job_ref=str(output["job_ref"]),
-                    summary=str(output.get("summary") or result.summary),
+                    summary=placeholder_summary[0],
+                    summary_truncated=placeholder_summary[1],
+                    summary_original_chars=placeholder_summary[2],
                 )
             if idem_key is not None:
                 await _cache_put(idem_key, result)
             return result
         except SandboxFailure as exc:
             duration = int((time.perf_counter() - start) * 1000)
+            summary, summary_truncated, original_chars = (
+                _summarize_with_meta(exc.output) if exc.output is not None else ("", False, 0)
+            )
             result = ToolResult(
                 ok=False,
                 output=exc.output,
-                summary=_summarize(exc.output) if exc.output is not None else "",
+                summary=summary,
                 duration_ms=duration,
                 error=f"{exc.code.value}: {exc.message}",
                 retries=attempt,
+                summary_truncated=summary_truncated,
+                summary_original_chars=original_chars,
             )
             if exc.retryable and attempt < spec.max_retries:
                 last_error = exc
@@ -226,20 +281,24 @@ async def _execute_with_retries(
 async def _run_docker_attempt(spec: ToolSpec, input: dict[str, Any]) -> dict[str, Any]:
     builder = spec.sandbox_command_builder
     if builder is None:
-        raise SandboxFailure(SandboxErrorCode.UNSUPPORTED_TOOL, "docker 工具缺少命令构建器")
+        raise SandboxFailure(SandboxErrorCode.UNSUPPORTED_TOOL, "命令沙箱工具缺少命令构建器")
     built = builder(**input)
     command = await built if inspect.isawaitable(built) else built
-    if not isinstance(command, SandboxCommand):
-        raise SandboxFailure(SandboxErrorCode.UNSUPPORTED_TOOL, "docker 命令构建器返回了无效类型")
+    if not isinstance(command, (SandboxCommand, WorkspaceCommand)):
+        raise SandboxFailure(SandboxErrorCode.UNSUPPORTED_TOOL, "命令构建器返回了无效类型")
     root = get_tool_workspace_root()
     if not root:
         raise SandboxFailure(SandboxErrorCode.INVALID_WORKDIR, "不在工作区上下文")
-    result: SandboxResult = await run_docker_command(
-        command,
-        workspace_root=root,
-        timeout_ms=spec.timeout_ms,
-        settings=get_settings(),
-    )
+    settings = get_settings()
+    if isinstance(command, WorkspaceCommand):
+        result: SandboxResult = await run_workspace_command(
+            command,
+            workspace_root=root,
+            timeout_ms=spec.timeout_ms,
+            settings=settings,
+        )
+    else:
+        result = await run_docker_command(command, workspace_root=root, timeout_ms=spec.timeout_ms, settings=settings)
     output: dict[str, Any] = {
         "stdout": result.stdout,
         "stderr": result.stderr,
@@ -247,28 +306,38 @@ async def _run_docker_attempt(spec: ToolSpec, input: dict[str, Any]) -> dict[str
     }
     if result.truncated:
         output["truncated"] = True
-    if note := command.env.get("LIBAO_BASH_REVIEW_NOTE"):
+    if note := command.env.get("LIBAO_SHELL_REVIEW_NOTE") or command.env.get("LIBAO_BASH_REVIEW_NOTE"):
         output["note"] = note
     return output
 
 
 async def _call_with_timeout(spec: ToolSpec, input: dict[str, Any], timeout_sec: float) -> Any:
-    """Docker 将命令构建与执行包在一次总超时内；NONE 继续兼容同步/异步 handler。"""
-    if spec.sandbox == SandboxLevel.DOCKER:
+    """命令沙箱将构建与执行包在一次总超时内；NONE 继续兼容同步/异步 handler。"""
+    if spec.sandbox in (SandboxLevel.DOCKER, SandboxLevel.WORKSPACE):
         return await asyncio.wait_for(_run_docker_attempt(spec, input), timeout=timeout_sec)
     handler = spec.handler
     coro = handler(**input) if asyncio.iscoroutinefunction(handler) else asyncio.to_thread(handler, **input)
     return await asyncio.wait_for(coro, timeout=timeout_sec)
 
 
-def _summarize(output: Any) -> str:
-    """工具结果文本摘要（tool_result.summary）。str 原样透传；dict/list json 化后截断到上限。"""
+def _bounded_text(text: str) -> tuple[str, bool, int]:
+    limit = max(0, int(get_settings().tool_result_max_chars))
+    return text[:limit], len(text) > limit, len(text)
+
+
+def _summarize_with_meta(output: Any) -> tuple[str, bool, int]:
+    """统一限制工具摘要；字符串与结构化结果使用同一字符预算并返回截断元数据。"""
     if output is None:
-        return ""
+        return "", False, 0
     if isinstance(output, str):
-        return output
+        return _bounded_text(output)
     try:
         text = json.dumps(output, ensure_ascii=False)
     except (TypeError, ValueError):
         text = str(output)
-    return text[: get_settings().tool_result_max_chars]
+    return _bounded_text(text)
+
+
+def _summarize(output: Any) -> str:
+    """向旧调用方提供摘要字符串；新的 ToolResult 同时携带截断元数据。"""
+    return _summarize_with_meta(output)[0]

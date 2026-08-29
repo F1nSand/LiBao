@@ -80,12 +80,12 @@ def test_build_initial_state_with_workspace():
     assert ac["workspace_root"] == "/tmp/ws1"
     assert ac["system_prompt"] == "base"  # system_prompt 恒定；工作区 fragment 走消息通道
     assert "项目助手" in st["project_overlay"]
-    for tid in ("tl_read_file", "tl_write_file", "tl_edit_file", "tl_glob", "tl_grep", "tl_bash"):
+    for tid in ("tl_read_file", "tl_write_file", "tl_edit_file", "tl_glob", "tl_grep", "tl_shell"):
         assert tid in ac["tools"]
     # 无工作区 → 无 workspace_root / 文件工具
     st2 = build_initial_state(agent, "hi")
     assert st2["agent_config"]["workspace_root"] is None
-    assert "tl_bash" not in st2["agent_config"]["tools"]
+    assert "tl_shell" not in st2["agent_config"]["tools"]
 
 
 def test_discover_global_skills(tmp_path):

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
 from app.core.errors import ERR_CONVERSATION_NOT_FOUND, AppError
+from app.core.session_cache import remove_session_workspace
 from app.services.serializers import serialize_conversation, serialize_message, serialize_trajectory_node
 from app.storage.models.agent import AgentConfig
 from app.storage.models.conversation import Conversation
@@ -52,6 +54,9 @@ class ConversationService:
     async def delete(self, db: Any, conversation: Conversation) -> None:
         await ConversationRepository(db).soft_delete(conversation)
         await db.commit()
+        # 普通会话使用 cache/sessions/<id>；工作区会话目录属于项目，绝不随会话删除。
+        if conversation.workspace_id is None:
+            await asyncio.to_thread(remove_session_workspace, conversation.id)
 
     async def messages(
         self, db: Any, conversation: Conversation, page: int, page_size: int

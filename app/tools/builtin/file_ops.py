@@ -1,7 +1,7 @@
 """工作区文件操作内置工具（M7-B，docs 01 §7.5 / §7.8）。
 
 read_file/write_file/edit_file/glob/grep 走路径强限制（resolve_workspace_path）；
-bash 走 LLM 语义审查（先审查再执行）。均读工作区根上下文（get_tool_workspace_root）；
+shell/bash 走规则 + 独立 LLM 语义审查（先审查再执行）。均读工作区根上下文（get_tool_workspace_root）；
 无工作区上下文 → 降级错误结果（不抛，executor 正常打包）。
 """
 
@@ -21,11 +21,15 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.tools.context import get_tool_workspace_root
+from app.tools.context import get_tool_shell_mode, get_tool_workspace_root
 from app.tools.filesystem import resolve_workspace_path
-from app.tools.sandbox import SandboxCommand, SandboxErrorCode, SandboxFailure
+from app.tools.registry import ToolGateAction, ToolGateDecision
+from app.tools.sandbox import SandboxCommand, SandboxErrorCode, SandboxFailure, WorkspaceCommand
+from app.tools.shell_state import get_shell_mode
 
 _MAX_READ = 20000
 _MAX_WRITE = 100000
@@ -33,7 +37,24 @@ _MAX_BASH_OUT = 4000
 _HOST_BASH_TIMEOUT_S = 30
 
 # 工作区文件工具 id 集（build_initial_state 在工作区上下文时注入；默认 enabled=True，仅工作区可见）
-FILE_TOOL_IDS = ("tl_read_file", "tl_write_file", "tl_edit_file", "tl_glob", "tl_grep", "tl_bash", "tl_undo_file")
+FILE_TOOL_IDS = ("tl_read_file", "tl_write_file", "tl_edit_file", "tl_glob", "tl_grep", "tl_shell", "tl_undo_file")
+
+
+def shell_description(mode: str | None) -> str:
+    """返回与本轮 shell 方言一致的 ACI 路由描述。"""
+    selected = mode or "powershell"
+    label = {"powershell": "PowerShell 7", "git_bash": "Git Bash", "docker": "Docker Bash"}.get(
+        selected, "PowerShell 7"
+    )
+    syntax = {
+        "powershell": "使用 Get-ChildItem/Get-Content/Set-Location 等 PowerShell cmdlet，不要写 Bash 重定向语法",
+        "git_bash": "使用 ls/cat/cd 等 POSIX Bash 语法",
+        "docker": "使用容器内 Bash 语法（ls/cat/cd），只能访问 /workspace",
+    }.get(selected, "使用 PowerShell 7 cmdlet 语法")
+    return (
+        f"在当前工作区执行 {label} 命令。{syntax}。命令会先经过规则与独立审查；依赖安装/远程脚本需要人工确认，"
+        "系统级/越权操作会被拦截。需要运行脚本、构建、测试等无法用文件工具完成的动作时使用。"
+    )
 
 # 回滚备份（2026-08-24）：write/edit 写前备份到 .agent/.undo/，tl_undo_file 恢复最近一份
 _UNDO_DIR = ".agent/.undo"
@@ -241,6 +262,47 @@ def _risk_grade(command: str) -> str:
 # 风险档位序（降级矩阵比较用；等级从低到高）
 _RISK_GRADE_ORDER = {"low": 0, "medium": 1, "high": 2}
 
+# 规则闸门：工作区内普通编辑/构建由审查 LLM 复核；系统边界、凭据与下载执行
+# 永远拦截；依赖安装和远程脚本需要图节点的人工确认。该策略对 PowerShell、Git
+# Bash 与 Docker 共享，避免靠维护模型/命令白名单来“猜安全”。
+_POLICY_BLOCK_PATTERNS = (
+    r"\b(?:sudo|runas|whoami\s+/user)\b",
+    r"\b(?:apt|apt-get|yum|dnf)\b",
+    r"\b(?:npm|pnpm|yarn)\s+(?:install|add)\b[^\n]*\s(?:-g|--global)\b",
+    r"\b(?:pip|uv\s+pip)\s+install\b[^\n]*(?:--system|--user)\b",
+    r"\b(?:curl|wget)\b[^\n]*\|\s*(?:bash|sh|pwsh|powershell)\b",
+    r"\b(?:curl|wget|irm|invoke-webrequest)\b[^\n]*\|\s*(?:iex|invoke-expression)\b",
+    r"(?:^|[\s'\"])(?:/etc|/root|/var|/usr|/bin|/sbin|/proc|/sys|/boot|/mnt)(?:[/\s'\"]|$)",
+    r"(?:^|[\s'\"])(?:[A-Za-z]:[\\/]|\\\\|\.\.[\\/]|~[\\/])",
+    r"(?m)^\s*(?:cd|set-location|push-location)\s+(?:\.\.|[\\/]|[A-Za-z]:)",
+    r"(?:~[/\\]\.ssh|\.aws|\.env\b|id_rsa|credentials|shadow|passwd|printenv|\benv\b|\bexport\b)",
+    r"\bgit\s+(?:push|reset\s+--hard|clean|checkout|merge|rebase)\b",
+    r"\b(?:chmod|chown|chgrp|systemctl|service|shutdown|reboot|kill|pkill|killall)\b",
+    r"\b(?:winget|choco)\s+install\b",
+    r"\binstall-(?:module|package|psresource)\b",
+    r"\b(?:invoke-expression|iex)\b",
+)
+_POLICY_CONFIRM_PATTERNS = (
+    r"\b(?:curl|wget|scp|rsync|nc|ncat|socat)\b",
+    r"\b(?:npm|pnpm|yarn)\s+(?:install|add)\b",
+    r"\b(?:pip|uv\s+pip|python\s+-m\s+pip)\s+install\b",
+    r"\b(?:cargo|go)\s+(?:add|get)\b",
+    r"\b(?:irm|invoke-webrequest|invoke-restmethod)\b",
+)
+
+
+def shell_preflight(input: dict[str, Any], context: dict[str, Any]) -> ToolGateDecision:
+    """在工具执行前做确定性的分级闸门；审查 LLM 仍在命令构建阶段运行。"""
+    command = input.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return ToolGateDecision(ToolGateAction.BLOCK, "shell 命令不能为空", "high")
+    low = command.lower()
+    if _fast_review(command) == "block" or any(re.search(pattern, low) for pattern in _POLICY_BLOCK_PATTERNS):
+        return ToolGateDecision(ToolGateAction.BLOCK, "命令触及系统边界、凭据或下载执行策略", "high")
+    if any(re.search(pattern, low) for pattern in _POLICY_CONFIRM_PATTERNS):
+        return ToolGateDecision(ToolGateAction.CONFIRM, "依赖安装或远程脚本需要人工确认", "high")
+    return ToolGateDecision(ToolGateAction.ALLOW, "工作区策略允许，继续进行语义审查", _risk_grade(command))
+
 
 # 输出校验：审查模型回复里出现试图覆盖规则的内容 → 一律 block（防审查模型被命令注入劫持后"自证清白"）
 _INJECTION_MARKERS = (
@@ -424,6 +486,41 @@ async def _curl_review(command: str) -> str:
     return _extract_review_content(proc.stdout)
 
 
+async def _httpx_review(command: str) -> str:
+    """通过 httpx 调用独立审查 endpoint，不依赖 Git Bash/curl。"""
+    settings = get_settings()
+    payload = {
+        "model": settings.bash_review_model,
+        "messages": [
+            {"role": "system", "content": _REVIEW_SYSTEM_PROMPT},
+            {"role": "user", "content": command},
+        ],
+        "temperature": 0,
+        "max_tokens": 200,
+    }
+    timeout = httpx.Timeout(
+        float(settings.bash_review_timeout), connect=float(settings.bash_review_connect_timeout)
+    )
+    client_kwargs: dict[str, Any] = {"timeout": timeout}
+    if settings.bash_review_proxy:
+        client_kwargs["proxy"] = settings.bash_review_proxy
+    async with httpx.AsyncClient(**client_kwargs) as client:
+        response = await client.post(
+            settings.bash_review_endpoint,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {settings.bash_review_api_key}",
+            },
+            json=payload,
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"审查 API HTTP {response.status_code}: {response.text[:160]}")
+    if not response.text.strip():
+        raise RuntimeError("审查 API 无响应体")
+    return _extract_review_content(response.text)
+
+
 def _extract_review_content(raw: str) -> str:
     """从 OpenAI chat completion 响应信封提取 assistant content（审查模型真正的判定文本）。
 
@@ -483,7 +580,7 @@ async def _review_command(command: str) -> dict[str, str]:
     if _breaker.open:
         return _degraded_review(grade, "审查通道熔断（暂不可用）")
     try:
-        raw = await _curl_review(command)
+        raw = await _httpx_review(command)
     except Exception as exc:  # noqa: BLE001  网络/curl 失败 → 熔断计数 + 降级
         _breaker.record_failure()
         return _degraded_review(grade, f"审查通道异常（{str(exc)[:100]}）")
@@ -621,6 +718,51 @@ async def build_bash_sandbox_command(command: str, cwd: str | None = None) -> Sa
     container_workdir = "/workspace" if relative == "." else f"/workspace/{relative}"
     env = {"LIBAO_BASH_REVIEW_NOTE": degraded_note} if degraded_note else {}
     return SandboxCommand(argv=("bash", "-lc", command), workdir=container_workdir, env=env)
+
+
+async def build_workspace_shell_command(command: str, cwd: str | None = None) -> WorkspaceCommand:
+    """审查并构建宿主 shell 命令；实际进程由 sandbox.run_workspace_command 启动。"""
+    root = _root()
+    if not root:
+        raise SandboxFailure(SandboxErrorCode.INVALID_WORKDIR, "不在工作区上下文")
+    try:
+        workdir = resolve_workspace_path(root, cwd) if cwd else Path(root).resolve()
+    except AppError as exc:
+        raise SandboxFailure(SandboxErrorCode.INVALID_WORKDIR, exc.message) from exc
+
+    fast = _fast_review(command)
+    if fast == "block":
+        raise SandboxFailure(
+            SandboxErrorCode.UNSUPPORTED_TOOL,
+            "命令被审查拦截（安全黑名单）",
+            output={"error": "命令被审查拦截（安全黑名单）", "verdict": "block", "reason": "命中危险命令模式"},
+        )
+    degraded_note: str | None = None
+    if fast is None:
+        review = await _review_command(command)
+        if review["verdict"] == "block":
+            reason = review["reason"]
+            raise SandboxFailure(
+                SandboxErrorCode.UNSUPPORTED_TOOL,
+                f"命令被审查拦截: {reason}",
+                output={"error": f"命令被审查拦截: {reason}", "verdict": "block", "reason": reason},
+            )
+        if review.get("degraded"):
+            degraded_note = review["reason"]
+
+    relative = workdir.relative_to(Path(root).resolve()).as_posix()
+    mode = get_tool_shell_mode() or get_shell_mode()
+    shell = "powershell" if mode == "powershell" else "git_bash"
+    env = {"LIBAO_SHELL_REVIEW_NOTE": degraded_note} if degraded_note else {}
+    return WorkspaceCommand(script=command, shell=shell, workdir=relative or ".", env=env)
+
+
+async def build_shell_command(command: str, cwd: str | None = None) -> SandboxCommand | WorkspaceCommand:
+    """按当前会话快照选择 PowerShell、Git Bash 或 Docker Bash。"""
+    mode = get_tool_shell_mode() or get_shell_mode()
+    if mode == "docker":
+        return await build_bash_sandbox_command(command, cwd)
+    return await build_workspace_shell_command(command, cwd)
 
 
 async def bash_handler(command: str, cwd: str | None = None) -> dict[str, Any]:

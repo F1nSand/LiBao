@@ -593,6 +593,34 @@ def register_builtin_tools() -> None:
     )
     _register(
         ToolSpec(
+            id="tl_shell",
+            name="shell",
+            description=(
+                "在当前工作区执行命令。语法由设置中的沙箱模式决定（PowerShell 7、Git Bash 或 Docker Bash）；"
+                "命令会先经过规则与独立审查，依赖安装/远程脚本需要人工确认，系统级/越权操作会被拦截。"
+                "需要跑脚本、构建、测试等无法用文件工具完成的动作时使用；不要用它读写文件（优先使用文件工具）。"
+            ),
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "要执行的命令，语法遵循当前沙箱模式"},
+                    "cwd": {"type": "string", "description": "可选：相对工作区根的工作目录，缺省工作区根"},
+                },
+                "required": ["command"],
+            },
+            tool_type=ToolType.EXECUTION,
+            enabled=True,
+            require_confirm=False,
+            idempotent=False,
+            sandbox=SandboxLevel.WORKSPACE,
+            timeout_ms=130000,
+            sandbox_command_builder=file_ops.build_shell_command,
+            preflight=file_ops.shell_preflight,
+            builtin=True,
+        )
+    )
+    _register(
+        ToolSpec(
             id="tl_bash",
             name="bash",
             description=(

@@ -11,12 +11,28 @@ import logging
 import shutil
 import time
 from pathlib import Path
+from uuid import UUID
 
 from app.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
 _LOOP_INTERVAL_S = 3600  # 周期扫描间隔（小时级，个人量级足够）
+
+
+def remove_session_workspace(conversation_id: UUID | str, settings: Settings | None = None) -> bool:
+    """删除一个普通会话的精确临时目录；拒绝符号链接/越出 sessions 根的路径。"""
+    settings = settings or get_settings()
+    sessions = (Path(settings.cache_dir) / "sessions").resolve()
+    target = (sessions / str(conversation_id)).resolve()
+    if target.parent != sessions or not target.is_dir():
+        return False
+    try:
+        shutil.rmtree(target)
+    except OSError as exc:
+        logger.warning("删除会话临时工作区失败 %s: %s", target, exc)
+        return False
+    return True
 
 
 def purge_stale_session_workspaces(settings: Settings | None = None, now: float | None = None) -> int:

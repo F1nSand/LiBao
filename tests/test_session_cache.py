@@ -6,7 +6,9 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.core.session_cache import purge_stale_session_workspaces
+import pytest
+
+from app.core.session_cache import purge_stale_session_workspaces, remove_session_workspace
 
 
 def _settings(cache_dir, ttl_days=7):
@@ -66,3 +68,27 @@ def test_purge_respects_ttl_days(tmp_path):
     assert purge_stale_session_workspaces(s) == 1
     assert (sessions / "half-day").is_dir()
     assert not (sessions / "two-days").exists()
+
+
+def test_remove_session_workspace_only_deletes_exact_session(tmp_path):
+    s = _settings(tmp_path / "cache")
+    sessions = tmp_path / "cache" / "sessions"
+    target = sessions / "conv-1"
+    target.mkdir(parents=True)
+    (target / "probe").write_text("x", encoding="utf-8")
+    assert remove_session_workspace("conv-1", s) is True
+    assert not target.exists()
+
+
+def test_remove_session_workspace_does_not_follow_escape_symlink(tmp_path):
+    s = _settings(tmp_path / "cache")
+    sessions = tmp_path / "cache" / "sessions"
+    sessions.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (sessions / "conv-link").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("当前平台不允许创建目录符号链接")
+    assert remove_session_workspace("conv-link", s) is False
+    assert outside.is_dir()
