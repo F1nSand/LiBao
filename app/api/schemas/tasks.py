@@ -41,3 +41,7 @@ class SubmitTaskRequest(BaseModel):
 
 class TaskResumeRequest(BaseModel):
     confirm: dict[str, Any] | None = None
+
+
+class TaskRecoverRequest(BaseModel):
+    idempotency_key: str = Field(default_factory=lambda: str(uuid.uuid4()), min_length=8, max_length=128)

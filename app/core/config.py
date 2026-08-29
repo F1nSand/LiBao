@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     # pending_confirm 载荷 TTL：过期后拒绝 resume（docs 01 §3.4 I8）
     task_confirm_ttl_hours: int = 24
 
-    # ---- Docker 沙箱（仅 tl_bash；不自动拉取、不宿主回退）----
+    # ---- Docker Bash 强隔离（tl_bash 旧兼容 + tl_shell 可选；不自动拉取、不宿主回退）----
     sandbox_docker_cli: str = "docker"
     sandbox_docker_image: str = "libao-sandbox:py312-v1"
     sandbox_docker_memory: str = "512m"
@@ -100,6 +100,9 @@ class Settings(BaseSettings):
     # 视觉能力声明（多模态适配 2026-08-27）：激活 provider 的 capabilities 推导——
     # ["vision"]→True、其他非空→False、空/无激活 provider→None（回落 core/vision.py pattern 判定）
     llm_vision_declared: bool | None = None
+    # 长流容错：SDK 只负责连接，不自行重试；应用层仅对 agent_execute 传输错误重试一次。
+    llm_stream_chunk_timeout_s: float = Field(default=300.0, gt=0)
+    llm_transport_auto_retries: int = Field(default=1, ge=0, le=1)
     # 单轮图片总预算（原始字节 MB；b64 后请求体 ≈ ×1.33）：超限自动跳过并在消息注记声明被剔张数
     image_total_budget_mb: int = 20
 

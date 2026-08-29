@@ -27,6 +27,7 @@ from app.storage.models.mcp_server import McpServer
 from app.storage.models.memory import LongTermMemory
 from app.storage.models.notification import Notification
 from app.storage.models.provider import ProviderConfig
+from app.storage.models.sandbox_preference import SandboxPreference
 from app.storage.models.task import Task
 from app.storage.models.tool_definition import ToolDefinition
 from app.storage.models.workspace import Workspace
@@ -47,6 +48,7 @@ TABLE_SPECS: dict[str, tuple[str, type]] = {
     "tool_definitions": ("tool_definitions.json", ToolDefinition),
     "workspaces": ("workspaces.json", Workspace),
     "kb_collections": ("kb_collections.json", KbCollection),
+    "sandbox_preferences": ("sandbox_preferences.json", SandboxPreference),
 }
 
 
@@ -65,7 +67,7 @@ class FileStore:
 
     async def init(self) -> None:
         """目录骨架 + 预加载全部已注册表（运行期 register 不再有未加载覆盖风险）。"""
-        for rel in ("sessions", "checkpoints", "memory/default/trace/_tasks", "data"):
+        for rel in ("sessions", "checkpoints", "task_events", "memory/default/trace/_tasks", "data"):
             (self.root / rel).mkdir(parents=True, exist_ok=True)
         (self.kb_root).mkdir(parents=True, exist_ok=True)
         for name in list(self.tables):
@@ -135,12 +137,13 @@ class FileContext:
 
     async def commit(self) -> None:
         """全部表全量序列化落盘（tmp+replace 原子）。"""
-        for table in self.store.tables.values():
+        # 请求并发时 repository 可能懒注册新表；快照遍历避免迭代期间字典变更。
+        for table in list(self.store.tables.values()):
             await table.flush()
 
     async def rollback(self) -> None:
         """全部表从磁盘重载（丢弃内存未提交修改）。"""
-        for table in self.store.tables.values():
+        for table in list(self.store.tables.values()):
             await table.reload()
 
     async def __aenter__(self) -> FileContext:

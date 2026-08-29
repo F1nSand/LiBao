@@ -93,7 +93,14 @@ class LLMService:
     @staticmethod
     def build_model(model: str | None = None, settings: Settings | None = None) -> ChatOpenAI:
         settings = settings or get_settings()
-        kwargs: dict[str, Any] = {"model": model or settings.llm_model, "streaming": True}
+        kwargs: dict[str, Any] = {
+            "model": model or settings.llm_model,
+            "streaming": True,
+            # 重试必须由 graph 的 checkpoint-aware orchestration 控制，避免 SDK
+            # 在半截响应后自行重放请求，造成工具/消息边界不可观测。
+            "max_retries": 0,
+            "stream_chunk_timeout": getattr(settings, "llm_stream_chunk_timeout_s", 300.0),
+        }
         if settings.llm_api_key:
             kwargs["api_key"] = settings.llm_api_key
         if settings.llm_base_url:
