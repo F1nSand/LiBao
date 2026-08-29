@@ -4,7 +4,12 @@ from __future__ import annotations
 import uuid
 from types import SimpleNamespace
 
+import pytest
+
+import app.orchestration.multimodal_input as multimodal_input
 from app.core.config import get_settings
+from app.core.errors import AppError
+from app.core.model_capabilities import ModelCapabilityKey, VisionCapability, VisionDecision
 from app.core.multimodal import (
     ImagePayload,
     encode_image,
@@ -18,7 +23,7 @@ from app.core.multimodal import (
 )
 from app.core.vision import has_vision_pattern, supports_vision
 from app.orchestration.context_builder import build_context
-from app.orchestration.multimodal_input import prepare_image_input
+from app.orchestration.multimodal_input import PreparedImageInput, image_config, prepare_image_input
 from app.orchestration.nodes.agent_execute import _image_ctx
 from app.orchestration.stream_core import build_initial_state
 
@@ -126,6 +131,14 @@ def test_human_message_vision_with_refs_list_blocks():
     assert [b for b in m.content if is_ref_block(b)] == refs  # ref 在前
     text_blocks = [b for b in m.content if b.get("type") == "text"]
     assert len(text_blocks) == 1 and text_blocks[0]["text"] == "看这两张图"  # 无 drop 注记时原文干净
+
+
+def test_human_message_vision_with_image_only_omits_empty_text_block():
+    """纯图片请求不能携带空 text block（智谱等兼容端点会以 1210 拒绝）。"""
+    refs = [make_ref_block("att-1", "image/png")]
+    message = human_message_with_images("", refs, vision=True)
+
+    assert message.content == refs
 
 
 def test_human_message_non_vision_inline_note():
@@ -251,6 +264,28 @@ async def test_prepare_image_input_owner_order_and_mime(monkeypatch):
     assert all(owner == user_id for owner, _ in seen_owner_ids)
 
 
+@pytest.mark.asyncio
+async def test_prepare_image_input_plain_turn_skips_capability_discovery(monkeypatch):
+    class Resolver:
+        async def resolve_vision(self, key, api_key=None):
+            raise AssertionError("plain turns must not discover image capability")
+
+    monkeypatch.setattr(multimodal_input, "get_model_capability_resolver", lambda: Resolver())
+
+    class EmptyRepository:
+        def __init__(self, db):
+            pass
+
+        async def get(self, owner_id, attachment_id):
+            return None
+
+    monkeypatch.setattr(multimodal_input, "AttachmentRepository", EmptyRepository)
+    result = await prepare_image_input(
+        object(), user_id=uuid.uuid4(), attachment_ids=[], effective_model="glm-5.3-flash"
+    )
+    assert result.candidate_count == 0 and result.capability is VisionCapability.UNKNOWN
+
+
 async def test_prepare_image_input_non_vision_never_reads_files(monkeypatch):
     user_id = uuid.uuid4()
     image_id = uuid.uuid4()
@@ -271,16 +306,72 @@ async def test_prepare_image_input_non_vision_never_reads_files(monkeypatch):
 
     monkeypatch.setattr("app.orchestration.multimodal_input.AttachmentRepository", FakeAttachmentRepository)
     monkeypatch.setattr("app.orchestration.multimodal_input.AttachmentService.read_file", read_file)
-    monkeypatch.setattr(get_settings(), "llm_vision_declared", False)
+
+    class Resolver:
+        async def resolve_vision(self, key, api_key=None):
+            return VisionDecision(VisionCapability.UNSUPPORTED, "metadata", key)
+
+    monkeypatch.setattr(multimodal_input, "get_model_capability_resolver", lambda: Resolver())
 
     result = await prepare_image_input(
         object(), user_id=user_id, attachment_ids=[str(image_id)], effective_model="gpt-4o"
     )
 
     assert result.vision is False
-    assert result.candidate_count == 1 and result.omitted_count == 1
+    assert result.candidate_count == 1 and result.omitted_count == 0
     assert result.image_refs == () and result.image_payload == {}
     assert reads == 0
+
+
+def test_image_config_force_context_preserves_nonempty_prepared_payload():
+    payload = _payload("att-1")
+    prepared = PreparedImageInput(
+        image_refs=(make_ref_block("att-1", "image/png"),),
+        image_payload={"att-1": payload},
+        current_image_ids=frozenset({"att-1"}),
+        candidate_count=1,
+        omitted_count=0,
+        vision=True,
+    )
+
+    config = image_config(prepared, force_context=True)
+
+    assert config["image_payload"] == {"att-1": payload}
+    assert config["current_image_ids"] == {"att-1"}
+    assert config["vision"] is True
+
+
+def test_image_config_force_context_emits_empty_keys_for_empty_prepared():
+    prepared = PreparedImageInput(
+        image_refs=(),
+        image_payload={},
+        current_image_ids=frozenset(),
+        candidate_count=0,
+        omitted_count=0,
+        vision=True,
+    )
+
+    config = image_config(prepared, force_context=True)
+
+    assert config == {"image_payload": {}, "current_image_ids": set(), "vision": False}
+    assert image_config(None, force_context=False) == {}
+
+
+def test_human_message_non_vision_does_not_duplicate_omission_count():
+    message = human_message_with_images(
+        "原始问题",
+        [],
+        vision=False,
+        model="deepseek-chat",
+        n_images=2,
+        n_dropped=0,
+    )
+
+    assert message.content.count("2 张图片") == 1
+    assert "另有" not in message.content
+    assert "预算" not in message.content
+    assert "读取失败" not in message.content
+    assert message.content.endswith("\n\n原始问题")
 
 
 async def test_prepare_image_input_counts_read_failures_and_budget_drops(monkeypatch):
@@ -360,3 +451,247 @@ def test_initial_state_reports_omission_when_no_image_survives(monkeypatch):
     )
     assert "2" in state["messages"][0].content
     assert "未能送达" in state["messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_glm_53_flash_unknown_capability_reads_and_prepares_image(monkeypatch):
+    user_id = uuid.uuid4()
+    image_id = uuid.uuid4()
+    row = SimpleNamespace(id=image_id, content_type="image/png")
+    reads: list[uuid.UUID] = []
+
+    class Repo:
+        def __init__(self, db):
+            self.db = db
+
+        async def get(self, owner_id, attachment_id):
+            assert owner_id == user_id
+            return row if attachment_id == image_id else None
+
+    class Resolver:
+        async def resolve_vision(self, key, api_key=None):
+            assert key.model == "glm-5.3-flash"
+            return VisionDecision(VisionCapability.UNKNOWN, "unknown", key)
+
+    async def read_file(att):
+        reads.append(att.id)
+        return b"png bytes"
+
+    monkeypatch.setattr(multimodal_input, "AttachmentRepository", Repo)
+    monkeypatch.setattr(multimodal_input, "AttachmentService", lambda: SimpleNamespace(read_file=read_file))
+    monkeypatch.setattr(multimodal_input, "get_model_capability_resolver", lambda: Resolver())
+
+    result = await prepare_image_input(
+        object(),
+        user_id=user_id,
+        attachment_ids=[str(image_id)],
+        effective_model="glm-5.3-flash",
+        effective_base_url="https://custom.example.test/v1",
+    )
+
+    assert result.capability is VisionCapability.UNKNOWN
+    assert reads == [image_id]
+    assert list(result.image_payload) == [str(image_id)]
+
+
+@pytest.mark.asyncio
+async def test_authoritative_unsupported_never_reads_image(monkeypatch):
+    user_id = uuid.uuid4()
+    image_id = uuid.uuid4()
+    row = SimpleNamespace(id=image_id, content_type="image/png")
+    reads: list[uuid.UUID] = []
+
+    class Repo:
+        def __init__(self, db):
+            self.db = db
+
+        async def get(self, owner_id, attachment_id):
+            return row if owner_id == user_id and attachment_id == image_id else None
+
+    class Resolver:
+        async def resolve_vision(self, key, api_key=None):
+            return VisionDecision(VisionCapability.UNSUPPORTED, "metadata", key)
+
+    async def read_file(att):
+        reads.append(att.id)
+        return b"should not be read"
+
+    monkeypatch.setattr(multimodal_input, "AttachmentRepository", Repo)
+    monkeypatch.setattr(multimodal_input, "AttachmentService", lambda: SimpleNamespace(read_file=read_file))
+    monkeypatch.setattr(multimodal_input, "get_model_capability_resolver", lambda: Resolver())
+
+    result = await prepare_image_input(
+        object(),
+        user_id=user_id,
+        attachment_ids=[str(image_id)],
+        effective_model="custom-text",
+        effective_base_url="https://custom.example.test/v1",
+    )
+
+    assert result.capability is VisionCapability.UNSUPPORTED
+    assert result.candidate_count == 1
+    assert result.image_refs == () and result.image_payload == {}
+    assert reads == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_image_success_records_supported(monkeypatch):
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.orchestration.nodes import agent_execute as agent_execute_module
+
+    key = ModelCapabilityKey("https://custom.example.test/v1", "glm-5.3-flash")
+    payload = ImagePayload(att_id="att-1", mime="image/png", data_b64="cG5n")
+    calls: list[list] = []
+
+    class Resolver:
+        def __init__(self):
+            self.successes = []
+
+        def record_success(self, seen_key):
+            self.successes.append(seen_key)
+
+        def record_unsupported(self, seen_key):
+            raise AssertionError("unexpected negative result")
+
+    resolver = Resolver()
+
+    class Model:
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        async def ainvoke(self, messages):
+            calls.append(messages)
+            return AIMessage(content="ok", usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2})
+
+    monkeypatch.setattr(agent_execute_module, "get_model_capability_resolver", lambda: resolver)
+    state = {
+        "agent_config": {"model": "glm-5.3-flash", "system_prompt": "", "tools": [], "max_steps": 5},
+        "messages": [HumanMessage(content=[make_ref_block("att-1", "image/png")])],
+        "flags": {},
+        "totals": {},
+        "run_logs": [],
+    }
+    config = {
+        "configurable": {
+            "model": Model(),
+            "image_payload": {"att-1": payload},
+            "current_image_ids": {"att-1"},
+            "vision": True,
+            "image_capability_state": VisionCapability.UNKNOWN.value,
+            "image_capability_key": key,
+        }
+    }
+
+    await agent_execute_module.agent_execute_node(state, config)
+
+    assert calls and any(block.get("type") == "image" for block in calls[0][1].content)
+    assert resolver.successes == [key]
+
+
+@pytest.mark.asyncio
+async def test_explicit_image_rejection_is_not_retried_and_records_negative(monkeypatch):
+    from langchain_core.messages import HumanMessage
+
+    from app.orchestration.nodes import agent_execute as agent_execute_module
+
+    key = ModelCapabilityKey("https://custom.example.test/v1", "glm-5.3-flash")
+    resolver_calls: list[tuple[str, ModelCapabilityKey]] = []
+
+    class Resolver:
+        def record_success(self, seen_key):
+            resolver_calls.append(("success", seen_key))
+
+        def record_unsupported(self, seen_key):
+            resolver_calls.append(("unsupported", seen_key))
+
+    class Model:
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        async def ainvoke(self, messages):
+            exc = RuntimeError("vision_not_supported: image input is unsupported")
+            exc.status_code = 400
+            raise exc
+
+    monkeypatch.setattr(agent_execute_module, "get_model_capability_resolver", lambda: Resolver())
+    state = {
+        "agent_config": {"model": "glm-5.3-flash", "system_prompt": "", "tools": [], "max_steps": 5},
+        "messages": [HumanMessage(content=[make_ref_block("att-1", "image/png")])],
+        "flags": {},
+        "totals": {},
+        "run_logs": [],
+    }
+    config = {
+        "configurable": {
+            "model": Model(),
+            "image_payload": {"att-1": ImagePayload(att_id="att-1", mime="image/png", data_b64="cG5n")},
+            "current_image_ids": {"att-1"},
+            "vision": True,
+            "image_capability_state": VisionCapability.UNKNOWN.value,
+            "image_capability_key": key,
+        }
+    }
+
+    with pytest.raises(AppError) as exc:
+        await agent_execute_module.agent_execute_node(state, config)
+
+    assert exc.value.code == 60005
+    assert resolver_calls == [("unsupported", key)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        type("Transient400", (RuntimeError,), {"status_code": 400})("bad request"),
+        type("Unauthorized", (RuntimeError,), {"status_code": 401})("unauthorized"),
+        type("RateLimited", (RuntimeError,), {"status_code": 429})("rate limited"),
+        type("ServerError", (RuntimeError,), {"status_code": 500})("server error"),
+        TimeoutError("request timed out"),
+    ],
+)
+async def test_transient_image_failure_does_not_poison_capability_cache(monkeypatch, error):
+    from langchain_core.messages import HumanMessage
+
+    from app.orchestration.nodes import agent_execute as agent_execute_module
+
+    key = ModelCapabilityKey("https://custom.example.test/v1", "glm-5.3-flash")
+    resolver_calls: list[tuple[str, ModelCapabilityKey]] = []
+
+    class Resolver:
+        def record_success(self, seen_key):
+            resolver_calls.append(("success", seen_key))
+
+        def record_unsupported(self, seen_key):
+            resolver_calls.append(("unsupported", seen_key))
+
+    class Model:
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        async def ainvoke(self, messages):
+            raise error
+
+    monkeypatch.setattr(agent_execute_module, "get_model_capability_resolver", lambda: Resolver())
+    state = {
+        "agent_config": {"model": "glm-5.3-flash", "system_prompt": "", "tools": [], "max_steps": 5},
+        "messages": [HumanMessage(content=[make_ref_block("att-1", "image/png")])],
+        "flags": {},
+        "totals": {},
+        "run_logs": [],
+    }
+    config = {
+        "configurable": {
+            "model": Model(),
+            "image_payload": {"att-1": ImagePayload(att_id="att-1", mime="image/png", data_b64="cG5n")},
+            "current_image_ids": {"att-1"},
+            "vision": True,
+            "image_capability_state": VisionCapability.UNKNOWN.value,
+            "image_capability_key": key,
+        }
+    }
+
+    with pytest.raises(type(error)):
+        await agent_execute_module.agent_execute_node(state, config)
+    assert resolver_calls == []

@@ -142,24 +142,15 @@ async def test_task_vision_hydrates_image_and_checkpoint_contains_no_base64(task
     assert attachment_id in task.input["attachment_ids"]
 
 
-async def test_task_non_vision_does_not_read_attachment(tasks_fixture, monkeypatch):
+async def test_task_unknown_capability_reads_attachment(tasks_fixture, monkeypatch):
     user, agent, task_id, _, _ = await _submit_task_with_image(tasks_fixture)
     agent.model = "deepseek-chat"
     monkeypatch.setattr(get_settings(), "llm_vision_declared", None)
-    reads = 0
-
-    async def fail_read(_service, _attachment):
-        nonlocal reads
-        reads += 1
-        raise AssertionError("non-vision task must not read image files")
-
-    monkeypatch.setattr(AttachmentService, "read_file", fail_read)
     model = CapturingTaskModel()
     await run_task_graph(graph=build_graph(), task_id=task_id, trace_id="trace-task-text", model_override=model)
     human = next(message for message in model.seen[0] if message.type == "human")
-    assert isinstance(human.content, str)
-    assert "1 张图片" in human.content and "deepseek-chat" in human.content
-    assert reads == 0
+    assert isinstance(human.content, list)
+    assert any(block.get("type") == "image" for block in human.content)
 
 
 async def test_task_missing_file_degrades_and_completes(tasks_fixture, monkeypatch):

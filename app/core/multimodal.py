@@ -68,7 +68,11 @@ def fit_budget(payloads: list[ImagePayload], budget_mb: int) -> tuple[list[Image
 
 
 def no_vision_note(model: str, n_images: int, n_dropped: int = 0) -> str:
-    """非视觉模型收图的注记（内联于同一条 user 消息前缀，绝不放独立 SystemMessage——避免污染后续轮前缀）。"""
+    """非视觉模型收图的注记。
+
+    ``n_images`` 表示候选图片总数；``n_dropped`` 仅表示视觉投递阶段的读盘失败或预算剔除，
+    因模型不支持视觉而忽略的图片不能再次计入后者。
+    """
     note = (
         f"（系统提示：当前模型 {model} 不支持读取图片，用户本次发送了 {n_images} 张图片已被忽略；"
         "请基于文字作答，如需看图请建议用户切换支持视觉的模型。）"
@@ -107,8 +111,12 @@ def human_message_with_images(
     if not refs:
         return HumanMessage(content=f"{vision_drop_note(n_dropped or candidate_count)}\n\n{text}")
     blocks: list[dict[str, Any]] = [dict(r) for r in refs]
-    text_block = {"type": "text", "text": f"{vision_drop_note(n_dropped)}{text}" if n_dropped else text}
-    blocks.append(text_block)
+    # Some OpenAI-compatible endpoints (including GLM) reject an empty text
+    # block in an image-only request with parameter error 1210. Keep the
+    # explanatory drop note when needed, but omit a genuinely empty block.
+    if text or n_dropped:
+        text_block = {"type": "text", "text": f"{vision_drop_note(n_dropped)}{text}" if n_dropped else text}
+        blocks.append(text_block)
     return HumanMessage(content=blocks)
 
 

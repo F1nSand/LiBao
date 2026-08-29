@@ -12,7 +12,7 @@ import pytest
 
 from app.core.config import get_settings
 from app.tools import executor
-from app.tools.registry import ToolSpec
+from app.tools.registry import ToolGateAction, ToolGateDecision, ToolSpec
 from app.tools.sandbox import SandboxCommand, SandboxErrorCode, SandboxFailure, SandboxLevel, SandboxResult
 
 
@@ -36,9 +36,13 @@ def test_summarize_dict_not_truncated_at_500():
     assert "item-19" in summary  # 末尾条目对 LLM 可见
 
 
-def test_summarize_str_passthrough():
-    long_str = "hello" * 1000  # 5000 字符
-    assert executor._summarize(long_str) == long_str  # str 原样透传，不截断
+def test_summarize_str_is_bounded_with_metadata():
+    long_str = "hello" * 2000  # 10000 字符
+    assert len(executor._summarize(long_str)) == get_settings().tool_result_max_chars
+    summary, truncated, original_chars = executor._summarize_with_meta(long_str)
+    assert summary == executor._summarize(long_str)
+    assert truncated is True
+    assert original_chars == len(long_str)
 
 
 async def test_retry_success_after_two_failures():
@@ -54,6 +58,42 @@ async def test_retry_success_after_two_failures():
     assert result.ok is True
     assert result.retries == 2
     assert calls["n"] == 3
+
+
+async def test_tool_result_reports_bounded_summary_metadata():
+    long_str = "x" * (get_settings().tool_result_max_chars + 17)
+    result = await executor.execute(_spec(handler=lambda: long_str), {})
+    assert result.ok is True
+    assert len(result.summary) == get_settings().tool_result_max_chars
+    assert result.summary_truncated is True
+    assert result.summary_original_chars == len(long_str)
+
+
+async def test_preflight_blocks_without_invoking_handler():
+    called = {"value": False}
+
+    def handler(**kw):
+        called["value"] = True
+        return {"ok": True}
+
+    def preflight(_input, _context):
+        return ToolGateDecision(ToolGateAction.BLOCK, "禁止", "high")
+
+    result = await executor.execute(_spec(handler=handler, preflight=preflight), {})
+    assert not result.ok
+    assert "sandbox_policy_blocked" in (result.error or "")
+    assert called["value"] is False
+
+
+async def test_preflight_confirmation_requires_explicit_approval():
+    def preflight(_input, _context):
+        return ToolGateDecision(ToolGateAction.CONFIRM, "需要确认", "high")
+
+    spec = _spec(handler=lambda: {"ok": True}, preflight=preflight)
+    denied = await executor.execute(spec, {})
+    assert not denied.ok and "sandbox_confirmation_required" in (denied.error or "")
+    approved = await executor.execute(spec, {}, approved=True)
+    assert approved.ok
 
 
 async def test_retry_all_fail():

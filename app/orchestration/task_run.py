@@ -15,6 +15,7 @@ from typing import Any
 
 from langgraph.types import Command
 
+from app.core.errors import normalize_llm_exception
 from app.orchestration.document_context import prepare_resume_document_context
 from app.orchestration.multimodal_input import PreparedImageInput, image_config, prepare_image_input
 from app.orchestration.stream_core import build_initial_state, resolve_effective_model, stream_graph_events
@@ -23,6 +24,7 @@ from app.services.task import TaskService, push_event
 from app.services.tool import ToolService
 from app.storage.file.store import get_store
 from app.storage.repositories.agent import AgentRepository
+from app.storage.repositories.run_log import RunLogRepository
 from app.storage.repositories.task import TaskRepository
 
 logger = logging.getLogger(__name__)
@@ -71,7 +73,7 @@ async def _run_graph_common(
         svc = TaskService()
         # F1：中断任务（chat/invoke 来源）的 thread 在 pending_confirm 里（conversation.id / uuid4），
         # 不能硬编码 task.id——否则 JSON 轨 resume 打到无 checkpoint 的线程报 EmptyInputError
-        thread_id = TaskService.resolve_resume_thread(task)
+        thread_id = TaskService.resolve_execution_thread(task)
         conversation_id = (task.pending_confirm or {}).get("conversation_id")
         try:
             conversation_uuid = uuid.UUID(str(conversation_id)) if conversation_id else None
@@ -99,8 +101,8 @@ async def _run_graph_common(
             if updated is None:
                 return None
             payload = dict(value)
-            payload["thread_id"] = str(task.id)
-            payload["conversation_id"] = None
+            payload["thread_id"] = thread_id
+            payload["conversation_id"] = conversation_id
             payload["created_at"] = datetime.now(UTC).isoformat()
             await TaskRepository(db).set_pending_confirm(updated, payload)
             await db.commit()
@@ -160,8 +162,38 @@ async def _run_graph_common(
             if updated is None:
                 return None
             if updated.status == "running":
-                await svc.set_failed(db, updated, str(exc))
-                await push_event(str(task_id), "error", {"code": 60001, "message": str(exc), "retryable": True})
+                error_payload = {
+                    "code": getattr(exc, "code", 60001),
+                    "message": getattr(exc, "message", str(exc)),
+                    "kind": getattr(exc, "kind", None),
+                    "retryable": getattr(exc, "retryable", False),
+                    "recoverable": getattr(exc, "recoverable", False),
+                    "details": getattr(exc, "details", {}),
+                }
+                await svc.set_failed(db, updated, error_payload)
+                details = error_payload["details"]
+                await RunLogRepository(db).create(
+                    task_id=task_id,
+                    trace_id=trace_id,
+                    node="agent_execute",
+                    type="llm",
+                    input={"model": details.get("model"), "context_metrics": details.get("context_metrics")},
+                    output={"kind": error_payload["kind"], "details": details},
+                    duration_ms=int(details.get("elapsed_ms") or 0),
+                    status="error",
+                )
+                await push_event(
+                    str(task_id),
+                    "error",
+                    {
+                        "code": getattr(exc, "code", 60001),
+                        "message": getattr(exc, "message", str(exc)),
+                        "kind": getattr(exc, "kind", None),
+                        "retryable": getattr(exc, "retryable", False),
+                        "recoverable": getattr(exc, "recoverable", False),
+                        "details": getattr(exc, "details", {}),
+                    },
+                )
             return None
 
         def task_emit(event_type: str, payload: dict[str, Any]) -> str:
@@ -171,6 +203,9 @@ async def _run_graph_common(
                 asyncio.create_task(push_event(str(task_id), "agent_switch", payload))
             return ""
 
+        async def task_event_sink(event_type: str, payload: dict[str, Any]) -> None:
+            await push_event(str(task_id), event_type, payload)
+
         async for _ in stream_graph_events(
             graph=graph,
             initial=initial,
@@ -179,6 +214,7 @@ async def _run_graph_common(
             on_interrupt=on_interrupt,
             on_final=on_final,
             on_error=on_error,
+            task_event_sink=task_event_sink,
         ):
             pass
 
@@ -189,8 +225,17 @@ async def _mark_failed(task_id: uuid.UUID, exc: Exception, log_msg: str) -> None
     async with get_store().session() as db:
         task = await TaskRepository(db).get_by_id(task_id)
         if task is not None:
-            await TaskService().set_failed(db, task, str(exc))
-            await push_event(str(task_id), "error", {"code": 50001, "message": str(exc), "retryable": True})
+            error = normalize_llm_exception(exc, model="unknown")
+            payload = {
+                "code": error.code,
+                "message": error.message,
+                "kind": error.kind,
+                "retryable": error.retryable,
+                "recoverable": error.recoverable,
+                "details": error.details,
+            }
+            await TaskService().set_failed(db, task, payload)
+            await push_event(str(task_id), "error", payload)
 
 
 async def run_task_graph(
@@ -235,6 +280,7 @@ async def run_task_graph(
                 image_refs=list(prepared_images.image_refs) or None,
                 image_candidate_count=prepared_images.candidate_count,
                 image_omitted_count=prepared_images.omitted_count,
+                image_capability=prepared_images.capability,
             )
         await _run_graph_common(
             graph=graph,
@@ -272,3 +318,38 @@ async def resume_task_graph(
         )
     except Exception as exc:  # noqa: BLE001
         await _mark_failed(task_id, exc, "resume task %s failed")
+
+
+async def recover_task_graph(
+    *, graph: Any, task_id: uuid.UUID, trace_id: str, model_override: Any = None
+) -> None:
+    """从模型传输失败 checkpoint 继续后台任务；initial=None，避免重放用户输入/工具。"""
+    try:
+        async with get_store().session() as db:
+            task = await TaskRepository(db).get_by_id(task_id)
+            if task is None:
+                return
+            agent = await AgentRepository(db).get_by_id(task.agent_id)
+            if agent is None:
+                return
+            task_input = task.input if isinstance(task.input, dict) else {}
+            attachment_ids = task_input.get("attachment_ids", [])
+            if not isinstance(attachment_ids, list):
+                attachment_ids = []
+            prepared_images = await prepare_image_input(
+                db,
+                user_id=task.user_id,
+                attachment_ids=[str(value) for value in attachment_ids],
+                effective_model=resolve_effective_model(agent),
+            )
+        await _run_graph_common(
+            graph=graph,
+            task_id=task_id,
+            initial=None,
+            trace_id=trace_id,
+            model_override=model_override,
+            image_context=prepared_images,
+            force_image_context=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        await _mark_failed(task_id, exc, "recover task %s failed")

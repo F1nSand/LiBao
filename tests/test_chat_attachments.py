@@ -79,7 +79,15 @@ async def test_chat_with_attachment_links(chat_att_fixture):
         # 用户消息带 attachments
         msgs = await MessageRepository(session).list_by_conversation(conv.id)
         user_msg = next(m for m in msgs if m.role == "user")
-        assert user_msg.attachments == [{"attachment_id": str(att_id)}]
+        assert user_msg.attachments == [
+            {
+                "attachment_id": str(att_id),
+                "name": "a.txt",
+                "mime_type": "text/plain",
+                "size": 5,
+                "status": "ready",
+            }
+        ]
         # 附件回填 conversation_id/message_id
         att = await AttachmentRepository(session).get(user.id, att_id)
         assert att.conversation_id == conv.id
@@ -116,11 +124,14 @@ class CapturingModel:
 
     async def ainvoke(self, messages):
         self.seen.append([m.model_copy(deep=True) for m in messages])
-        return AIMessage(content="已收到，这是回复。")
+        return AIMessage(
+            content="已收到，这是回复。",
+            usage_metadata={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        )
 
 
-async def test_image_attachment_non_vision_degrades_with_note(chat_att_fixture):
-    """非视觉模型带图：链路跑通、落库仍纯 str+引用、模型收到注记前缀纯文本（无 ref 块泄漏）。"""
+async def test_image_attachment_unknown_capability_is_sent_to_model(chat_att_fixture):
+    """未知模型能力时先按真实请求发送图片，不因模型名未命中名单而静默丢弃。"""
     user, agent, conv = chat_att_fixture
     async with get_store().session() as session:
         att = await AttachmentService().save_upload(session, user, "a.png", "image/png", b"\x89PNG fake")
@@ -139,13 +150,14 @@ async def test_image_attachment_non_vision_degrades_with_note(chat_att_fixture):
         msgs = await MessageRepository(session).list_by_conversation(conv.id)
         user_msg = next(m for m in msgs if m.role == "user")
         assert isinstance(user_msg.content, str) and user_msg.content == "这是什么图？"
-        assert user_msg.attachments == [{"attachment_id": att_id}]
-    # 模型收到的是「注记前缀 + 原文」纯文本（fake 非 vision pattern、未声明）
+        assert user_msg.attachments[0]["attachment_id"] == att_id
+        assert user_msg.attachments[0]["name"] == "a.png"
+        assert user_msg.attachments[0]["mime_type"] == "image/png"
+    # fake 未提供能力元数据，但未知不等于不支持：模型应收到标准 image block。
     first_human = next(m for m in model.seen[0] if m.type == "human")
-    assert isinstance(first_human.content, str)
-    assert "不支持读取图片" in first_human.content
-    assert "已被忽略" in first_human.content
-    assert first_human.content.endswith("这是什么图？")
+    assert isinstance(first_human.content, list)
+    assert any(block.get("type") == "image" for block in first_human.content)
+    assert first_human.content[-1]["text"] == "这是什么图？"
     # SSE 正常 done
     assert any("done" in f for f in frames)
 
@@ -197,6 +209,57 @@ async def test_image_attachment_vision_hydrates_block_and_no_b64_in_checkpoint(c
     for f in ckpt_files:
         data = f.read_text(encoding="utf-8", errors="ignore")
         assert "eDk5UE5H" not in data and "\x89PNG" not in data  # b64/原始字节不落盘
+
+
+async def test_image_then_plain_turn_degrades_historical_ref(chat_att_fixture, tmp_path):
+    """视觉图片后的下一轮纯文本请求也必须净化历史 image_ref。"""
+    from app.core.multimodal import is_ref_block
+    from app.orchestration.checkpointer import JsonFileSaver
+
+    user, agent, conv = chat_att_fixture
+    agent.model = "gpt-4o"
+    async with get_store().session() as session:
+        att = await AttachmentService().save_upload(session, user, "history.png", "image/png", b"png bytes")
+        att_id = str(att.id)
+
+    graph = graph_local(checkpointer=JsonFileSaver(tmp_path / "checkpoints"))
+    first_model = CapturingModel()
+    async with get_store().session() as session:
+        async for _ in chat_stream_events(
+            db=session,
+            graph=graph,
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="先描述这张图",
+            attachments=[att_id],
+            trace_id="trace-history-image",
+            model_override=first_model,
+        ):
+            pass
+
+    second_model = CapturingModel()
+    async with get_store().session() as session:
+        async for _ in chat_stream_events(
+            db=session,
+            graph=graph,
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="这是下一轮纯文本",
+            trace_id="trace-history-text",
+            model_override=second_model,
+        ):
+            pass
+
+    assert second_model.seen
+    humans = [message for message in second_model.seen[-1] if message.type == "human"]
+    assert humans[-1].content == "这是下一轮纯文本"
+    historical = humans[0].content
+    assert isinstance(historical, list)
+    assert all(not is_ref_block(block) for block in historical)
+    assert all(block.get("type") != "image" for block in historical if isinstance(block, dict))
+    assert "图片已省略" in historical[0]["text"]
 
 
 async def test_chat_budget_drop_note_is_propagated(chat_att_fixture, monkeypatch):
@@ -268,10 +331,10 @@ async def test_all_unreadable_chat_images_report_omission(chat_att_fixture, monk
     assert "这张图是什么" in human.content
 
 
-def graph_local():
+def graph_local(checkpointer=None):
     from app.orchestration.graph import build_graph
 
-    return build_graph()
+    return build_graph(checkpointer)
 
 
 def test_stream_graph_config_exposes_image_payload():

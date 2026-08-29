@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import httpx
+
 from app.core.llm import resolve_openai_base_url
 
 
@@ -43,6 +45,57 @@ def test_build_model_uses_chatopenai_kwargs(monkeypatch):
     assert captured["api_key"] == "sk-x"
     assert captured["base_url"] == "https://api.deepseek.com"
     assert captured["streaming"] is True
+    assert captured["max_retries"] == 0
+    assert captured["stream_chunk_timeout"] == 300.0
+    assert "max_tokens" not in captured
+    assert "context_window" not in captured
+
+
+def test_classify_llm_transport_failures():
+    from app.core.errors import LLMFailureKind, classify_llm_exception
+
+    cases = [
+        httpx.RemoteProtocolError("peer closed connection without sending complete message body"),
+        httpx.ReadTimeout("read timed out"),
+        RuntimeError("No streaming chunk received for 120.0s"),
+        RuntimeError("incomplete chunked read"),
+    ]
+    assert all(classify_llm_exception(exc) is LLMFailureKind.TRANSPORT for exc in cases)
+
+
+def test_context_and_auth_errors_are_not_transport_recoverable():
+    from app.core.errors import LLMFailureKind, classify_llm_exception
+
+    cases = [
+        RuntimeError("maximum context length is 256000 tokens"),
+        RuntimeError("HTTP 400 invalid request"),
+        RuntimeError("HTTP 401 unauthorized"),
+        RuntimeError("HTTP 429 rate limit exceeded"),
+    ]
+    assert all(classify_llm_exception(exc) is not LLMFailureKind.TRANSPORT for exc in cases)
+
+
+def test_normalized_transport_error_redacts_payload():
+    from app.core.errors import LLMTransportError, normalize_llm_exception
+
+    exc = RuntimeError(
+        "peer closed https://gateway.invalid/chat?api_key=secret-key; "
+        "response body secret-body and prompt nonce-prompt"
+    )
+    normalized = normalize_llm_exception(
+        exc,
+        model="glm-5.3-flash",
+        context_metrics={"estimated_prompt_tokens": 12},
+    )
+    assert isinstance(normalized, LLMTransportError)
+    assert normalized.code == 60008
+    assert normalized.retryable is True
+    assert normalized.recoverable is True
+    details = str(normalized.details)
+    assert "secret-key" not in details
+    assert "secret-body" not in details
+    assert "nonce-prompt" not in details
+    assert normalized.details["model"] == "glm-5.3-flash"
 
 
 def test_build_model_falls_back_to_settings_model(monkeypatch):

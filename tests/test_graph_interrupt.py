@@ -6,9 +6,10 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, Interrupt
 
+from app.orchestration.checkpointer import JsonFileSaver
 from app.orchestration.graph import build_graph
 from app.tools import executor
-from app.tools.registry import ToolSpec, register, unregister
+from app.tools.registry import ToolGateAction, ToolGateDecision, ToolSpec, register, unregister
 from app.tools.sandbox import SandboxCommand, SandboxLevel, SandboxResult
 
 
@@ -122,6 +123,63 @@ async def test_resume_approved_continues(confirm_tool):
     assert fm["tool_calls"][0]["status"] == "done"
     assert fm["tool_calls"][0]["output"]["delivered"] is True
     assert "已按确认结果处理" in fm["content"]
+
+
+async def test_dynamic_preflight_approval_resumes_and_executes():
+    """动态策略确认后，resume 必须把批准传给执行器而不是再次返回确认错误。"""
+    tool_id = "tl_dynamic_confirm_test"
+    unregister(tool_id)
+
+    def preflight(_input, _context):
+        return ToolGateDecision(ToolGateAction.CONFIRM, "需要确认", "high")
+
+    register(
+        ToolSpec(
+            id=tool_id,
+            name="dynamic_confirm_test",
+            description="动态策略确认测试工具",
+            params_schema={"type": "object", "properties": {"msg": {"type": "string"}}, "required": ["msg"]},
+            enabled=True,
+            preflight=preflight,
+            handler=lambda msg: {"approved": True, "msg": msg},
+        )
+    )
+    try:
+        graph = build_graph(checkpointer=MemorySaver())
+        fake = FakeChatModel(tool_name="dynamic_confirm_test")
+        _, config = await _run_to_interrupt(graph, fake, "dynamic-preflight", tool_id)
+
+        async for _ in graph.astream(Command(resume={"approved": True}), config, stream_mode=["updates"]):
+            pass
+
+        state = await graph.aget_state(config)
+        assert state.values["final_message"]["tool_calls"][0]["status"] == "done"
+        assert state.values["final_message"]["tool_calls"][0]["output"]["approved"] is True
+    finally:
+        unregister(tool_id)
+
+
+async def test_json_file_saver_resume_approved_continues(confirm_tool, tmp_path):
+    """真实文件 checkpoint 的中断写入可被恢复，不在 HTTP resume 前置检查处 500。"""
+    graph = build_graph(checkpointer=JsonFileSaver(tmp_path / "checkpoints"))
+    class JsonCheckpointModel(FakeChatModel):
+        async def ainvoke(self, messages):
+            response = await super().ainvoke(messages)
+            response.usage_metadata = {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+            return response
+
+    fake = JsonCheckpointModel()
+    _, config = await _run_to_interrupt(graph, fake, "json-resume")
+
+    # 与 /tasks/{id}/resume 路由相同的前置读取。
+    snapshot = await graph.aget_state(config)
+    assert snapshot.next
+
+    async for _ in graph.astream(Command(resume={"approved": True}), config, stream_mode=["updates"]):
+        pass
+
+    state = await graph.aget_state(config)
+    assert state.values["final_message"]["tool_calls"][0]["status"] == "done"
 
 
 async def test_resume_denied_cancels(confirm_tool):

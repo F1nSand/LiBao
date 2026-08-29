@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.errors import ERR_PROVIDER_NOT_FOUND, AppError
 from app.core.llm import resolve_openai_base_url
 from app.storage.models.provider import ProviderConfig
@@ -65,6 +65,7 @@ class ProviderService:
         row = await repo.get_by_id(provider_id)
         if row is None or row.org_id != user.org_id or row.deleted_at is not None:
             raise AppError(ERR_PROVIDER_NOT_FOUND, "Provider 不存在或无权访问")
+        was_active = bool(row.enabled)
         activate_requested = fields.get("enabled") is True
         for key, val in fields.items():
             if key in _PATCHABLE_FIELDS and not (activate_requested and key == "enabled"):
@@ -73,6 +74,8 @@ class ProviderService:
             return await self.activate(db, user, provider_id)
         await db.commit()
         await db.refresh(row)
+        if was_active:
+            await self.sync_active_to_settings(db, user.org_id)
         return row
 
     async def activate(self, db: Any, user: User, provider_id: uuid.UUID) -> ProviderConfig:
@@ -93,8 +96,11 @@ class ProviderService:
         row = await repo.get_by_id(provider_id)
         if row is None or row.org_id != user.org_id or row.deleted_at is not None:
             raise AppError(ERR_PROVIDER_NOT_FOUND, "Provider 不存在或无权访问")
+        was_active = bool(row.enabled)
         row.deleted_at = datetime.now(UTC)
         await db.commit()
+        if was_active:
+            await self.sync_active_to_settings(db, user.org_id)
 
     async def sync_active_to_settings(self, db: Any | None = None, org_id: uuid.UUID | None = None) -> None:
         """同步：激活 provider → 覆盖 Settings（LLMService 即用激活的 provider）。
@@ -104,9 +110,14 @@ class ProviderService:
         本地单机化：db/org_id 为兼容参数（文件化后忽略），读 providers.json。
         """
         provider = await ProviderRepository().get_enabled(org_id or uuid.UUID(int=0))
+        baseline = Settings()
         settings = get_settings()
+        # 每次同步先恢复进程启动时的非 Provider 基线，避免停用、删除或清空字段残留旧值。
+        settings.llm_model = baseline.llm_model
+        settings.llm_base_url = baseline.llm_base_url
+        settings.llm_api_key = baseline.llm_api_key
+        settings.llm_vision_declared = None
         if provider is None:
-            settings.llm_vision_declared = None  # 无激活 provider → 回落 pattern 判定
             return
         if provider.base_url:
             settings.llm_base_url = resolve_openai_base_url(provider.base_url, provider.is_full_url)

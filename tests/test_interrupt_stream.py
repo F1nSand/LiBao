@@ -14,6 +14,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from app.core.config import get_settings
 from app.orchestration.chat_stream import chat_stream_events, resume_stream_events
 from app.orchestration.graph import build_graph
+from app.orchestration.task_run import resume_task_graph
 from app.services.attachment import AttachmentService
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Conversation, User
@@ -39,6 +40,28 @@ class FakeChatModel:
                 tool_calls=[{"name": "confirm_test", "args": {"msg": "hi"}, "id": "call_1", "type": "tool_call"}],
             )
         return AIMessage(content="已按确认结果处理。")
+
+
+class DoubleInterruptModel(FakeChatModel):
+    """首次请求和每次批准后的下一轮都要求确认，最后才返回文本。"""
+
+    async def ainvoke(self, messages):
+        self.seen.append([message.model_copy(deep=True) for message in messages])
+        if self._n < 2:
+            call_number = self._n + 1
+            self._n += 1
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "confirm_test",
+                        "args": {"msg": f"hi-{call_number}"},
+                        "id": f"call_{call_number}",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        return AIMessage(content="二次确认后完成。")
 
 
 @pytest.fixture
@@ -146,6 +169,9 @@ async def test_resume_approved_done(interrupt_fixture):
         types = [e["type"] for e in events]
         assert "message_start" not in types  # 续流不得重置 segments
         assert "token" in types and "status" in types
+        assert events[0]["type"] == "status"
+        assert events[0]["payload"]["accepted"] is True
+        assert events[0]["payload"]["phase"] == "tool"
         assert types[-1] == "done"
         done = events[-1]
         assert done["payload"]["message"]["tool_calls"] == []  # 最终轮无工具（逐轮消息，docs 03 §3）
@@ -163,6 +189,83 @@ async def test_resume_approved_done(interrupt_fixture):
         assert msgs[1].round == 1 and msgs[1].tool_calls[0]["tool_name"] == "confirm_test"
         assert msgs[1].tool_calls[0]["status"] == "done"
         assert msgs[2].round == 2 and msgs[2].tool_calls == []
+
+
+async def test_resume_rehydrates_document_attachment_without_ref_block(interrupt_fixture):
+    """中断恢复重新读取正文，并使用原 ref_id 水合，不把 document_ref 送进模型。"""
+    user, agent, conv = interrupt_fixture
+    async with get_store().session() as session:
+        attachment = await AttachmentService().save_upload(
+            session, user, "resume.md", "text/markdown", b"resume document nonce"
+        )
+        attachment_id = str(attachment.id)
+
+    graph = build_graph(checkpointer=MemorySaver())
+    fake = FakeChatModel()
+    async with get_store().session() as session:
+        frames = []
+        async for frame in chat_stream_events(
+            db=session,
+            graph=graph,
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="中断后继续总结文件",
+            attachments=[attachment_id],
+            trace_id="trace-resume-document",
+            model_override=fake,
+        ):
+            frames.append(frame)
+        events = _frames_to_events(frames)
+        task_id = uuid.UUID(next(e for e in events if e["type"] == "interrupt")["payload"]["task_id"])
+        task = await TaskRepository(session).get_by_id(task_id)
+        assert task.input["document_refs"][0]["ref_id"]
+
+    async with get_store().session() as session:
+        task = await TaskRepository(session).get_by_id(task_id)
+        async for _ in resume_stream_events(
+            db=session,
+            graph=graph,
+            task=task,
+            user=user,
+            approved=True,
+            trace_id="trace-resume-document-2",
+            model_override=fake,
+        ):
+            pass
+
+    resumed_human = next(message for message in fake.seen[-1] if message.type == "human")
+    assert isinstance(resumed_human.content, list)
+    assert all(block.get("type") != "document_ref" for block in resumed_human.content)
+    text = "\n".join(block.get("text", "") for block in resumed_human.content if isinstance(block, dict))
+    assert "resume document nonce" in text
+
+
+async def test_json_resume_second_interrupt_preserves_original_thread(interrupt_fixture):
+    _user, _agent, conv = interrupt_fixture
+    graph = build_graph(checkpointer=MemorySaver())
+    fake = DoubleInterruptModel()
+    _, task_id = await _run_interrupt(interrupt_fixture, graph, fake)
+
+    async with get_store().session() as session:
+        await resume_task_graph(
+            graph=graph, task_id=task_id, approved=True, trace_id="trace-json-1", model_override=fake
+        )
+
+    async with get_store().session() as session:
+        task_after_first_resume = await TaskRepository(session).get_by_id(task_id)
+        assert task_after_first_resume.status == "waiting_confirm"
+        assert task_after_first_resume.pending_confirm["thread_id"] == str(conv.id)
+        assert task_after_first_resume.pending_confirm["conversation_id"] == str(conv.id)
+        assert task_after_first_resume.pending_confirm["thread_id"] != str(task_id)
+        await resume_task_graph(
+            graph=graph, task_id=task_id, approved=True, trace_id="trace-json-2", model_override=fake
+        )
+
+    async with get_store().session() as session:
+        completed = await TaskRepository(session).get_by_id(task_id)
+        assert completed.status == "done"
+        assert completed.output and completed.output.get("content") == "二次确认后完成。"
 
 
 async def test_resume_denied_cancelled(interrupt_fixture):

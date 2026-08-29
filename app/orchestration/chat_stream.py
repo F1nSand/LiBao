@@ -30,6 +30,7 @@ from app.storage.models.conversation import Conversation
 from app.storage.models.message import Message
 from app.storage.models.task import Task
 from app.storage.models.user import User
+from app.storage.repositories.agent import AgentRepository
 from app.storage.repositories.attachment import AttachmentRepository
 from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
@@ -102,9 +103,10 @@ def _graph_config(
     # 多模态：图片 b64 载荷只进 configurable（不落 checkpoint）。新路径使用共享准备结果；
     # 保留旧参数以兼容测试和少量内部调用。
     if force_image_context:
-        cfg["configurable"].update(image_config(None, force_context=True))
+        cfg["configurable"].update(image_config(image_context, force_context=True))
     elif image_context is not None:
-        cfg["configurable"].update(image_config(image_context))
+        # chat 每轮都显式建立上下文；空附件轮也必须触发历史 image_ref 净化。
+        cfg["configurable"].update(image_config(image_context, force_context=True))
     elif image_payload:
         cfg["configurable"]["image_payload"] = image_payload
         cfg["configurable"]["current_image_ids"] = set(current_image_ids or [])
@@ -139,6 +141,7 @@ async def chat_stream_events(
     file_refs: list[str] | None = None,
     workspace: dict[str, Any] | None = None,
     trace_id: str,
+    task: Task | None = None,
     model_override: Any = None,
     attachment_mimes: dict[str, str] | None = None,
 ) -> AsyncIterator[str]:
@@ -146,6 +149,23 @@ async def chat_stream_events(
     msg_repo = MessageRepository(db)
     # 逐轮消息收集（docs 03 §3 多消息扩展）：stream_core 每轮工具结果齐后 append + 即时落库
     round_sink: list[dict[str, Any]] = []
+
+    async def _task_cancelled() -> bool:
+        """在 graph 启动前观察持久化状态，收口首帧前的取消竞态。"""
+        if task is None:
+            return False
+        current = await TaskRepository(db).get_by_id(task.id)
+        return current is None or current.status == "cancelled"
+
+    async def _clear_prestart_cancel() -> None:
+        if task is not None:
+            from app.orchestration.task_worker import clear_cancel_requested
+
+            clear_cancel_requested(str(task.id))
+
+    if await _task_cancelled():
+        await _clear_prestart_cancel()
+        return
 
     # ---- ⓪ 多模态图片载荷准备（不进 state/checkpoint）----
     # owner 校验、mime 过滤、vision 判定、读盘和预算都由共享流水线收口。
@@ -165,6 +185,9 @@ async def chat_stream_events(
         file_refs=list(file_refs or []),
         workspace=workspace,
     )
+    if await _task_cancelled():
+        await _clear_prestart_cancel()
+        return
 
     async def _persist_round(round_msg: dict[str, Any]) -> None:
         """即时落库（docs 03 §3）：每轮工具结果齐后同步写该轮 Message（任务中 DB 已有已完成轮次）。"""
@@ -220,17 +243,24 @@ async def chat_stream_events(
     # 标题兜底：默认标题会话（新建按钮/API 创建）在首条消息后自动用首句命名（与前端 truncate 同语义）
     if conversation.title == "新会话" and content.strip():
         conversation.title = _title_from(content)
+    if task is not None:
+        task.input = {**(task.input or {}), "user_message_id": str(user_msg.id)}
     await db.commit()
 
+    if await _task_cancelled():
+        await _clear_prestart_cancel()
+        return
+
     assistant_msg_id = uuid.uuid4()
-    yield emit(
-        "message_start",
-        {
-            "message_id": str(assistant_msg_id),
-            "agent_id": str(agent.id),
-            "conversation_id": str(conversation.id),
-        },
-    )
+    message_start_payload = {
+        "message_id": str(assistant_msg_id),
+        "agent_id": str(agent.id),
+        "conversation_id": str(conversation.id),
+        "task_id": str(task.id) if task is not None else None,
+    }
+    if task is not None:
+        await push_event(str(task.id), "message_start", message_start_payload)
+    yield emit("message_start", message_start_payload)
 
     graph_config = _graph_config(
         thread_id=str(conversation.id),
@@ -242,20 +272,31 @@ async def chat_stream_events(
     )
 
     async def on_interrupt(value: dict[str, Any]) -> str:
-        task = await TaskService().create_waiting_confirm(
-            db,
-            user=user,
-            agent_id=agent.id,
-            input={
-                "message": content,
-                "attachment_ids": list(attachments or []),
-                "file_refs": persisted_file_refs,
-                "document_refs": list(prepared_documents.refs),
-            },
-            value=value,
-            conversation_id=conversation.id,
-            thread_id=str(conversation.id),
-        )
+        nonlocal task
+        if task is not None:
+            await TaskService().set_waiting_confirm(
+                db,
+                task,
+                value=value,
+                conversation_id=conversation.id,
+                thread_id=str(conversation.id),
+            )
+        else:
+            # 兼容不经过 HTTP 路由的旧调用方/单测。
+            task = await TaskService().create_waiting_confirm(
+                db,
+                user=user,
+                agent_id=agent.id,
+                input={
+                    "message": content,
+                    "attachment_ids": list(attachments or []),
+                    "file_refs": persisted_file_refs,
+                    "document_refs": list(prepared_documents.refs),
+                },
+                value=value,
+                conversation_id=conversation.id,
+                thread_id=str(conversation.id),
+            )
         return emit(
             "interrupt",
             {
@@ -268,6 +309,11 @@ async def chat_stream_events(
 
     async def on_final(final_state: dict[str, Any]) -> dict[str, Any]:
         # ---- ② 流结束：只补最终轮（round_sink 轮已在流中即时落库）+ run_logs + last_message_at ----
+        if task is not None:
+            current_task = await TaskRepository(db).get_by_id(task.id)
+            if current_task is None or current_task.status == "cancelled":
+                # 取消与 done 竞态：取消获胜时禁止补 assistant 消息/覆盖任务终态。
+                return {}
         fm = final_state.get("final_message", {}) or {}
         totals = final_state.get("totals") or {}
         # 最终轮推理（最后一条 AI 消息的 reasoning_content）
@@ -299,7 +345,81 @@ async def chat_stream_events(
         # 收口兜底标记（2026-08-24）：步数守卫强制退出 → 前端可提示答复可能不完整
         if (final_state.get("flags") or {}).get("max_steps_exceeded"):
             payload["note"] = "已达步数上限，答复可能不完整"
+        if task is not None:
+            current_task = await TaskRepository(db).get_by_id(task.id)
+            if current_task is not None and current_task.status != "cancelled":
+                await TaskService().set_done(
+                    db, current_task, final_message=payload["message"], _lock_held=True
+                )
+                await push_event(
+                    str(task.id),
+                    "done",
+                    {
+                        "message_id": str(assistant_msg_id),
+                        "token_usage": payload.get("token_usage"),
+                        "message": payload["message"],
+                    },
+                )
         return payload
+
+    async def on_error(exc: Exception) -> None:
+        if task is None:
+            return
+        await db.rollback()
+        current_task = await TaskRepository(db).get_by_id(task.id)
+        if current_task is not None and current_task.status != "cancelled":
+            error_payload = {
+                "code": getattr(exc, "code", 60001),
+                "message": getattr(exc, "message", str(exc)),
+                "kind": getattr(exc, "kind", None),
+                "retryable": getattr(exc, "retryable", False),
+                "recoverable": getattr(exc, "recoverable", False),
+                "details": getattr(exc, "details", {}),
+            }
+            await TaskService().set_failed(db, current_task, error_payload, _lock_held=True)
+            details = error_payload["details"]
+            await RunLogRepository(db).create(
+                session_id=conversation.id,
+                trace_id=trace_id,
+                node="agent_execute",
+                type="llm",
+                input={"model": details.get("model"), "context_metrics": details.get("context_metrics")},
+                output={"kind": error_payload["kind"], "details": details},
+                duration_ms=int(details.get("elapsed_ms") or 0),
+                status="error",
+            )
+            await push_event(
+                str(task.id),
+                "error",
+                {
+                    "code": getattr(exc, "code", 60001),
+                    "message": getattr(exc, "message", str(exc)),
+                    "kind": getattr(exc, "kind", None),
+                    "retryable": getattr(exc, "retryable", False),
+                    "recoverable": getattr(exc, "recoverable", False),
+                    "details": getattr(exc, "details", {}),
+                },
+            )
+
+    async def _guarded_final(final_state: dict[str, Any]) -> dict[str, Any]:
+        if task is None:
+            return await on_final(final_state)
+        from app.orchestration.task_worker import task_guard
+
+        async with task_guard(str(task.id)):
+            return await on_final(final_state)
+
+    async def _guarded_error(exc: Exception) -> None:
+        if task is None:
+            return await on_error(exc)
+        from app.orchestration.task_worker import task_guard
+
+        async with task_guard(str(task.id)):
+            await on_error(exc)
+
+    async def _task_event_sink(event_type: str, payload: dict[str, Any]) -> None:
+        if task is not None:
+            await push_event(str(task.id), event_type, payload)
 
     async for frame in stream_graph_events(
         graph=graph,
@@ -313,14 +433,18 @@ async def chat_stream_events(
             image_refs=list(prepared_images.image_refs) or None,
             image_candidate_count=prepared_images.candidate_count,
             image_omitted_count=prepared_images.omitted_count,
+            image_capability=prepared_images.capability,
             document_refs=list(prepared_documents.refs) or None,
         ),
         graph_config=graph_config,
         emit=emit,
         on_interrupt=on_interrupt,
-        on_final=on_final,
+        on_final=_guarded_final,
+        on_error=_guarded_error,
+        task_event_sink=_task_event_sink,
         round_sink=round_sink,
         on_round_message=_persist_round,
+        run_id=str(task.id) if task is not None else None,
     ):
         yield frame
 
@@ -334,6 +458,7 @@ async def resume_stream_events(
     approved: bool,
     trace_id: str,
     model_override: Any = None,
+    recovery: bool = False,
 ) -> AsyncIterator[str]:
     """中断恢复（docs 03 §5.3 resume）：读 pending_confirm → 恢复 thread → SSE 续流。
 
@@ -342,8 +467,13 @@ async def resume_stream_events(
     """
     emit = sse_emitter()
     pending = task.pending_confirm or {}
-    thread_id = TaskService.resolve_resume_thread(task)
-    conversation_id = uuid.UUID(pending["conversation_id"]) if pending.get("conversation_id") else None
+    thread_id = (
+        TaskService.resolve_execution_thread(task) if recovery else TaskService.resolve_resume_thread(task)
+    )
+    conversation_raw = (
+        (task.input or {}).get("conversation_id") if recovery else pending.get("conversation_id")
+    )
+    conversation_id = uuid.UUID(conversation_raw) if conversation_raw else None
     task_service = TaskService()
 
     # checkpoint 只保存轻量 document_ref；恢复时按 task input 重新读取当前轮正文，
@@ -356,13 +486,59 @@ async def resume_stream_events(
         task_input=task.input,
     )
 
+    assistant_msg_id = uuid.uuid4()
     if approved:
-        await task_service.set_running(db, task)
+        if not recovery:
+            await task_service.set_running(db, task)
+        pending_tool = str(pending.get("tool_name") or pending.get("name") or pending.get("node_id") or "tool")
+        if recovery:
+            yield emit(
+                "status",
+                {"status": "retrying", "phase": "reconnecting", "accepted": True, "message": "正在从断点继续"},
+            )
+            retry_start_payload = {
+                "message_id": str(assistant_msg_id),
+                "task_id": str(task.id),
+                "retry_of_task_id": str(task.id),
+            }
+            await push_event(str(task.id), "message_start", retry_start_payload)
+            yield emit("message_start", retry_start_payload)
+        else:
+            yield emit(
+                "status",
+                {
+                    "status": "running",
+                    "phase": "tool",
+                    "detail": pending_tool,
+                    "tool_name": pending_tool,
+                    "tool_call_id": pending.get("tool_call_id"),
+                    "accepted": True,
+                    "message": "已确认，正在执行",
+                },
+            )
     else:
         await task_service.set_cancelled(db, task)
+        yield emit(
+            "status",
+            {
+                "status": "cancelling",
+                "phase": "cancelling",
+                "accepted": True,
+                "message": "已拒绝，正在取消操作",
+            },
+        )
 
-    assistant_msg_id = uuid.uuid4()
     round_sink: list[dict[str, Any]] = []
+    parent_id = None
+    round_offset = 0
+    if recovery and conversation_id:
+        raw_parent = (task.input or {}).get("user_message_id")
+        try:
+            parent_id = uuid.UUID(str(raw_parent)) if raw_parent else None
+        except (AttributeError, ValueError):
+            parent_id = None
+        existing = await MessageRepository(db).list_by_conversation(conversation_id)
+        round_offset = max((int(m.round or 0) for m in existing if parent_id and m.parent_id == parent_id), default=0)
 
     async def _persist_round(round_msg: dict[str, Any]) -> None:
         """即时落库（docs 03 §3）：resume 续流每轮同步写该轮 Message（会话流才落库）。"""
@@ -375,25 +551,50 @@ async def resume_stream_events(
             thinking=round_msg.get("thinking") or "",
             tool_calls=round_msg["tool_calls"],
             token_usage=round_msg.get("token_usage"),
+            parent_id=parent_id,
             trace_id=trace_id,
-            round=round_msg["round"],
+            round=round_offset + round_msg["round"],
         )
         row.id = uuid.UUID(round_msg["id"])
         await db.commit()
 
+    recovery_images = None
+    if recovery:
+        attachment_ids = (task.input or {}).get("attachment_ids", [])
+        if not isinstance(attachment_ids, list):
+            attachment_ids = []
+        recovery_agent = await AgentRepository(db).get_by_id(task.agent_id)
+        recovery_images = await prepare_image_input(
+            db,
+            user_id=user.id,
+            attachment_ids=[str(value) for value in attachment_ids],
+            effective_model=recovery_agent.model if recovery_agent else "",
+        )
     graph_config = _graph_config(
         thread_id=str(thread_id),
         trace_id=trace_id,
         assistant_msg_id=assistant_msg_id,
         model_override=model_override,
-        # resume 续跑：中断轮的图片 b64 载荷已不在进程（configurable 不落盘）→ 不传 payload，
-        # 历史 ref 自然降级文本标记；中断轮图片不参与续跑属可接受退化（计划文档记录）
-        force_image_context=True,
+        image_context=recovery_images,
+        # 普通 resume 的图片 b64 载荷不落 checkpoint；恢复任务则重新安全读取 owner 附件。
+        force_image_context=not recovery,
         document_context=resume_documents,
     )
 
     async def on_interrupt(value: dict[str, Any]) -> str:
         # 二次中断：再建新 Task 承接（同一 thread 继续）
+        if recovery:
+            await task_service.set_waiting_confirm(
+                db,
+                task,
+                value=value,
+                conversation_id=conversation_id,
+                thread_id=str(thread_id),
+            )
+            return emit(
+                "interrupt",
+                {"node_id": value.get("node_id"), "payload": value, "confirm_required": True, "task_id": str(task.id)},
+            )
         new_task = await task_service.create_waiting_confirm(
             db,
             user=user,
@@ -434,7 +635,8 @@ async def resume_stream_events(
                 tool_calls=[],
                 token_usage=fm.get("token_usage") or totals,
                 trace_id=trace_id,
-                round=len(round_sink) + 1,
+                parent_id=parent_id,
+                round=round_offset + len(round_sink) + 1,
             )
             assistant_msg.id = assistant_msg_id
             for log in final_state.get("run_logs", []):
@@ -470,19 +672,77 @@ async def resume_stream_events(
         await db.rollback()
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status == "running":
-            await task_service.set_failed(db, updated, str(exc))
-            await push_event(str(task.id), "error", {"code": 60001, "message": str(exc), "retryable": True})
+            error_payload = {
+                "code": getattr(exc, "code", 60001),
+                "message": getattr(exc, "message", str(exc)),
+                "kind": getattr(exc, "kind", None),
+                "retryable": getattr(exc, "retryable", False),
+                "recoverable": getattr(exc, "recoverable", False),
+                "details": getattr(exc, "details", {}),
+            }
+            await task_service.set_failed(db, updated, error_payload)
+            details = error_payload["details"]
+            await RunLogRepository(db).create(
+                task_id=task.id,
+                trace_id=trace_id,
+                node="agent_execute",
+                type="llm",
+                input={"model": details.get("model"), "context_metrics": details.get("context_metrics")},
+                output={"kind": error_payload["kind"], "details": details},
+                duration_ms=int(details.get("elapsed_ms") or 0),
+                status="error",
+            )
+            await push_event(
+                str(task.id),
+                "error",
+                {
+                    "code": getattr(exc, "code", 60001),
+                    "message": getattr(exc, "message", str(exc)),
+                    "kind": getattr(exc, "kind", None),
+                    "retryable": getattr(exc, "retryable", False),
+                    "recoverable": getattr(exc, "recoverable", False),
+                    "details": getattr(exc, "details", {}),
+                },
+            )
+
+    async def _task_event_sink(event_type: str, payload: dict[str, Any]) -> None:
+        await push_event(str(task.id), event_type, payload)
 
     async for frame in stream_graph_events(
         graph=graph,
-        initial=Command(resume={"approved": approved}),
+        initial=None if recovery else Command(resume={"approved": approved}),
         graph_config=graph_config,
         emit=emit,
         on_interrupt=on_interrupt,
         on_final=on_final,
         on_error=on_error,
+        task_event_sink=_task_event_sink,
         round_sink=round_sink,
         on_round_message=_persist_round,
+        run_id=str(task.id),
+    ):
+        yield frame
+
+
+async def retry_stream_events(
+    *,
+    db: Any,
+    graph: Any,
+    task: Task,
+    user: User,
+    trace_id: str,
+    model_override: Any = None,
+) -> AsyncIterator[str]:
+    """普通聊天的 checkpoint 恢复流；与 confirmation resume 分离，initial=None。"""
+    async for frame in resume_stream_events(
+        db=db,
+        graph=graph,
+        task=task,
+        user=user,
+        approved=True,
+        trace_id=trace_id,
+        model_override=model_override,
+        recovery=True,
     ):
         yield frame
 

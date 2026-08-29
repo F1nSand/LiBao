@@ -5,16 +5,18 @@ M0（地基）+ M1（最小闭环）实现。Python 3.12 + FastAPI + LangGraph +
 
 ## 快速启动
 
-前置：Docker Desktop（提供 db/redis）、Python 3.12（uv 管理）、LLM 可用（DeepSeek key 或 Ollama，见 `.env`）。
+前置：Python 3.12（uv 管理）、LLM 可用（DeepSeek key 或 Ollama，见 `.env`）。Docker Desktop 仅在选择 Docker Bash 强隔离模式或运行基础设施时需要。
 
 ### 一键启动（推荐）
 
 | 方式 | 说明 |
 |---|---|
-| **双击 `start.cmd`** | 纯 Windows 批处理，无需 git-bash。自动打开「Agent Backend」「Agent Frontend」两个服务窗口，关闭即停 |
+| **双击 `start.cmd`** | 纯 Windows 批处理，无需 git-bash。自动打开「Agent Backend」「Agent Frontend」两个服务窗口，关闭即停；会检查后端运行指纹 |
 | `bash start.sh` | git-bash 下运行，所有服务共用一个窗口，Ctrl+C 全部停止 |
 
-两者逻辑相同：db/redis 拉起（等待 healthy）→ `alembic upgrade head` + 幂等种子 → 后端 `:8000` → 前端 `:5173`（`VITE_USE_MOCK=false` 走真实后端）。已在运行的服务自动跳过。
+两者逻辑相同：db/redis 拉起（等待 healthy）→ `alembic upgrade head` + 幂等种子 → 后端 `:8000` → 前端 `:5173`（`VITE_USE_MOCK=false` 走真实后端）。后端健康且运行指纹与源码匹配时才跳过；过期/旧版/其他项目实例会明确提示，不会静默复用。需要人工重启时运行 `start.cmd restart` 或 `bash start.sh restart`，按提示关闭已验证的后端窗口后再启动。
+
+健康接口 `/api/v1/system/health` 的 `runtime.restart_required=true` 表示进程启动后源码发生变化，必须重启后端才能加载最新代码；`runtime.checkpoint_codec` 标识当前断点编码版本。
 
 ### 手动分步
 
@@ -43,7 +45,7 @@ cd ../FrontEnd && VITE_USE_MOCK=false npm run dev            # http://localhost:
 
 测试：`uv run pytest tests/`（工具/编排/SSE 序列单测 + 需 DB 的集成测试，DB 不可达自动跳过）。
 
-### Task 附件与 Docker bash 沙箱
+### Task 附件与可切换 Shell 沙箱
 
 Task 的 `input` 保持开放结构；可选字段示例：
 
@@ -51,15 +53,17 @@ Task 的 `input` 保持开放结构；可选字段示例：
 {"input":{"message":"描述这些图片","attachment_ids":["<attachment-uuid>"]},"params":{}}
 ```
 
-`attachment_ids` 必须属于当前用户且为 UUID，否则提交返回 `40403`；非图片附件仍可随任务保存，但本轮只有图片可能作为模型输入。视觉模型会按请求顺序读取图片并受单轮预算限制；非视觉模型不读图片，只收到忽略说明。interrupt 后 resume 不重读、不重放图片，而是把历史图片引用降级为 `[图片已省略…]` 文本。
+`attachment_ids` 必须属于当前用户且为 UUID，否则提交返回 `40403`。TXT/Markdown、代码、文本型 PDF、DOCX 会在当前轮按来源标签和预算注入；图片能力按具体 endpoint/model 运行期协商：`unknown` 先发送真实图片请求，成功或明确拒绝后短期缓存结果，明确拒绝返回 `60005`，不静默删图重试。interrupt 后 resume 不重读、不重放图片，而是把历史图片引用降级为 `[图片已省略…]` 文本。
 
-`tl_bash` 是当前唯一使用 Docker 沙箱的工具。先构建固定版本镜像：
+工作区会话默认注入 `tl_shell`，可在设置 → 沙箱切换 PowerShell 7、Git Bash 或 Docker Bash。宿主模式只允许相对工作区 cwd，使用工作区 `.agent/runtime/` 收拢临时目录和缓存；命令先过规则闸门与独立审查，依赖安装/远程脚本需人工确认，系统级/越权/凭据操作硬拦。旧 checkpoint 中的 `tl_bash` 仍保留为 Docker 兼容工具。
+
+选择 Docker Bash 前先构建固定版本镜像：
 
 ```bash
 docker build -t libao-sandbox:py312-v1 -f docker/sandbox/Dockerfile docker/sandbox
 ```
 
-运行时固定 `--network none`，只挂载当前工作区到容器 `/workspace`，使用只读根文件系统、无特权用户 `65532:65532`、`512m` 内存、`1` CPU、`128` PIDs 和 `64m` `/tmp` tmpfs。Docker daemon 不可用或镜像缺失时返回稳定工具错误，不自动 pull，也不会回退到宿主机 shell；超时、取消和非零退出同样不会留下沙箱容器。配置项见 `.env.example`。
+运行时固定 `--network none`，只挂载当前工作区到容器 `/workspace`，使用只读根文件系统、无特权用户（Linux 非 root 宿主映射当前 UID/GID，其余情况回落到 `65532:65532`）、`512m` 内存、`1` CPU、`128` PIDs 和 `64m` `/tmp` tmpfs。Docker daemon 不可用或镜像缺失时返回稳定工具错误，使用 `--pull never` 且不回退到宿主机 shell；超时、取消和非零退出同样不会留下沙箱容器。配置项见 `.env.example`。
 
 ## 架构（docs 00 五层单向依赖）
 
@@ -79,6 +83,7 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 ## M1 关键机制
 
 - **SSE 事件序列**（docs 03 §3）：`message_start → token* → tool_call → tool_result → status → done/error`；keepalive 15s；`seq` 单调。
+- **长流断线恢复**：模型流空闲超时由 `LLM_STREAM_CHUNK_TIMEOUT_S` 控制（默认 300 秒），与模型上下文窗口是两个独立概念；系统不会把未知模型硬限制为 256K/1M。明确的模型传输错误在 agent 节点自动重试一次，失败后保留 `llm_transport` 可恢复错误，可通过 `/tasks/{id}/recover` 从显式失败 checkpoint 继续，最多 3 次且不重新提交原用户消息。
 - **Sessionless 持久化**：`conversation.id = LangGraph thread_id`；消息即日志（message-as-log），刷新/重启可完整回放；checkpoint 与业务同库。
 - **静态前缀稳定**：system_prompt + 工具 ACI 字节稳定 → KV Cache 友好；`agent_version.prefix_hash` 作缓存键。
 - **trace_id 全链路**：ASGI 中间件注入 → REST 信封/SSE 事件 → run_log 落库。
@@ -88,7 +93,7 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 ### M2 核心闭环（已完成）
 - 工具管理：`GET/POST /tools`、`GET/PUT/PATCH/DELETE /tools/{id}`、`POST /tools/{id}/test`、`GET /tools/search`；DB 元数据 + registry 执行实现按 name 绑定，启停同步桥（默认关闭原则实时生效）
 - 中断/恢复：`require_confirm` 工具 → `interrupt()` → Task 行（waiting_confirm + pending_confirm）→ SSE `interrupt` 事件（带 task_id）→ `POST /tasks/{id}/resume`（`Accept: text/event-stream` 续流 / JSON 后台续跑）→ done/cancelled；拒绝分支卡片状态 `cancelled`
-- 任务：`POST/GET /tasks`、`GET /tasks/{id}`、`POST cancel`（40902）、`GET /tasks/{id}/events`（回放+live-tail）；后台运行（asyncio.create_task，完整队列为 M4）
+- 任务：`POST/GET /tasks`、`GET /tasks/{id}`、`POST cancel`（40902）、`GET /tasks/{id}/events`（持久事件回放+live-tail，支持 `after_seq`/`Last-Event-ID`）；`POST /tasks/{id}/recover`（幂等断点恢复）；后台运行（asyncio.create_task，完整队列为 M4）
 - 执行策略：失败静默重试（指数退避+抖动，`ToolSpec.max_retries`）+ 幂等去重（进程内缓存）+ 沙盒守卫
 - 单通用 Agent + Subagent 派发：所有会话/任务固定「通用助手」（不再有 /agents 管理端点）；内置 `tl_dispatch_subagent` 工具派发 subagent（research/code_review/proposal_review，嵌套 LLM 循环 + 上下文隔离 + agent_switch 事件）
 
@@ -101,16 +106,16 @@ API → 编排 → 服务 → 工具 → 存储   （禁止反向）
 ### M3 核心闭环（本轮完成）
 - **记忆**：`/memory/traces`（append-only 轨迹，chat 每轮落 user+assistant 各一条）、`/memory/longterm` CRUD（json_card/note，版本化只增 + 软删）、`/memory/longterm/{id}/versions`、`/memory/maintenance`（LLM 整理：重要性评分/合并/抽象，`_extract_json` 剥围栏）；**memory_inject 图节点**每轮注入 importance top-N 卡片（历史后/状态栏前渲染；user_id 缺失/桥未设静默跳过，注入永不击穿对话）
 - **RAG**：`/kb/collections` CRUD、`/kb/collections/{id}/documents` 上传（txt/md，UTF-8 严格，内容入库零磁盘）、文档状态机 uploaded→chunking→indexing→indexed/failed/archived（后台 `process_document`：字符滑窗 512/64 → SiliconFlow Qwen3-Embedding-0.6B 向量化 → 批量插库）、`/kb/search` 混合检索（语义 HNSW cosine + BM25 tsvector/ts_rank + RRF k=60 融合，语义通道故障降级 bm25-only）、**kb_search 内置工具**（ContextVar org 上下文 + sessionmaker 桥，Agentic RAG 预留）
-- **附件**：`/uploads`（multipart，20MB/40011、类型白名单/40012）、`/attachments/{id}` 二进制流、`/{id}/analysis` 轮询契约（uploaded→analyzing→ready/failed，60004）、图片 I2 视觉降级（"无法分析"完成态）、txt/md 提取、pdf/office 仅 metadata；**chat 消息 attachments 链路接通**（校验 40403 → 落库 → 附件回填 conversation_id/message_id）
+- **附件**：`/uploads`（multipart，20MB/40011、类型白名单/40012）、`/attachments/{id}` 二进制流、`/{id}/analysis` 上传准备/正文抽取状态（uploaded→analyzing→ready/failed，60004）；图片上传阶段保持中性 `analysis_on_send`，发送时按具体 endpoint 的元数据、运行期缓存和真实携图结果协商视觉能力；TXT/Markdown、代码、文本型 PDF、DOCX 正文按预算注入当前模型轮次，**chat 消息 attachments 链路接通**（校验 40403 → 落库 → 附件回填 conversation_id/message_id）
 
 ### M3.5+ 接缝（下轮）
 | 接缝 | 现状 | 落地位置 |
 |---|---|---|
 | **MinIO 对象存储** | 本地磁盘 `{upload_dir}/{attachment_id}`（MVP） | `services/attachment.py` → M4 加 MinIO/预签名 |
-| **视觉模型（VLM）** | `analyze_image` 走 I2 降级文本（ready + reason=no_vision_model） | `storage/attachment_analysis.py::analyze_content` |
+| **视觉模型（VLM）** | 运行期能力协商：同源元数据 → 成功/明确拒绝缓存 → LiteLLM 正向提示 → 未知模型直接携图；明确拒绝返回 60005，不静默删图重试 | `core/model_capabilities.py` + `orchestration/nodes/agent_execute.py` |
 | **Cross-Encoder 重排序** | rerank_score 恒 null | `storage/repositories/kb.py::hybrid_search` |
 | **对话自动记忆提取** | 仅手动卡片 + maintenance；context_update 自动提取未做 | `orchestration/nodes/context_update.py` |
-| **PDF/Office 文本提取** | 仅 metadata（reason 标注） | `services/attachment.py`；引入 pypdf 即可 |
+| **PDF/Office 文本提取** | PDF/DOCX 走确定性正文抽取与 12K/48K 当前轮预算；`.doc` 拒绝，扫描 PDF 明确提示未执行 OCR | `services/document_extraction.py` + `orchestration/document_context.py` |
 | **Docker 沙盒** ✅ | 仅 `tl_bash` 走一次性锁定容器：network none、仅挂载 `/workspace`、无自动 pull/宿主回退 | `tools/sandbox.py` + `docker/sandbox/Dockerfile` |
 | **MCP 会话复用** ✅ M4 完整版 | owner-task 池（连接 cancel scope 常驻 owner 任务，规避跨请求复用报错）+ 请求队列串行；stdio 免每次起子进程 | `tools/mcp_manager.py` |
 | **MCP 资源/提示原语** | 只映射工具（E2） | 资源→RAG 数据源、提示→Skill 库（M6） |

@@ -13,9 +13,9 @@ import pytest
 
 from app.core.errors import AppError
 from app.tools.builtin import file_ops
-from app.tools.context import set_tool_workspace_root
+from app.tools.context import set_tool_shell_mode, set_tool_workspace_root
 from app.tools.filesystem import resolve_workspace_path
-from app.tools.sandbox import SandboxErrorCode, SandboxFailure
+from app.tools.sandbox import SandboxCommand, SandboxErrorCode, SandboxFailure, WorkspaceCommand
 
 
 def _review_settings(**over):
@@ -42,6 +42,49 @@ def _stub_review(monkeypatch, verdict="allow", reason="", **extra):
         return {"verdict": verdict, "reason": reason, **extra}
 
     monkeypatch.setattr(file_ops, "_review_command", _review)
+
+
+@pytest.mark.asyncio
+async def test_build_shell_command_selects_workspace_shell_mode(tmp_path, monkeypatch):
+    set_tool_workspace_root(str(tmp_path))
+    set_tool_shell_mode("powershell")
+    try:
+        _stub_review(monkeypatch)
+        command = await file_ops.build_shell_command("echo ok")
+        assert isinstance(command, WorkspaceCommand)
+        assert command.shell == "powershell"
+        set_tool_shell_mode("git_bash")
+        command = await file_ops.build_shell_command("echo ok")
+        assert isinstance(command, WorkspaceCommand)
+        assert command.shell == "git_bash"
+    finally:
+        set_tool_shell_mode(None)
+        set_tool_workspace_root(None)
+
+
+@pytest.mark.asyncio
+async def test_build_shell_command_selects_docker_mode(tmp_path, monkeypatch):
+    set_tool_workspace_root(str(tmp_path))
+    set_tool_shell_mode("docker")
+    try:
+        _stub_review(monkeypatch)
+        command = await file_ops.build_shell_command("echo ok")
+        assert isinstance(command, SandboxCommand)
+        assert command.argv == ("bash", "-lc", "echo ok")
+    finally:
+        set_tool_shell_mode(None)
+        set_tool_workspace_root(None)
+
+
+def test_shell_preflight_blocks_system_boundary_and_confirms_install():
+    blocked = file_ops.shell_preflight({"command": "sudo apt-get install jq"}, {})
+    assert blocked.action.value == "block"
+    assert file_ops.shell_preflight({"command": "cat /etc/passwd"}, {}).action.value == "block"
+    assert file_ops.shell_preflight({"command": "Set-Location .."}, {}).action.value == "block"
+    confirm = file_ops.shell_preflight({"command": "npm install docx"}, {})
+    assert confirm.action.value == "confirm"
+    allowed = file_ops.shell_preflight({"command": "python -m pytest -q"}, {})
+    assert allowed.action.value == "allow"
 
 
 def test_resolve_workspace_path_within(tmp_path):

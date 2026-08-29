@@ -201,3 +201,165 @@ async def test_provider_get_active_returns_enabled(provider_fixture):
         p2 = await svc.create(session, user, name="p2", model="m2", enabled=True)
         active = await svc.get_active(session, user)
         assert active is not None and active.id == p2.id
+
+
+def _set_provider_baseline(monkeypatch):
+    """让热同步测试能区分 Settings 基线与当前激活 Provider。"""
+    import app.services.provider as provider_module
+    from app.core.config import get_settings
+
+    baseline = SimpleNamespace(
+        llm_model="baseline-model",
+        llm_base_url="https://baseline.example/v1",
+        llm_api_key="baseline-key",
+        llm_vision_declared=True,
+    )
+    monkeypatch.setattr(provider_module, "Settings", lambda: baseline)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_model", "stale-model")
+    monkeypatch.setattr(settings, "llm_base_url", "https://stale.example")
+    monkeypatch.setattr(settings, "llm_api_key", "stale-key")
+    monkeypatch.setattr(settings, "llm_vision_declared", True)
+    return settings
+
+
+async def test_provider_patch_active_fields_hot_syncs_without_reactivation(provider_fixture, monkeypatch):
+    user = provider_fixture
+    settings = _set_provider_baseline(monkeypatch)
+    svc = ProviderService()
+    async with get_store().session() as session:
+        p = await svc.create(
+            session,
+            user,
+            name="active",
+            base_url="https://old.example/v1",
+            model="old-model",
+            api_key="old-key",
+            enabled=True,
+            capabilities=["vision"],
+        )
+        patched = await svc.patch(
+            session,
+            user,
+            p.id,
+            base_url="https://new.example/v1",
+            model="new-model",
+            api_key="new-key",
+            capabilities=["text-only"],
+        )
+        await svc.patch(session, user, p.id, capabilities=[])
+
+    assert patched.enabled is True
+    assert settings.llm_model == "new-model"
+    assert settings.llm_base_url == "https://new.example/v1"
+    assert settings.llm_api_key == "new-key"
+    assert settings.llm_vision_declared is None
+
+
+async def test_provider_patch_inactive_fields_does_not_change_runtime_settings(provider_fixture, monkeypatch):
+    user = provider_fixture
+    settings = _set_provider_baseline(monkeypatch)
+    svc = ProviderService()
+    async with get_store().session() as session:
+        active = await svc.create(
+            session,
+            user,
+            name="active",
+            base_url="https://active.example/v1",
+            model="active-model",
+            api_key="active-key",
+        )
+        inactive = await svc.create(
+            session,
+            user,
+            name="inactive",
+            base_url="https://inactive.example/v1",
+            model="inactive-model",
+            api_key="inactive-key",
+            enabled=False,
+        )
+        await svc.sync_active_to_settings(session, user.org_id)
+        before = (settings.llm_model, settings.llm_base_url, settings.llm_api_key, settings.llm_vision_declared)
+        await svc.patch(
+            session,
+            user,
+            inactive.id,
+            base_url="https://changed.example/v1",
+            model="changed-model",
+            api_key="changed-key",
+            capabilities=["vision"],
+        )
+
+    assert active.enabled is True
+    assert (settings.llm_model, settings.llm_base_url, settings.llm_api_key, settings.llm_vision_declared) == before
+
+
+async def test_provider_deactivate_active_restores_base_settings(provider_fixture, monkeypatch):
+    user = provider_fixture
+    settings = _set_provider_baseline(monkeypatch)
+    svc = ProviderService()
+    async with get_store().session() as session:
+        p = await svc.create(
+            session,
+            user,
+            name="active",
+            base_url="https://provider.example/v1",
+            model="provider-model",
+            api_key="provider-key",
+            capabilities=["vision"],
+        )
+        await svc.sync_active_to_settings(session, user.org_id)
+        await svc.patch(session, user, p.id, enabled=False)
+
+    assert settings.llm_model == "baseline-model"
+    assert settings.llm_base_url == "https://baseline.example/v1"
+    assert settings.llm_api_key == "baseline-key"
+    assert settings.llm_vision_declared is None
+
+
+async def test_provider_delete_active_restores_base_settings(provider_fixture, monkeypatch):
+    user = provider_fixture
+    settings = _set_provider_baseline(monkeypatch)
+    svc = ProviderService()
+    async with get_store().session() as session:
+        p = await svc.create(
+            session,
+            user,
+            name="active",
+            base_url="https://provider.example/v1",
+            model="provider-model",
+            api_key="provider-key",
+        )
+        await svc.sync_active_to_settings(session, user.org_id)
+        await svc.delete(session, user, p.id)
+
+    assert settings.llm_model == "baseline-model"
+    assert settings.llm_base_url == "https://baseline.example/v1"
+    assert settings.llm_api_key == "baseline-key"
+    assert settings.llm_vision_declared is None
+
+
+async def test_provider_clear_active_fields_uses_base_settings(provider_fixture, monkeypatch):
+    user = provider_fixture
+    settings = _set_provider_baseline(monkeypatch)
+    svc = ProviderService()
+    async with get_store().session() as session:
+        p = await svc.create(
+            session,
+            user,
+            name="active",
+            base_url="https://provider.example/v1",
+            model="provider-model",
+            api_key="provider-key",
+            enabled=True,
+        )
+        await svc.sync_active_to_settings(session, user.org_id)
+        cleared = await svc.patch(session, user, p.id, model=None, base_url=None, api_key=None)
+
+    assert cleared.model is None
+    assert cleared.base_url is None
+    assert cleared.api_key is None
+    assert "api_key" not in serialize_provider(cleared)
+    assert settings.llm_model == "baseline-model"
+    assert settings.llm_base_url == "https://baseline.example/v1"
+    assert settings.llm_api_key == "baseline-key"

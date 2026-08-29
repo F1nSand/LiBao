@@ -1,4 +1,21 @@
-# 进度账本 — plan: docs/plans/2026-08-28-task-api-docker-sandbox-task-multimodal.md
+# 进度账本 — plan: docs/plans/2026-08-28-code-review-remediation.md
+
+## 2026-08-28 前端交接回执：聊天停止升级为真实任务取消
+
+> [done] 2026-08-28 · ←前端 | **聊天停止升级为真实任务取消** | 前端已接入 `POST /tasks/{task_id}/cancel`，要求普通 `/chat/stream` 在 `message_start` 返回可复用 `task_id`。本端已完成：聊天路由创建并置 running Task；chat/resume graph producer 注册到进程内可取消表；取消请求真正 `Task.cancel()`；取消与 done/failed 使用任务级锁和终态守卫，取消后不触发迟到 `on_final`；interrupt/resume 复用同一 Task。最终验证：后端定向回归通过，全量 `656 passed / 3 skipped`，ruff 全绿；前端 typecheck、lint、Vitest `40 files / 213 tests`、build 通过；真实后端 E2E `4/4` 通过。共享前端计划与交接账本：`C:/Users/Admin1/Desktop/Agent/FrontEnd/docs/plans/2026-08-28-chat-attachment-and-agent-status-ux.md`、`FrontEnd/progress.md`。
+
+> [done] 2026-08-28 · ←前端 | **纯图片消息 1210 参数错误** | 根因是视觉消息构造器在空文本时仍追加 `{"type":"text","text":""}`；智谱等兼容端点会拒绝该请求。现已仅在有文本或需要投递失败提示时追加 text block；纯图片只发送 image block。新增回归测试，相关 11 项与全量 pytest `656 passed / 3 skipped`、ruff 均通过。`AttachmentBubble` 仅负责展示，不需修改。
+
+执行状态：
+
+- Task 1: complete (tests `uv run pytest tests/test_multimodal.py tests/test_chat_attachments.py tests/test_tasks_api.py tests/test_interrupt_stream.py -q` → PASS, 55 passed; targeted red→green verified)
+- Task 2: complete (tests `uv run pytest tests/test_interrupt_stream.py tests/test_tasks_api.py tests/test_graph_interrupt.py -q` → PASS, 29 passed; targeted red→green verified)
+- Task 3: complete (tests `uv run pytest tests/test_docker_sandbox.py tests/test_executor_retry_idempotency.py tests/test_file_ops.py -q` → PASS, 102 passed; targeted red→green verified)
+- Task 4: complete (Docker name/pull policy/UID mapping/timeout-cancel-read-failure cleanup implemented; targeted tests → PASS)
+- Task 5: complete (tests `uv run pytest tests/test_provider.py tests/test_multimodal.py tests/test_llm.py tests/test_chat_stream.py -q` → PASS, 52 passed/7 warnings; targeted red→green verified)
+- Task 6: complete (定点 193 passed/10 warnings；全量 `uv run pytest tests/ -q` → 599 passed/2 skipped/70 warnings；`uv run ruff check app tests`、`git diff --check` → PASS；不变量搜索与人工 Review/Simplify 无 Critical/High/Medium findings；Docker smoke SKIP：当前环境无 Docker CLI；提交按计划等待用户批准)
+
+历史计划账本（保留）：
 
 执行状态：
 
@@ -987,3 +1004,7 @@ T1-T13 + review-test-simplify gate 全部完成；start.cmd/start.sh 一键启�
   3. 工具卡重试按钮无反应：前端 retry 事件无监听 → 接线 ToolCallCard→Bubble→List→ChatView，重试=重发最后一条用户消息；
      前端 vue-tsc 通过（FrontEnd 非 git 仓库，改动存盘）
   提交：947e0ec
+# 2026-08-29 shell sandbox handoff
+- 后端已完成可切换 `powershell` / `git_bash` / `docker` 三模式，新增 `tl_shell`、`/settings/sandbox`，普通会话删除清理精确缓存目录。
+- 前端 Settings 已新增“沙箱”标签并同步构建产物；前端进度记录见 `C:/Users/Admin1/Desktop/Agent/FrontEnd/progress.md`。
+- 受影响后端回归 209 passed/2 skipped，前端 217 passed；Docker smoke 因环境未确认 daemon/image 暂 skip，不自动回退。

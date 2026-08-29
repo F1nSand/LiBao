@@ -11,12 +11,16 @@ import uuid
 import pytest
 from langchain_core.messages import AIMessage
 
+from app.core.errors import AppError
 from app.orchestration.chat_stream import chat_stream_events
 from app.orchestration.checkpointer import JsonFileSaver
 from app.orchestration.graph import build_graph
+from app.orchestration.task_worker import route_cancel, running_task
+from app.services.task import TaskService
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Conversation, User
 from app.storage.repositories.message import MessageRepository
+from app.storage.repositories.task import TaskRepository
 
 
 class FakeChatModel:
@@ -115,6 +119,174 @@ async def test_chat_stream_event_sequence(chat_fixture):
         assert msgs[1].round == 1 and msgs[1].tool_calls and msgs[1].tool_calls[0]["tool_name"] == "time_now"
         assert msgs[2].round == 2 and msgs[2].tool_calls == []
         assert msgs[1].trace_id == "trace-t10"
+
+
+async def test_chat_task_lifecycle_exposes_id_and_finishes_done(chat_fixture):
+    """普通聊天复用同一 Task：首帧带 task_id，最终状态 done。"""
+    user, agent, conv = chat_fixture
+    task_service = TaskService()
+    async with get_store().session() as session:
+        task = await task_service.submit(session, user, agent.id, {"message": "hello"})
+        await task_service.set_running(session, task)
+        frames = []
+        async for frame in chat_stream_events(
+            db=session,
+            graph=build_graph(),
+            conversation=conv,
+            agent=agent,
+            user=user,
+            content="hello",
+            trace_id="trace-chat-task",
+            task=task,
+            model_override=SlowFakeModel(),
+        ):
+            frames.append(frame)
+        events = [
+            json.loads(frame.split("\n\n")[0].split("data: ", 1)[1])
+            for frame in frames
+            if not frame.startswith(":")
+        ]
+        assert events[0]["type"] == "message_start"
+        assert events[0]["payload"]["task_id"] == str(task.id)
+        assert events[-1]["type"] == "done"
+        stored = await TaskRepository(session).get_by_id(task.id)
+        assert stored.status == "done"
+
+
+async def test_cancelled_chat_task_does_not_start_graph(chat_fixture):
+    """首帧前已取消的聊天不应启动 graph 或发出 message_start。"""
+    user, agent, conv = chat_fixture
+    task_service = TaskService()
+    async with get_store().session() as session:
+        task = await task_service.submit(session, user, agent.id, {"message": "cancelled"})
+        await task_service.set_running(session, task)
+        await task_service.cancel(session, task)
+
+        class ExplodingGraph:
+            async def astream(self, *_args, **_kwargs):
+                raise AssertionError("cancelled chat must not start graph")
+                yield  # pragma: no cover
+
+        frames = [
+            frame
+            async for frame in chat_stream_events(
+                db=session,
+                graph=ExplodingGraph(),
+                conversation=conv,
+                agent=agent,
+                user=user,
+                content="cancelled",
+                trace_id="trace-chat-pre-cancel",
+                task=task,
+            )
+        ]
+        assert frames == []
+        stored = await TaskRepository(session).get_by_id(task.id)
+        assert stored.status == "cancelled"
+
+
+async def test_running_chat_cancel_skips_final_message(chat_fixture):
+    """运行中取消普通聊天：graph 被打断且不落库最终 assistant。"""
+    user, agent, conv = chat_fixture
+    task_service = TaskService()
+    async with get_store().session() as session:
+        task = await task_service.submit(session, user, agent.id, {"message": "slow"})
+        await task_service.set_running(session, task)
+        task_id = task.id
+
+        async def consume() -> list[str]:
+            return [
+                frame
+                async for frame in chat_stream_events(
+                    db=session,
+                    graph=build_graph(),
+                    conversation=conv,
+                    agent=agent,
+                    user=user,
+                    content="slow",
+                    trace_id="trace-chat-cancel",
+                    task=task,
+                    model_override=SlowFakeModel(),
+                )
+            ]
+
+        stream_job = asyncio.create_task(consume())
+        for _ in range(100):
+            if running_task(str(task_id)) is not None:
+                break
+            await asyncio.sleep(0.01)
+        assert running_task(str(task_id)) is not None
+        async with get_store().session() as cancel_session:
+            current = await TaskRepository(cancel_session).get_by_id(task_id)
+            await task_service.cancel(cancel_session, current)
+        await route_cancel(str(task_id))
+        await stream_job
+
+        stored = await TaskRepository(session).get_by_id(task_id)
+        assert stored.status == "cancelled"
+        messages = await MessageRepository(session).list_by_conversation(conv.id)
+        assert [message.role for message in messages] == ["user"]
+        assert all("event: done" not in frame for frame in stream_job.result())
+
+
+async def test_chat_finalization_wins_cancel_race(chat_fixture, monkeypatch):
+    """最终落库持锁时取消等待；完成胜出后取消返回 40902。"""
+    user, agent, conv = chat_fixture
+    task_service = TaskService()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original_set_done = TaskService.set_done
+
+    async def delayed_set_done(self, db, task, final_message, **kwargs):
+        entered.set()
+        await release.wait()
+        return await original_set_done(self, db, task, final_message, **kwargs)
+
+    monkeypatch.setattr(TaskService, "set_done", delayed_set_done)
+    async with get_store().session() as session:
+        task = await task_service.submit(session, user, agent.id, {"message": "race"})
+        await task_service.set_running(session, task)
+
+        async def consume() -> list[str]:
+            return [
+                frame
+                async for frame in chat_stream_events(
+                    db=session,
+                    graph=build_graph(),
+                    conversation=conv,
+                    agent=agent,
+                    user=user,
+                    content="race",
+                    trace_id="trace-chat-race",
+                    task=task,
+                    model_override=SlowFakeModel(),
+                )
+            ]
+
+        stream_job = asyncio.create_task(consume())
+        await asyncio.wait_for(entered.wait(), timeout=10)
+
+        async def cancel() -> AppError | None:
+            async with get_store().session() as cancel_session:
+                current = await TaskRepository(cancel_session).get_by_id(task.id)
+                try:
+                    await task_service.cancel(cancel_session, current)
+                except AppError as exc:
+                    return exc
+            return None
+
+        cancel_job = asyncio.create_task(cancel())
+        await asyncio.sleep(0)
+        assert not cancel_job.done()
+        release.set()
+        frames = await stream_job
+        cancel_error = await cancel_job
+        assert cancel_error is not None and cancel_error.code == 40902
+        assert any("event: done" in frame for frame in frames)
+        stored = await TaskRepository(session).get_by_id(task.id)
+        assert stored.status == "done"
+        messages = await MessageRepository(session).list_by_conversation(conv.id)
+        assert [message.role for message in messages] == ["user", "assistant"]
 
 
 async def test_message_seal_carries_cost(chat_fixture):
