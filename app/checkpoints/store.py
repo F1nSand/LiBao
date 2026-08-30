@@ -145,6 +145,20 @@ class CodeCheckpointStore:
             await self._write_index_unlocked(index)
             return operation
 
+    async def update_operation(self, operation: RollbackOperation) -> RollbackOperation:
+        """Atomically replace an existing operation journal record and its index heartbeat."""
+        operation.updated_at = datetime.now(UTC)
+        async with self._lock(operation.conversation_id):
+            path = self._operation_path(operation.conversation_id, operation.id)
+            if not path.exists():
+                raise CheckpointStoreError("rollback operation 不存在")
+            _atomic_write_json(path, operation.to_dict())
+            index = await self._read_index_unlocked(operation.conversation_id)
+            if operation.id not in index.operation_ids:
+                index.operation_ids.append(operation.id)
+            await self._write_index_unlocked(index)
+            return operation
+
     async def read_operation(
         self, conversation_id: uuid.UUID | str, operation_id: uuid.UUID | str
     ) -> RollbackOperation | None:

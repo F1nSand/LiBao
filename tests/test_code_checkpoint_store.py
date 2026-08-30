@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.checkpoints.models import FileVersionRef
+from app.checkpoints.models import ConversationCursor, FileRestoreResult, FileVersionRef, RollbackOperation
 from app.checkpoints.service import CheckpointService
 from app.checkpoints.store import CodeCheckpointStore
 
@@ -126,3 +126,62 @@ async def test_cleanup_expired_removes_only_old_sessions(tmp_path):
     assert await service.cleanup_expired(now=datetime.now(UTC)) == 1
     assert not old_dir.exists()
     assert store.session_dir(fresh).exists()
+
+
+@pytest.mark.asyncio
+async def test_operation_update_is_atomic_and_v2_round_trips(tmp_path):
+    store = CodeCheckpointStore(tmp_path / ".agent")
+    conversation_id = uuid.uuid4()
+    operation = RollbackOperation(
+        id=uuid.uuid4(),
+        conversation_id=conversation_id,
+        target_checkpoint_id=uuid.uuid4(),
+        mode="both",
+        before_cursor=ConversationCursor(None, None, None, 1, True, True),
+        planned_after_cursor=ConversationCursor(None, None, None, 2, True, True),
+        after_cursor=None,
+        undo_files={},
+        file_results=[],
+        status="prepared",
+        planned_files=[{"path": "a.txt", "action": "restore", "current_sha256": "abc"}],
+    )
+    await store.create_operation(operation)
+
+    operation.status = "failed_partial"
+    operation.applied_paths.append("a.txt")
+    operation.error = {"code": "injected", "message": "write failed"}
+    await store.update_operation(operation)
+    loaded = await store.read_operation(conversation_id, operation.id)
+
+    assert loaded is not None
+    assert loaded.status == "failed_partial"
+    assert loaded.applied_paths == ["a.txt"]
+    assert loaded.planned_after_cursor is not None
+    assert loaded.after_cursor is None
+    assert loaded.error == {"code": "injected", "message": "write failed"}
+
+
+@pytest.mark.asyncio
+async def test_recover_incomplete_operations_marks_only_journals(tmp_path):
+    store = CodeCheckpointStore(tmp_path / ".agent")
+    service = CheckpointService(store)
+    conversation_id = uuid.uuid4()
+    operation = RollbackOperation(
+        id=uuid.uuid4(),
+        conversation_id=conversation_id,
+        target_checkpoint_id=uuid.uuid4(),
+        mode="code_only",
+        before_cursor=ConversationCursor(None, None, None, 0),
+        planned_after_cursor=ConversationCursor(None, None, None, 1),
+        after_cursor=None,
+        undo_files={},
+        file_results=[FileRestoreResult("a.txt", "restored")],
+        status="applying",
+    )
+    await store.create_operation(operation)
+
+    assert await service.recover_incomplete_operations() == 1
+    recovered = await store.read_operation(conversation_id, operation.id)
+    assert recovered is not None
+    assert recovered.status == "failed_partial"
+    assert recovered.error and recovered.error["code"] == "incomplete_operation"

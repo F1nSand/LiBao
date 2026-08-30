@@ -20,6 +20,14 @@ class _Db:
         return None
 
 
+class _FailCommitDb(_Db):
+    async def commit(self) -> None:
+        raise OSError("injected cursor commit failure")
+
+    async def rollback(self) -> None:
+        return None
+
+
 async def _checkpoint_with_message(
     checkpoint_service: CheckpointService,
     conversation: Conversation,
@@ -579,6 +587,117 @@ async def test_execute_uses_confirmed_file_plan_and_is_idempotent(tmp_path: Path
     assert extra.read_bytes() == b"extra-after"
     assert second == first
     assert len(await checkpoint_store.list_operations(conversation_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_restore_preflight_missing_blob_leaves_workspace_untouched(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation_id = uuid.uuid4()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "note.txt"
+    target.write_bytes(b"after")
+    checkpoint = await checkpoint_service.create_anchor(
+        conversation_id=conversation_id,
+        user_message_id=uuid.uuid4(),
+        workspace_identity=f"session:{workspace}",
+        anchor_message_head_id=None,
+    )
+    await checkpoint_store.prepare_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        b"before",
+        tool_call_id="call",
+        planned_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    await checkpoint_store.finalize_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        final_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    loaded = await checkpoint_store.read_checkpoint(conversation_id, checkpoint.id)
+    assert loaded is not None
+    blob = loaded.files["note.txt"].before.blob_sha256
+    assert blob
+    (checkpoint_store._blob_path(conversation_id, blob)).unlink()  # noqa: SLF001
+
+    service = CheckpointRestoreService(checkpoint_service)
+    conversation = _conversation(conversation_id)
+    preview = await service.preview_checkpoint(
+        _Db(), conversation, target_checkpoint_id=checkpoint.id, mode="code_only", workspace_root=str(workspace)
+    )
+    with pytest.raises(AppError) as exc:
+        await service.execute_preview(_Db(), conversation, uuid.UUID(preview["preview_id"]))
+
+    assert exc.value.code == 50031
+    assert target.read_bytes() == b"after"
+    assert await checkpoint_store.list_operations(conversation_id) == []
+
+
+@pytest.mark.asyncio
+async def test_cursor_commit_failure_leaves_failed_partial_journal_and_before_cursor(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation_id = uuid.uuid4()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "note.txt"
+    target.write_bytes(b"after")
+    checkpoint = await checkpoint_service.create_anchor(
+        conversation_id=conversation_id,
+        user_message_id=uuid.uuid4(),
+        workspace_identity=f"session:{workspace}",
+        anchor_message_head_id=None,
+    )
+    await checkpoint_store.prepare_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        b"before",
+        tool_call_id="call",
+        planned_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    await checkpoint_store.finalize_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        final_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    service = CheckpointRestoreService(checkpoint_service)
+    conversation = _conversation(conversation_id)
+    before_cursor = _cursor_for_test(conversation)
+    preview = await service.preview_checkpoint(
+        _Db(), conversation, target_checkpoint_id=checkpoint.id, mode="code_only", workspace_root=str(workspace)
+    )
+
+    with pytest.raises(OSError):
+        await service.execute_preview(_FailCommitDb(), conversation, uuid.UUID(preview["preview_id"]))
+
+    assert _cursor_for_test(conversation) == before_cursor
+    assert target.read_bytes() == b"before"
+    operations = await checkpoint_store.list_operations(conversation_id)
+    assert len(operations) == 1
+    assert operations[0].status == "failed_partial"
+    assert operations[0].after_cursor is None
+    assert operations[0].applied_paths == ["note.txt"]
+
+    with pytest.raises(AppError) as guard_exc:
+        await service.preview_checkpoint(
+            _Db(), conversation, target_checkpoint_id=checkpoint.id, mode="code_only", workspace_root=str(workspace)
+        )
+    assert guard_exc.value.code == 40938
+
+    inverse_preview = await service.preview_operation_before(
+        _Db(), conversation, operations[0].id, str(workspace)
+    )
+    inverse_result = await service.execute_preview(
+        _Db(), conversation, uuid.UUID(inverse_preview["preview_id"])
+    )
+    assert inverse_result["conversation"]["action"] == "restore_cursor"
+    assert target.read_bytes() == b"after"
 
 
 @pytest.mark.asyncio

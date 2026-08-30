@@ -60,6 +60,9 @@ async def lifespan(app: FastAPI):
     recovered = await checkpoint_service.recover_open_checkpoints()
     if recovered:
         logger.info("checkpoint crash recovery: marked %d open manifests interrupted", recovered)
+    recovered_operations = await checkpoint_service.recover_incomplete_operations()
+    if recovered_operations:
+        logger.info("rollback operation recovery: marked %d incomplete journals failed_partial", recovered_operations)
 
     async def checkpoint_cache_loop():
         while True:

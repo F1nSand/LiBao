@@ -285,11 +285,19 @@ class RollbackOperation:
     after_cursor: ConversationCursor | None
     undo_files: dict[str, FileVersionRef]
     file_results: list[FileRestoreResult]
-    status: Literal["prepared", "completed", "partial", "failed_partial"]
+    status: Literal["prepared", "applying", "completed", "partial", "failed_partial"]
     created_at: datetime = field(default_factory=_utcnow)
+    preview_id: uuid.UUID | None = None
+    target_user_message_id: uuid.UUID | None = None
+    planned_files: list[dict[str, Any]] = field(default_factory=list)
+    applied_paths: list[str] = field(default_factory=list)
+    planned_after_cursor: ConversationCursor | None = None
+    error: dict[str, Any] | None = None
+    updated_at: datetime = field(default_factory=_utcnow)
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": 2,
             "id": str(self.id),
             "conversation_id": str(self.conversation_id),
             "target_checkpoint_id": str(self.target_checkpoint_id),
@@ -300,6 +308,13 @@ class RollbackOperation:
             "file_results": [item.to_dict() for item in self.file_results],
             "status": self.status,
             "created_at": self.created_at.isoformat(),
+            "preview_id": str(self.preview_id) if self.preview_id else None,
+            "target_user_message_id": str(self.target_user_message_id) if self.target_user_message_id else None,
+            "planned_files": list(self.planned_files),
+            "applied_paths": list(self.applied_paths),
+            "planned_after_cursor": self.planned_after_cursor.to_dict() if self.planned_after_cursor else None,
+            "error": self.error,
+            "updated_at": self.updated_at.isoformat(),
         }
 
     @classmethod
@@ -317,4 +332,17 @@ class RollbackOperation:
             file_results=[FileRestoreResult.from_dict(item) for item in data.get("file_results") or []],
             status=data.get("status", "failed_partial"),
             created_at=_parse_dt(data.get("created_at")) or _utcnow(),
+            preview_id=(uuid.UUID(str(data["preview_id"])) if data.get("preview_id") else None),
+            target_user_message_id=(
+                uuid.UUID(str(data["target_user_message_id"])) if data.get("target_user_message_id") else None
+            ),
+            planned_files=[dict(item) for item in data.get("planned_files") or [] if isinstance(item, dict)],
+            applied_paths=[str(path) for path in data.get("applied_paths") or []],
+            planned_after_cursor=(
+                ConversationCursor.from_dict(data["planned_after_cursor"])
+                if data.get("planned_after_cursor")
+                else None
+            ),
+            error=dict(data["error"]) if isinstance(data.get("error"), dict) else None,
+            updated_at=_parse_dt(data.get("updated_at")) or _parse_dt(data.get("created_at")) or _utcnow(),
         )

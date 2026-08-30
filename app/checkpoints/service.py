@@ -62,6 +62,30 @@ class CheckpointService:
                 continue
         return total
 
+    async def recover_incomplete_operations(self) -> int:
+        """Mark prepared/applying journals as interrupted without touching workspace bytes."""
+        total = 0
+        if not self.store.root.is_dir():
+            return total
+        for session_dir in self.store.root.iterdir():
+            if not session_dir.is_dir():
+                continue
+            try:
+                conversation_id = uuid.UUID(session_dir.name)
+            except (ValueError, AttributeError):
+                continue
+            for operation in await self.store.list_operations(conversation_id):
+                if operation.status not in {"prepared", "applying"}:
+                    continue
+                operation.status = "failed_partial"
+                operation.error = {
+                    "code": "incomplete_operation",
+                    "message": "恢复操作在进程退出前未完成，请先执行 operation-before 撤销",
+                }
+                await self.store.update_operation(operation)
+                total += 1
+        return total
+
     async def cleanup_expired(self, *, now: datetime | None = None) -> int:
         """按会话最后活动时间删除过期 checkpoint 目录。"""
         now = now or datetime.now(UTC)

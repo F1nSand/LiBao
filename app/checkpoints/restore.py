@@ -7,6 +7,7 @@ the mutation gateway.  This is the key property that keeps manual edits safe.
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import hashlib
 import uuid
@@ -108,6 +109,11 @@ class CheckpointRestoreService:
         if tasks:
             raise RestoreConflict()
 
+    async def _assert_no_incomplete_operations(self, conversation_id: uuid.UUID) -> None:
+        for operation in await self.checkpoints.store.list_operations(conversation_id):
+            if operation.status in {"prepared", "applying", "failed_partial"}:
+                raise AppError(40938, "存在未完成的恢复操作，请先执行 operation-before 撤销")
+
     async def _draft_for_message(self, db: Any, conversation: Conversation, message: Message) -> dict[str, Any]:
         """Build an authoritative composer draft without mutating attachment ownership."""
         attachments: list[dict[str, Any]] = []
@@ -205,6 +211,40 @@ class CheckpointRestoreService:
             "draft": await self._draft_for_message(db, conversation, target_message),
         }
 
+    def _planned_cursor(
+        self, conversation: Conversation, target: CodeCheckpoint, mode: RollbackMode
+    ) -> ConversationCursor:
+        current = _cursor(conversation)
+        message_head = current.active_message_head_id
+        message_initialized = current.message_cursor_initialized
+        graph_id = current.active_graph_checkpoint_id
+        graph_initialized = current.graph_cursor_initialized
+        code_node = current.active_code_node_id
+        if mode in {"conversation_only", "both"}:
+            message_head = target.anchor_message_head_id
+            message_initialized = True
+            graph_id = target.graph_parent_checkpoint_id
+            graph_initialized = target.graph_parent_bound
+        if mode in {"code_only", "both"}:
+            code_node = target.id
+        return ConversationCursor(
+            active_message_head_id=message_head,
+            message_cursor_initialized=message_initialized,
+            active_graph_checkpoint_id=graph_id,
+            graph_cursor_initialized=graph_initialized,
+            active_code_node_id=code_node,
+            history_revision=current.history_revision + 1,
+        )
+
+    @staticmethod
+    def _apply_cursor(conversation: Conversation, cursor: ConversationCursor) -> None:
+        conversation.active_message_head_id = cursor.active_message_head_id
+        conversation.message_cursor_initialized = cursor.message_cursor_initialized
+        conversation.active_graph_checkpoint_id = cursor.active_graph_checkpoint_id
+        conversation.graph_cursor_initialized = cursor.graph_cursor_initialized
+        conversation.active_code_node_id = cursor.active_code_node_id
+        conversation.history_revision = cursor.history_revision
+
     async def _file_plan(
         self,
         conversation_id: uuid.UUID,
@@ -298,6 +338,7 @@ class CheckpointRestoreService:
         if mode not in {"code_only", "conversation_only", "both"}:
             raise AppError(40031, "不支持的回滚模式")
         await self._assert_idle(db, conversation)
+        await self._assert_no_incomplete_operations(conversation.id)
         target = await self.checkpoints.store.read_checkpoint(conversation.id, target_checkpoint_id)
         if target is None:
             raise AppError(40431, "checkpoint 不存在或已过期")
@@ -397,6 +438,7 @@ class CheckpointRestoreService:
         await self._assert_idle(db, conversation)
         if record.get("kind") == "operation_before":
             return await self._execute_operation_preview(db, conversation, record, preview_id)
+        await self._assert_no_incomplete_operations(conversation.id)
         mode = record_mode
         root: Path | None = None
         if mode in {"code_only", "both"}:
@@ -415,73 +457,139 @@ class CheckpointRestoreService:
             files = list(record.get("files") or [])
             target_refs = dict(record.get("target_refs") or {})
         before_cursor = _cursor(conversation)
+        planned_cursor = self._planned_cursor(conversation, target, mode)
+        target_bytes: dict[str, bytes] = {}
         undo_files: dict[str, FileVersionRef] = {}
         results: list[FileRestoreResult] = []
-        restored = deleted = conflicts = 0
+        # Preflight every target blob and capture every undo blob before the first
+        # workspace mutation.  A missing target blob therefore leaves the workspace
+        # untouched and produces no half-written operation.
         for item in files:
             assert root is not None
-            path = root / Path(item["path"])
+            relative_path = item["path"]
+            target_ref = target_refs.get(relative_path)
+            if target_ref is None:
+                raise AppError(50031, "checkpoint 文件计划缺少目标引用，已安全停止恢复")
+            path = root / Path(relative_path)
             current = path.read_bytes() if path.is_file() else None
-            current_sha = _sha256(current)
+            if item.get("conflict"):
+                continue
             expected_sha = item.get("current_sha256")
             expected_exists = bool(item.get("expected_exists"))
-            if item.get("conflict") or (
-                current_sha != expected_sha if expected_exists else current is not None
-            ):
-                conflicts += 1
-                results.append(
-                    FileRestoreResult(
-                        item["path"],
-                        "skipped_conflict",
-                        "文件在预览后发生变化",
-                        current_sha,
-                        item.get("target_sha256"),
-                    )
-                )
+            current_sha = _sha256(current)
+            if (current_sha != expected_sha) if expected_exists else current is not None:
                 continue
             if current is not None:
                 async with self.checkpoints.store._lock(conversation.id):  # noqa: SLF001
                     digest = await self.checkpoints.store._put_blob_unlocked(conversation.id, current)  # noqa: SLF001
-                undo_files[item["path"]] = FileVersionRef(True, digest, len(current), item["content_kind"])
+                undo_files[relative_path] = FileVersionRef(True, digest, len(current), item["content_kind"])
             else:
-                undo_files[item["path"]] = FileVersionRef(False, None, 0, item["content_kind"])
-            target_ref = target_refs[item["path"]]
+                undo_files[relative_path] = FileVersionRef(False, None, 0, item["content_kind"])
             if target_ref.exists:
-                target_bytes = await self.checkpoints.store.read_blob(conversation.id, target_ref.blob_sha256)
-                if target_bytes is None:
+                content = await self.checkpoints.store.read_blob(conversation.id, target_ref.blob_sha256)
+                if content is None:
                     raise AppError(50031, "checkpoint blob 缺失，已安全停止恢复")
-                _write_atomic(path, target_bytes)
-                restored += 1
-                results.append(FileRestoreResult(item["path"], "restored", None, current_sha, target_ref.blob_sha256))
-            else:
-                path.unlink(missing_ok=True)
-                deleted += 1
-                results.append(FileRestoreResult(item["path"], "deleted", None, current_sha, None))
-
-        if mode in {"conversation_only", "both"}:
-            conversation.active_message_head_id = target.anchor_message_head_id
-            conversation.message_cursor_initialized = True
-            conversation.active_graph_checkpoint_id = target.graph_parent_checkpoint_id
-            conversation.graph_cursor_initialized = target.graph_parent_bound
-            if mode == "both":
-                conversation.active_code_node_id = target.id
-        elif mode == "code_only":
-            conversation.active_code_node_id = target.id
-        conversation.history_revision += 1
-        after_cursor = _cursor(conversation)
+                target_bytes[relative_path] = content
         operation = RollbackOperation(
             id=uuid.uuid4(),
             conversation_id=conversation.id,
             target_checkpoint_id=target.id,
             mode=mode,
             before_cursor=before_cursor,
-            after_cursor=after_cursor,
+            after_cursor=None,
             undo_files=undo_files,
-            file_results=results,
-            status="partial" if conflicts else "completed",
+            file_results=[],
+            status="prepared",
+            preview_id=preview_id,
+            target_user_message_id=target.user_message_id,
+            planned_files=list(files),
+            applied_paths=[],
+            planned_after_cursor=planned_cursor,
         )
         await self.checkpoints.store.create_operation(operation)
-        await db.commit()
+        try:
+            operation.status = "applying"
+            await self.checkpoints.store.update_operation(operation)
+            restored = deleted = conflicts = 0
+            for item in files:
+                assert root is not None
+                relative_path = item["path"]
+                path = root / Path(relative_path)
+                current = path.read_bytes() if path.is_file() else None
+                current_sha = _sha256(current)
+                expected_sha = item.get("current_sha256")
+                expected_exists = bool(item.get("expected_exists"))
+                conflict = bool(item.get("conflict")) or (
+                    (current_sha != expected_sha) if expected_exists else current is not None
+                )
+                if conflict:
+                    conflicts += 1
+                    results.append(
+                        FileRestoreResult(
+                            relative_path,
+                            "skipped_conflict",
+                            "文件在预览后发生变化",
+                            current_sha,
+                            item.get("target_sha256"),
+                        )
+                    )
+                    operation.file_results = list(results)
+                    await self.checkpoints.store.update_operation(operation)
+                    continue
+                target_ref = target_refs[relative_path]
+                if target_ref.exists:
+                    _write_atomic(path, target_bytes[relative_path])
+                    restored += 1
+                    results.append(
+                        FileRestoreResult(relative_path, "restored", None, current_sha, target_ref.blob_sha256)
+                    )
+                else:
+                    path.unlink(missing_ok=True)
+                    deleted += 1
+                    results.append(FileRestoreResult(relative_path, "deleted", None, current_sha, None))
+                operation.file_results = list(results)
+                operation.applied_paths.append(relative_path)
+                await self.checkpoints.store.update_operation(operation)
+
+            # A partial workspace transition is represented by its operation id,
+            # while a zero-applied conflict keeps the previous code cursor.  Message
+            # and graph cursors still follow the requested target for Both.
+            final_cursor = planned_cursor
+            if conflicts and not operation.applied_paths:
+                final_cursor = ConversationCursor(
+                    active_message_head_id=planned_cursor.active_message_head_id,
+                    message_cursor_initialized=planned_cursor.message_cursor_initialized,
+                    active_graph_checkpoint_id=planned_cursor.active_graph_checkpoint_id,
+                    graph_cursor_initialized=planned_cursor.graph_cursor_initialized,
+                    active_code_node_id=before_cursor.active_code_node_id,
+                    history_revision=planned_cursor.history_revision,
+                )
+            elif conflicts and operation.applied_paths and mode in {"code_only", "both"}:
+                final_cursor = ConversationCursor(
+                    active_message_head_id=planned_cursor.active_message_head_id,
+                    message_cursor_initialized=planned_cursor.message_cursor_initialized,
+                    active_graph_checkpoint_id=planned_cursor.active_graph_checkpoint_id,
+                    graph_cursor_initialized=planned_cursor.graph_cursor_initialized,
+                    active_code_node_id=operation.id,
+                    history_revision=planned_cursor.history_revision,
+                )
+            self._apply_cursor(conversation, final_cursor)
+            try:
+                await db.commit()
+            except BaseException:
+                self._apply_cursor(conversation, before_cursor)
+                await db.rollback()
+                raise
+            operation.after_cursor = _cursor(conversation)
+            operation.status = "partial" if conflicts else "completed"
+            await self.checkpoints.store.update_operation(operation)
+        except BaseException as exc:
+            if operation.after_cursor is None:
+                operation.status = "failed_partial"
+                operation.error = {"message": str(exc)[:500], "type": type(exc).__name__}
+                with contextlib.suppress(Exception):
+                    await self.checkpoints.store.update_operation(operation)
+            raise
         result = {
             "operation_id": str(operation.id),
             "status": operation.status,
@@ -584,66 +692,117 @@ class CheckpointRestoreService:
         operation: RollbackOperation = record["operation"]
         root = Path(record["workspace_root"])
         before_cursor = _cursor(conversation)
+        desired = operation.before_cursor
+        planned_cursor = ConversationCursor(
+            active_message_head_id=desired.active_message_head_id,
+            message_cursor_initialized=desired.message_cursor_initialized,
+            active_graph_checkpoint_id=desired.active_graph_checkpoint_id,
+            graph_cursor_initialized=desired.graph_cursor_initialized,
+            active_code_node_id=desired.active_code_node_id,
+            history_revision=before_cursor.history_revision + 1,
+        )
+        target_bytes: dict[str, bytes] = {}
         undo_files: dict[str, FileVersionRef] = {}
         results: list[FileRestoreResult] = []
-        restored = deleted = conflicts = 0
+        # Validate every stored undo blob and capture the current bytes before the
+        # first reverse write.  Operation-before therefore follows the same WAL
+        # preflight guarantee as a forward restore.
         for item in record["files"]:
+            relative_path = item["path"]
             path = root / Path(item["path"])
             current = path.read_bytes() if path.is_file() else None
             current_sha = _sha256(current)
             expected_sha = item.get("current_sha256")
             expected_exists = bool(item.get("expected_exists"))
-            if item.get("conflict") or (current_sha != expected_sha if expected_exists else current is not None):
-                conflicts += 1
-                results.append(
-                    FileRestoreResult(
-                        item["path"],
-                        "skipped_conflict",
-                        "文件在预览后发生变化",
-                        current_sha,
-                        item.get("target_sha256"),
-                    )
-                )
+            if item.get("conflict") or ((current_sha != expected_sha) if expected_exists else current is not None):
                 continue
             if current is not None:
                 async with self.checkpoints.store._lock(conversation.id):  # noqa: SLF001
                     digest = await self.checkpoints.store._put_blob_unlocked(conversation.id, current)  # noqa: SLF001
-                undo_files[item["path"]] = FileVersionRef(True, digest, len(current), item["content_kind"])
+                undo_files[relative_path] = FileVersionRef(True, digest, len(current), item["content_kind"])
             else:
-                undo_files[item["path"]] = FileVersionRef(False, None, 0, item["content_kind"])
-            target_ref = operation.undo_files[item["path"]]
+                undo_files[relative_path] = FileVersionRef(False, None, 0, item["content_kind"])
+            target_ref = operation.undo_files[relative_path]
             if target_ref.exists:
                 content = await self.checkpoints.store.read_blob(conversation.id, target_ref.blob_sha256)
                 if content is None:
                     raise AppError(50031, "rollback blob 缺失，已安全停止恢复")
-                _write_atomic(path, content)
-                restored += 1
-                results.append(FileRestoreResult(item["path"], "restored", None, current_sha, target_ref.blob_sha256))
-            else:
-                path.unlink(missing_ok=True)
-                deleted += 1
-                results.append(FileRestoreResult(item["path"], "deleted", None, current_sha, None))
-        desired = operation.before_cursor
-        conversation.active_message_head_id = desired.active_message_head_id
-        conversation.message_cursor_initialized = desired.message_cursor_initialized
-        conversation.active_graph_checkpoint_id = desired.active_graph_checkpoint_id
-        conversation.graph_cursor_initialized = desired.graph_cursor_initialized
-        conversation.active_code_node_id = desired.active_code_node_id
-        conversation.history_revision += 1
-        after_cursor = _cursor(conversation)
+                target_bytes[relative_path] = content
         inverse = RollbackOperation(
             id=uuid.uuid4(),
             conversation_id=conversation.id,
             target_checkpoint_id=operation.target_checkpoint_id,
             mode=operation.mode,
             before_cursor=before_cursor,
-            after_cursor=after_cursor,
+            after_cursor=None,
             undo_files=undo_files,
-            file_results=results,
-            status="partial" if conflicts else "completed",
+            file_results=[],
+            status="prepared",
+            preview_id=preview_id,
+            target_user_message_id=operation.target_user_message_id,
+            planned_files=list(record["files"]),
+            planned_after_cursor=planned_cursor,
         )
         await self.checkpoints.store.create_operation(inverse)
-        await db.commit()
+        try:
+            inverse.status = "applying"
+            await self.checkpoints.store.update_operation(inverse)
+            restored = deleted = conflicts = 0
+            for item in record["files"]:
+                relative_path = item["path"]
+                path = root / Path(relative_path)
+                current = path.read_bytes() if path.is_file() else None
+                current_sha = _sha256(current)
+                expected_sha = item.get("current_sha256")
+                expected_exists = bool(item.get("expected_exists"))
+                conflict = bool(item.get("conflict")) or (
+                    (current_sha != expected_sha) if expected_exists else current is not None
+                )
+                if conflict:
+                    conflicts += 1
+                    results.append(
+                        FileRestoreResult(
+                            relative_path,
+                            "skipped_conflict",
+                            "文件在预览后发生变化",
+                            current_sha,
+                            item.get("target_sha256"),
+                        )
+                    )
+                    inverse.file_results = list(results)
+                    await self.checkpoints.store.update_operation(inverse)
+                    continue
+                target_ref = operation.undo_files[relative_path]
+                if target_ref.exists:
+                    _write_atomic(path, target_bytes[relative_path])
+                    restored += 1
+                    results.append(
+                        FileRestoreResult(relative_path, "restored", None, current_sha, target_ref.blob_sha256)
+                    )
+                else:
+                    path.unlink(missing_ok=True)
+                    deleted += 1
+                    results.append(FileRestoreResult(relative_path, "deleted", None, current_sha, None))
+                inverse.file_results = list(results)
+                inverse.applied_paths.append(relative_path)
+                await self.checkpoints.store.update_operation(inverse)
+            self._apply_cursor(conversation, planned_cursor)
+            try:
+                await db.commit()
+            except BaseException:
+                self._apply_cursor(conversation, before_cursor)
+                await db.rollback()
+                raise
+            inverse.after_cursor = _cursor(conversation)
+            inverse.status = "partial" if conflicts else "completed"
+            await self.checkpoints.store.update_operation(inverse)
+        except BaseException as exc:
+            if inverse.after_cursor is None:
+                inverse.status = "failed_partial"
+                inverse.error = {"message": str(exc)[:500], "type": type(exc).__name__}
+                with contextlib.suppress(Exception):
+                    await self.checkpoints.store.update_operation(inverse)
+            raise
         result = {
             "operation_id": str(inverse.id),
             "status": inverse.status,
