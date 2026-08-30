@@ -54,7 +54,55 @@ export interface Message {
   round?: number
   /** 推理链（docs/03 §3.3；后端持久化后返回，前端活动区折叠显示） */
   thinking?: string
+  checkpoint_id?: string
+  checkpoint?: CheckpointSummary
   created_at: string
+}
+
+export interface CheckpointSummary {
+  id: string
+  status: 'open' | 'sealed' | 'interrupted' | 'expired'
+  changed_file_count: number
+  can_restore_code: boolean
+  can_restore_conversation: boolean
+}
+
+export type RollbackMode = 'code_only' | 'conversation_only' | 'both'
+
+export interface RestoreFilePreview {
+  path: string
+  action: 'restore' | 'delete' | 'skip_conflict'
+  content_kind: 'text' | 'binary'
+  current_sha256?: string | null
+  target_sha256?: string | null
+  current_size: number
+  target_size: number
+  conflict: boolean
+  reason?: string | null
+  diff?: string
+  diff_truncated?: boolean
+}
+
+export interface RestorePreview {
+  preview_id: string
+  target: { type: 'checkpoint' | 'rollback_operation_before'; id: string }
+  mode: RollbackMode
+  target_message_id?: string | null
+  expires_at: string
+  conversation: { truncate_after_message_id?: string | null; hidden_message_count: number }
+  files: RestoreFilePreview[]
+  warnings: string[]
+}
+
+export interface RestoreResult {
+  operation_id: string
+  status: 'completed' | 'partial' | 'failed_partial'
+  restored_files: number
+  deleted_files: number
+  skipped_conflicts: string[]
+  hidden_message_count: number
+  undo_available: boolean
+  history_revision: number
 }
 
 /** ---------- 对话轨迹（Trajectory，docs/03 §5.2.x）：按会话隔离、只读派生 ---------- */
@@ -115,6 +163,10 @@ export interface Conversation {
   workspace_id?: string
   last_message_at?: string
   created_at: string
+  active_message_head_id?: string | null
+  active_graph_checkpoint_id?: string | null
+  active_code_node_id?: string | null
+  history_revision?: number
 }
 
 export interface ChatMessageInput {

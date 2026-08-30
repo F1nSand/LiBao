@@ -14,6 +14,7 @@ import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
 import AttachmentUploader, { type PendingAttachment } from '@/components/business/AttachmentUploader.vue'
 import InterruptConfirmDialog from '@/components/business/InterruptConfirmDialog.vue'
 import AgentRunStatus from '@/components/common/AgentRunStatus.vue'
+import CheckpointRestoreDialog from '@/components/business/CheckpointRestoreDialog.vue'
 
 /** 对话工作台（docs/02 §4 / §5）：消息流 + 流式渲染 + 工具卡 + 中断确认 + 会话|轨迹切换（单通用 Agent，无切换） */
 const chat = useChatStore()
@@ -55,6 +56,8 @@ const attachmentUploader = ref<InstanceType<typeof AttachmentUploader> | null>(n
 const isDragging = ref(false)
 const lastFailedDraft = ref<{ content: string; attachments: PendingAttachment[] } | null>(null)
 const interruptVisible = ref(false)
+const restoreVisible = ref(false)
+const restoreMessage = ref<Message | null>(null)
 
 /** 会话 | 轨迹 视图切换 */
 const mode = ref<'chat' | 'trajectory'>('chat')
@@ -193,6 +196,27 @@ async function retryFailed() {
   await sendWith(draft.content, draft.attachments, false)
 }
 
+async function onRollback(message: Message) {
+  // Claude Code semantics: never rewind while a tool can still mutate files.
+  if (composerDisabled.value) {
+    await stop()
+    if (composerDisabled.value) {
+      ElMessage.warning('当前任务尚未停止，请稍后再试')
+      return
+    }
+  }
+  const checkpointId = message.checkpoint_id ?? message.checkpoint?.id
+  if (!checkpointId || !chat.currentId) return
+  restoreMessage.value = message
+  restoreVisible.value = true
+}
+
+async function onRestoreCompleted() {
+  restoreVisible.value = false
+  if (chat.currentId) await chat.loadMessages(chat.currentId)
+  await chat.loadConversations()
+}
+
 // 中断 → 弹窗
 watch(
   () => stream.state.value.interrupted,
@@ -271,6 +295,16 @@ async function onPickModel(p: ProviderConfig) {
         :messages="chat.currentMessages"
         :stream="currentStream"
         :loading="chat.messagesLoading"
+        @rollback="onRollback"
+      />
+
+      <CheckpointRestoreDialog
+        v-if="restoreMessage && chat.currentId"
+        v-model="restoreVisible"
+        :conversation-id="chat.currentId"
+        :checkpoint-id="restoreMessage.checkpoint_id ?? restoreMessage.checkpoint?.id ?? ''"
+        :message-id="restoreMessage.id"
+        @completed="onRestoreCompleted"
       />
 
       <div v-if="mode === 'chat' && chat.messagesError" class="stream-error" role="alert">

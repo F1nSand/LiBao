@@ -16,6 +16,7 @@ import {
   longtermMemories,
   notifications,
   systemLogs,
+  checkpointHistory,
 } from './db'
 import { ok, fail, json, paginate, uid, randHex, isoDate, fast } from './util'
 import { buildChatScript, buildResumeScript, toEnvelope, PERSISTED_TYPES, type SseScriptItem } from './stream'
@@ -328,6 +329,13 @@ export const mockServer = {
         tool_calls: [],
         created_at: isoDate(0),
       })
+      const checkpointId = uid('cp')
+      const userMessage = messages[chatReq.conversation_id].at(-1)
+      if (userMessage) {
+        userMessage.checkpoint_id = checkpointId
+        userMessage.checkpoint = { id: checkpointId, status: 'sealed', changed_file_count: 0, can_restore_code: true, can_restore_conversation: true }
+      }
+      ;(checkpointHistory[chatReq.conversation_id] ??= []).push({ kind: 'checkpoint', id: checkpointId, user_message_id: userMessage?.id, status: 'sealed', changed_file_count: 0, created_at: isoDate(0) })
       const script = buildChatScript(chatReq)
       const taskId = String((script[0]?.payload as { task_id?: string } | undefined)?.task_id ?? '')
       if (taskId) {
@@ -375,6 +383,28 @@ export const mockServer = {
       const page = Number(query.get('page') ?? 1)
       const size = Number(query.get('page_size') ?? 50)
       return void json(res, ok(paginate(list, page, size)))
+    }
+    p = match(pathname, '/conversations/:id/checkpoints')
+    if (method === 'GET' && p) {
+      return void json(res, ok({ conversation_id: p.id, current_state_id: null, cursor: { history_revision: 0 }, items: checkpointHistory[p.id] ?? [] }))
+    }
+    p = match(pathname, '/conversations/:id/restore-previews')
+    if (method === 'POST' && p) {
+      const b = body.json ?? {}
+      return void json(res, ok({
+        preview_id: uid('preview'),
+        target: { type: b.target_type ?? 'checkpoint', id: b.target_checkpoint_id ?? b.target_id },
+        mode: b.mode ?? 'both',
+        target_message_id: 'm_001',
+        expires_at: new Date(Date.now() + 600000).toISOString(),
+        conversation: { truncate_after_message_id: 'm_001', hidden_message_count: b.mode === 'code_only' ? 0 : 0 },
+        files: [],
+        warnings: ['仅恢复 AI 直接文件工具产生的工作区文件；手动编辑/外部进程冲突文件将跳过。', 'shell、脚本、数据库、MCP/远程服务、记忆和知识库副作用不纳入回滚。'],
+      }))
+    }
+    p = match(pathname, '/conversations/:id/restores')
+    if (method === 'POST' && p) {
+      return void json(res, ok({ operation_id: uid('op'), status: 'completed', restored_files: 0, deleted_files: 0, skipped_conflicts: [], hidden_message_count: 0, undo_available: true, history_revision: 1 }))
     }
     p = match(pathname, '/conversations/:id/trajectory')
     if (method === 'GET' && p) {

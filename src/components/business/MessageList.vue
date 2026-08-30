@@ -20,6 +20,7 @@ import MessageBubble from './MessageBubble.vue'
  * 滚动改为确定性（scrollHeight 真实，nextTick + rAF 一次落地即可）。
  */
 const props = defineProps<{ messages: Message[]; stream?: StreamState | null; loading?: boolean }>()
+const emit = defineEmits<{ rollback: [message: Message] }>()
 
 const containerRef = ref<HTMLElement | null>(null)
 
@@ -166,7 +167,7 @@ defineExpose({ containerRef, jumpToLatest })
       <div v-if="!loading && messages.length === 0 && !showStreamBubble" class="msg-empty">开始对话吧～</div>
       <template v-if="!loading">
         <div v-for="msg in messages" :key="msg.id" class="msg-row">
-          <MessageBubble :message="msg" />
+          <MessageBubble :message="msg" @rollback="emit('rollback', $event)" />
         </div>
         <div v-if="showStreamBubble" class="msg-row">
           <MessageBubble :stream="stream" />

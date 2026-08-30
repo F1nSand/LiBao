@@ -103,6 +103,11 @@ export const messages: Record<string, Message[]> = {
       conversation_id: 'c_001',
       role: 'user',
       content: '计算 6*7',
+      checkpoint_id: 'cp_001',
+      checkpoint: {
+        id: 'cp_001', status: 'sealed', changed_file_count: 0,
+        can_restore_code: true, can_restore_conversation: true,
+      },
       attachments: [],
       tool_calls: [],
       created_at: isoDate(10),
@@ -188,6 +193,10 @@ export const messages: Record<string, Message[]> = {
       created_at: isoDate(3),
     },
   ],
+}
+
+export const checkpointHistory: Record<string, { kind: 'checkpoint' | 'rollback_operation'; id: string; user_message_id?: string; target_checkpoint_id?: string; status: string; mode?: string; changed_file_count?: number; created_at: string }[]> = {
+  c_001: [{ kind: 'checkpoint', id: 'cp_001', user_message_id: 'm_001', status: 'sealed', changed_file_count: 0, created_at: isoDate(10) }],
 }
 
 /** Skills 种子（M7-A 简化 2026-08-25：两级目录——全局 + 工作区，删 org CRUD） */

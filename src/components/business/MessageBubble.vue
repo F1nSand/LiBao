@@ -18,6 +18,7 @@ const props = defineProps<{
   message?: Message
   stream?: StreamState | null
 }>()
+const emit = defineEmits<{ rollback: [message: Message] }>()
 
 type ActivityItem =
   | { kind: 'tool'; card: ToolCallCardState }
@@ -147,6 +148,16 @@ const usageText = computed(() => {
           </span>
         </div>
         <div v-if="hasUserText" class="user-text">{{ message.content }}</div>
+        <button
+          v-if="message.checkpoint_id || message.checkpoint"
+          type="button"
+          class="rollback-trigger"
+          title="回滚到此状态"
+          @click="emit('rollback', message)"
+        >
+          <el-icon :size="13"><RefreshLeft /></el-icon>
+          <span>回滚到此状态</span>
+        </button>
       </template>
 
       <!-- 助手消息：活动区（工具/切换/思考）在回复气泡上方，往下递进 -->
@@ -262,6 +273,39 @@ const usageText = computed(() => {
   word-break: break-word;
   line-height: 1.6;
   max-width: 100%;
+}
+.rollback-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-end;
+  min-height: 30px;
+  margin-top: 4px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 140ms ease, transform 140ms ease, color 140ms ease, background 140ms ease;
+}
+.msg.user:hover .rollback-trigger,
+.msg.user:focus-within .rollback-trigger {
+  opacity: 1;
+  transform: translateY(0);
+}
+.rollback-trigger:hover {
+  border-color: color-mix(in srgb, var(--app-primary) 30%, var(--app-border-light));
+  background: color-mix(in srgb, var(--app-primary) 9%, transparent);
+  color: var(--app-link);
+}
+.rollback-trigger:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--app-focus-ring);
+  outline-offset: 2px;
 }
 .msg-text {
   background: var(--app-content-bg);
