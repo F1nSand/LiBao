@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from app.checkpoints.identity import build_workspace_identity, workspace_identity_matches
+from app.checkpoints.identity import workspace_identity_matches
 from app.checkpoints.models import (
     CodeCheckpoint,
     ConversationCursor,
@@ -95,10 +95,6 @@ class CheckpointRestoreService:
         tasks = await self._active_tasks(db, conversation.id)
         if tasks:
             raise RestoreConflict()
-
-    @staticmethod
-    def _identity(root: str, workspace_id: str | None) -> str:
-        return build_workspace_identity(root, workspace_id)
 
     async def _file_plan(
         self,
