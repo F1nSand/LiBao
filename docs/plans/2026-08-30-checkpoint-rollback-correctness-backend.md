@@ -37,12 +37,12 @@ class CheckpointRestorePreviewRequest(BaseModel):
     target_type: Literal['checkpoint']
     target_checkpoint_id: UUID
     mode: Literal['code_only', 'conversation_only', 'both']
-    client_request_id: UUID
+    client_request_id: str
 
 class OperationBeforeRestorePreviewRequest(BaseModel):
     target_type: Literal['rollback_operation_before']
     target_id: UUID
-    client_request_id: UUID
+    client_request_id: str
 
 RestorePreviewRequest = Annotated[
     CheckpointRestorePreviewRequest | OperationBeforeRestorePreviewRequest,
@@ -51,8 +51,8 @@ RestorePreviewRequest = Annotated[
 
 class RestoreExecuteRequest(BaseModel):
     preview_id: UUID
-    expected_mode: Literal['code_only', 'conversation_only', 'both']
-    client_request_id: UUID
+    expected_mode: Literal['code_only', 'conversation_only', 'both'] | null
+    client_request_id: str | null
 ```
 
 Preview 与 execute 统一返回以下 conversation 结构：
@@ -95,6 +95,8 @@ Preview 与 execute 统一返回以下 conversation 结构：
 ```
 
 Execute 额外返回 `operation_id`、`target_message_id`、文件统计、`undo_available` 和新 `history_revision`。后端在 restore lock 内验证 `expected_mode == preview.mode`、request id、conversation owner、target、revision、active code cursor、workspace identity、TTL 和 preview 文件 hashes。
+
+兼容策略：`client_request_id` 作为不透明字符串（UUID 仍可用）；preview 缺省时由服务端生成。`expected_mode` 与 execute 的 request id 在旧静态 bundle 缺失时允许为空，但只要 v2 客户端提交，服务端仍严格执行 mode/request-id 绑定校验。
 
 ---
 

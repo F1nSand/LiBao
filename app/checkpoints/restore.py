@@ -374,7 +374,7 @@ class CheckpointRestoreService:
         mode: RollbackMode,
         workspace_root: str | None,
         workspace_id: str | None = None,
-        client_request_id: uuid.UUID | None = None,
+        client_request_id: str | None = None,
     ) -> dict[str, Any]:
         if mode not in {"code_only", "conversation_only", "both"}:
             raise AppError(40031, "不支持的回滚模式")
@@ -433,7 +433,7 @@ class CheckpointRestoreService:
         preview_id: uuid.UUID,
         *,
         expected_mode: RollbackMode | None = None,
-        client_request_id: uuid.UUID | None = None,
+        client_request_id: str | None = None,
     ) -> dict[str, Any]:
         async with _restore_lock(conversation.id):
             return await self._execute_preview_unlocked(
@@ -451,7 +451,7 @@ class CheckpointRestoreService:
         preview_id: uuid.UUID,
         *,
         expected_mode: RollbackMode | None = None,
-        client_request_id: uuid.UUID | None = None,
+        client_request_id: str | None = None,
     ) -> dict[str, Any]:
         record = _PREVIEWS.get(str(preview_id))
         if record is None:
@@ -656,7 +656,7 @@ class CheckpointRestoreService:
         operation_id: uuid.UUID,
         workspace_root: str,
         *,
-        client_request_id: uuid.UUID | None = None,
+        client_request_id: str | None = None,
     ) -> dict[str, Any]:
         await self._assert_idle(db, conversation)
         operation = await self.checkpoints.store.read_operation(conversation.id, operation_id)

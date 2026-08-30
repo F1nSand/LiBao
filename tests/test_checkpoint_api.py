@@ -5,7 +5,7 @@ import uuid
 import pytest
 
 from app.api.routers import checkpoints
-from app.api.schemas.checkpoints import CheckpointRestorePreviewRequest
+from app.api.schemas.checkpoints import CheckpointRestorePreviewRequest, RestoreExecuteRequest
 from app.storage.models.conversation import Conversation
 from app.storage.models.user import User
 
@@ -54,3 +54,17 @@ async def test_conversation_only_preview_succeeds_when_workspace_is_missing(monk
     )
 
     assert response["data"]["files"] == []
+
+
+def test_restore_requests_accept_frontend_string_request_ids_and_legacy_execute_defaults():
+    request_id = "restore_request_1725000000000_1"
+    preview = CheckpointRestorePreviewRequest(
+        target_checkpoint_id=uuid.uuid4(),
+        mode="both",
+        client_request_id=request_id,
+    )
+    assert preview.client_request_id == request_id
+
+    legacy_execute = RestoreExecuteRequest(preview_id=uuid.uuid4())
+    assert legacy_execute.expected_mode is None
+    assert legacy_execute.client_request_id is None
