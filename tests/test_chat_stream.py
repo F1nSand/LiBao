@@ -12,7 +12,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from app.core.errors import AppError
-from app.orchestration.chat_stream import chat_stream_events
+from app.orchestration.chat_stream import _graph_config, chat_stream_events
 from app.orchestration.checkpointer import JsonFileSaver
 from app.orchestration.graph import build_graph
 from app.orchestration.task_worker import route_cancel, running_task
@@ -38,6 +38,33 @@ class FakeChatModel:
                 content="", tool_calls=[{"name": "time_now", "args": {}, "id": "call_1", "type": "tool_call"}]
             )
         return AIMessage(content="现在是 2026 年 8 月 13 日 21:00。")
+
+
+def test_graph_config_distinguishes_code_anchor_from_graph_parent():
+    cfg = _graph_config(
+        thread_id="conversation-1",
+        trace_id="trace-1",
+        assistant_msg_id=uuid.uuid4(),
+        checkpoint_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        graph_parent_checkpoint_id="graph-before-1",
+    )
+
+    assert cfg["configurable"]["code_checkpoint_id"] == "11111111-1111-1111-1111-111111111111"
+    assert cfg["configurable"]["checkpoint_id"] == "graph-before-1"
+    assert "start_graph_from_root" not in cfg["configurable"]
+
+
+def test_graph_config_marks_explicit_empty_graph_root():
+    cfg = _graph_config(
+        thread_id="conversation-1",
+        trace_id="trace-1",
+        assistant_msg_id=uuid.uuid4(),
+        checkpoint_id=uuid.uuid4(),
+        start_graph_from_root=True,
+    )
+
+    assert cfg["configurable"]["start_graph_from_root"] is True
+    assert "checkpoint_id" not in cfg["configurable"]
 
 
 @pytest.fixture

@@ -49,6 +49,7 @@ def _cursor(conversation: Conversation) -> ConversationCursor:
         active_message_head_id=conversation.active_message_head_id,
         message_cursor_initialized=conversation.message_cursor_initialized,
         active_graph_checkpoint_id=conversation.active_graph_checkpoint_id,
+        graph_cursor_initialized=conversation.graph_cursor_initialized,
         active_code_node_id=conversation.active_code_node_id,
         history_revision=conversation.history_revision,
     )

@@ -177,6 +177,70 @@ async def test_checkpoint_ns_isolation(tmp_path):
     assert t2.checkpoint["id"] == "b1"
 
 
+async def test_run_bounds_are_indexed_by_code_checkpoint_id(tmp_path):
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-run-bounds"}}
+    saver.put(config, _checkpoint("c0"), {"source": "input"}, {})
+    saver.put(
+        {"configurable": {"thread_id": "t-run-bounds", "code_checkpoint_id": "code-1"}},
+        _checkpoint("c1", parent="c0"),
+        {"source": "input"},
+        {},
+    )
+    saver.put(
+        {"configurable": {"thread_id": "t-run-bounds", "code_checkpoint_id": "code-1"}},
+        _checkpoint("c2", parent="c1"),
+        {"source": "loop"},
+        {},
+    )
+
+    parent, output = await saver.aget_run_bounds(config, "code-1")
+
+    assert parent == "c0"
+    assert output == "c2"
+
+
+async def test_failed_run_bounds_skip_failed_input_checkpoint(tmp_path):
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-failed-run"}}
+    saver.put(config, _checkpoint("c0"), {"source": "loop"}, {})
+    run_config = {"configurable": {"thread_id": "t-failed-run", "code_checkpoint_id": "code-2"}}
+    saver.put(run_config, _checkpoint("c1", parent="c0"), {"source": "input"}, {})
+    saver.put_writes(
+        {"configurable": {"thread_id": "t-failed-run", "checkpoint_id": "c1"}},
+        [("__error__", RuntimeError("boom"))],
+        "task-1",
+    )
+
+    parent, output = await saver.aget_run_bounds(config, "code-2")
+
+    assert parent == "c0"
+    assert output == "c0"
+
+
+async def test_explicit_checkpoint_wins_over_start_graph_from_root(tmp_path):
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-root"}}
+    saver.put(config, _checkpoint("c1"), {}, {})
+
+    root = await saver.aget_tuple(
+        {"configurable": {"thread_id": "t-root", "start_graph_from_root": True}}
+    )
+    explicit = await saver.aget_tuple(
+        {
+            "configurable": {
+                "thread_id": "t-root",
+                "checkpoint_id": "c1",
+                "start_graph_from_root": True,
+            }
+        }
+    )
+
+    assert root is None
+    assert explicit is not None
+    assert explicit.checkpoint["id"] == "c1"
+
+
 async def test_delete_thread(tmp_path):
     saver = _saver(tmp_path)
     config = {"configurable": {"thread_id": "t6"}}

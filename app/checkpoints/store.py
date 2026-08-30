@@ -319,6 +319,26 @@ class CodeCheckpointStore:
             _atomic_write_json(self._manifest_path(conversation_id, checkpoint_id), checkpoint.to_dict())
             return checkpoint
 
+    async def bind_graph_run(
+        self,
+        conversation_id: uuid.UUID | str,
+        checkpoint_id: uuid.UUID | str,
+        *,
+        graph_parent_checkpoint_id: str | None,
+        graph_parent_bound: bool,
+        graph_output_checkpoint_id: str | None,
+    ) -> CodeCheckpoint:
+        async with self._lock(conversation_id):
+            checkpoint = await self._load_manifest_unlocked(conversation_id, checkpoint_id)
+            checkpoint.graph_parent_checkpoint_id = graph_parent_checkpoint_id
+            checkpoint.graph_parent_bound = graph_parent_bound
+            checkpoint.graph_output_checkpoint_id = graph_output_checkpoint_id
+            # Keep the legacy field populated only for readers that understand the old name;
+            # its value is the graph input node, never the code checkpoint UUID.
+            checkpoint.graph_input_checkpoint_id = graph_parent_checkpoint_id
+            _atomic_write_json(self._manifest_path(conversation_id, checkpoint_id), checkpoint.to_dict())
+            return checkpoint
+
     async def seal_checkpoint(
         self, conversation_id: uuid.UUID | str, checkpoint_id: uuid.UUID | str, *, interrupted: bool = False
     ) -> CodeCheckpoint:

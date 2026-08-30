@@ -7,6 +7,7 @@ M2：require_confirm 工具 → interrupt 事件（自动建 Task 承接）→ P
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -95,6 +96,8 @@ def _graph_config(
     force_image_context: bool = False,
     document_context: PreparedDocumentContext | None = None,
     checkpoint_id: uuid.UUID | None = None,
+    graph_parent_checkpoint_id: str | None = None,
+    start_graph_from_root: bool = False,
 ) -> dict[str, Any]:
     cfg: dict[str, Any] = {
         "configurable": {
@@ -105,6 +108,10 @@ def _graph_config(
     }
     if checkpoint_id is not None:
         cfg["configurable"]["code_checkpoint_id"] = str(checkpoint_id)
+    if graph_parent_checkpoint_id is not None:
+        cfg["configurable"]["checkpoint_id"] = str(graph_parent_checkpoint_id)
+    elif start_graph_from_root:
+        cfg["configurable"]["start_graph_from_root"] = True
     if model_override is not None:
         cfg["configurable"]["model"] = model_override
     # 多模态：图片 b64 载荷只进 configurable（不落 checkpoint）。新路径使用共享准备结果；
@@ -201,6 +208,29 @@ async def chat_stream_events(
     )
     user_message_id = uuid.uuid4()
     checkpoint_id = uuid.uuid4()
+    graph_parent_checkpoint_id: str | None = None
+    graph_parent_bound = False
+    start_graph_from_root = False
+    graph_checkpointer = getattr(graph, "checkpointer", None)
+    if conversation.graph_cursor_initialized:
+        graph_parent_checkpoint_id = conversation.active_graph_checkpoint_id
+        graph_parent_bound = True
+        start_graph_from_root = graph_parent_checkpoint_id is None
+    else:
+        graph_tuple_resolver = getattr(graph_checkpointer, "aget_tuple", None)
+        if graph_tuple_resolver is not None:
+            graph_tuple = await graph_tuple_resolver(
+                {"configurable": {"thread_id": str(conversation.id)}}
+            )
+            if graph_tuple is not None:
+                graph_parent_checkpoint_id = str(
+                    (graph_tuple.config.get("configurable") or {}).get("checkpoint_id")
+                    or graph_tuple.checkpoint.get("id")
+                )
+                graph_parent_bound = True
+        elif conversation.history_revision == 0:
+            # A brand-new conversation without a compiled checkpointer is an explicit graph root.
+            graph_parent_bound = True
     previous_head = conversation.active_message_head_id
     if previous_head is None:
         existing_messages = await msg_repo.list_by_conversation(conversation.id, limit=None, offset=0)
@@ -221,6 +251,8 @@ async def chat_stream_events(
         workspace_identity=workspace_identity,
         anchor_message_head_id=previous_head,
         checkpoint_id=checkpoint_id,
+        graph_parent_checkpoint_id=graph_parent_checkpoint_id,
+        graph_parent_bound=graph_parent_bound,
     )
 
     async def _persist_round(round_msg: dict[str, Any]) -> None:
@@ -320,10 +352,30 @@ async def chat_stream_events(
         image_context=prepared_images,
         document_context=prepared_documents,
         checkpoint_id=checkpoint.id,
+        graph_parent_checkpoint_id=graph_parent_checkpoint_id,
+        start_graph_from_root=start_graph_from_root,
     )
+
+    async def _bind_graph_run() -> None:
+        resolver = getattr(graph_checkpointer, "aget_run_bounds", None)
+        if resolver is None:
+            return
+        parent_id, output_id = await resolver(
+            {"configurable": {"thread_id": str(conversation.id)}}, str(checkpoint.id)
+        )
+        await checkpoint_service.store.bind_graph_run(
+            conversation.id,
+            checkpoint.id,
+            graph_parent_checkpoint_id=parent_id,
+            graph_parent_bound=True,
+            graph_output_checkpoint_id=output_id,
+        )
+        conversation.active_graph_checkpoint_id = output_id
+        conversation.graph_cursor_initialized = True
 
     async def on_interrupt(value: dict[str, Any]) -> str:
         nonlocal task
+        await _bind_graph_run()
         if task is not None:
             await TaskService().set_waiting_confirm(
                 db,
@@ -368,6 +420,7 @@ async def chat_stream_events(
                 # 取消与 done 竞态：取消获胜时禁止补 assistant 消息/覆盖任务终态。
                 await checkpoint_service.seal_checkpoint(conversation.id, checkpoint.id, interrupted=True)
                 return {}
+        await _bind_graph_run()
         fm = final_state.get("final_message", {}) or {}
         totals = final_state.get("totals") or {}
         # 最终轮推理（最后一条 AI 消息的 reasoning_content）
@@ -392,7 +445,7 @@ async def chat_stream_events(
         )
         conversation.active_message_head_id = final_row.id
         conversation.active_code_node_id = checkpoint.id
-        conversation.active_graph_checkpoint_id = str(checkpoint.id)
+        conversation.graph_cursor_initialized = True
         conversation.history_revision += 1
         for log in final_state.get("run_logs", []):
             await RunLogRepository(db).create(session_id=conversation.id, **log)
@@ -424,6 +477,8 @@ async def chat_stream_events(
 
     async def on_error(exc: Exception) -> None:
         await checkpoint_service.store.seal_checkpoint(conversation.id, checkpoint.id, interrupted=True)
+        with contextlib.suppress(Exception):
+            await _bind_graph_run()
         if task is None:
             return
         await db.rollback()
@@ -660,8 +715,33 @@ async def resume_stream_events(
         checkpoint_id=checkpoint_id,
     )
 
+    graph_checkpointer = getattr(graph, "checkpointer", None)
+
+    async def _bind_graph_run() -> None:
+        """Bind the real graph output for the code anchor, including resumed runs."""
+        if checkpoint_id is None:
+            return
+        resolver = getattr(graph_checkpointer, "aget_run_bounds", None)
+        if resolver is None:
+            return
+        parent_graph_id, output_graph_id = await resolver(
+            {"configurable": {"thread_id": str(thread_id)}}, str(checkpoint_id)
+        )
+        if conversation_id:
+            await checkpoint_service.store.bind_graph_run(
+                conversation_id,
+                checkpoint_id,
+                graph_parent_checkpoint_id=parent_graph_id,
+                graph_parent_bound=True,
+                graph_output_checkpoint_id=output_graph_id,
+            )
+            if conversation_row is not None:
+                conversation_row.active_graph_checkpoint_id = output_graph_id
+                conversation_row.graph_cursor_initialized = True
+
     async def on_interrupt(value: dict[str, Any]) -> str:
         # 二次中断：再建新 Task 承接（同一 thread 继续）
+        await _bind_graph_run()
         if recovery:
             await task_service.set_waiting_confirm(
                 db,
@@ -694,6 +774,7 @@ async def resume_stream_events(
         )
 
     async def on_final(final_state: dict[str, Any]) -> dict[str, Any]:
+        await _bind_graph_run()
         fm = final_state.get("final_message", {}) or {}
         totals = final_state.get("totals") or {}
         assistant_msg: Message | None = None
@@ -727,7 +808,6 @@ async def resume_stream_events(
             await ConversationRepository(db).touch_last_message(conversation_id)
             if checkpoint_id is not None and conversation_row is not None:
                 conversation_row.active_code_node_id = checkpoint_id
-                conversation_row.active_graph_checkpoint_id = str(checkpoint_id)
         # F10：重读任务行，避免覆盖并发取消（与 task_run 一致）
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status != "cancelled":
@@ -758,6 +838,8 @@ async def resume_stream_events(
         # F5：SSE 轨 resume 图级异常 → 任务置 failed（与 task_run 一致）
         # E1：on_final 落库失败会毒化 session → 先 rollback，防 set_failed 也失败
         await db.rollback()
+        with contextlib.suppress(Exception):
+            await _bind_graph_run()
         if checkpoint_id is not None and conversation_id:
             await checkpoint_service.store.seal_checkpoint(conversation_id, checkpoint_id, interrupted=True)
         updated = await TaskRepository(db).get_by_id(task.id)

@@ -25,6 +25,8 @@ class CheckpointService:
         workspace_identity: str,
         anchor_message_head_id: uuid.UUID,
         checkpoint_id: uuid.UUID | None = None,
+        graph_parent_checkpoint_id: str | None = None,
+        graph_parent_bound: bool = False,
     ) -> CodeCheckpoint:
         checkpoint = CodeCheckpoint(
             id=checkpoint_id or uuid.uuid4(),
@@ -32,6 +34,8 @@ class CheckpointService:
             user_message_id=user_message_id,
             workspace_identity=workspace_identity,
             anchor_message_head_id=anchor_message_head_id,
+            graph_parent_checkpoint_id=graph_parent_checkpoint_id,
+            graph_parent_bound=graph_parent_bound,
         )
         return await self.store.create_checkpoint(checkpoint)
 

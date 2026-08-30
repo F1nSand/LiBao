@@ -103,6 +103,9 @@ class CodeCheckpoint:
     workspace_identity: str
     anchor_message_head_id: uuid.UUID | None
     graph_input_checkpoint_id: str | None = None
+    graph_parent_checkpoint_id: str | None = None
+    graph_parent_bound: bool = False
+    graph_output_checkpoint_id: str | None = None
     status: CheckpointStatus = "open"
     files: dict[str, FileMutationRecord] = field(default_factory=dict)
     created_at: datetime = field(default_factory=_utcnow)
@@ -119,6 +122,9 @@ class CodeCheckpoint:
                 str(self.anchor_message_head_id) if self.anchor_message_head_id is not None else None
             ),
             "graph_input_checkpoint_id": self.graph_input_checkpoint_id,
+            "graph_parent_checkpoint_id": self.graph_parent_checkpoint_id,
+            "graph_parent_bound": self.graph_parent_bound,
+            "graph_output_checkpoint_id": self.graph_output_checkpoint_id,
             "status": self.status,
             "files": {path: record.to_dict() for path, record in self.files.items()},
             "created_at": _dt(self.created_at),
@@ -148,6 +154,17 @@ class CodeCheckpoint:
                 ),
                 graph_input_checkpoint_id=(
                     str(data["graph_input_checkpoint_id"]) if data.get("graph_input_checkpoint_id") else None
+                ),
+                graph_parent_checkpoint_id=(
+                    str(data["graph_parent_checkpoint_id"])
+                    if data.get("graph_parent_checkpoint_id")
+                    else None
+                ),
+                graph_parent_bound=bool(data.get("graph_parent_bound", False)),
+                graph_output_checkpoint_id=(
+                    str(data["graph_output_checkpoint_id"])
+                    if data.get("graph_output_checkpoint_id")
+                    else None
                 ),
                 status=status,
                 files=files,
@@ -200,6 +217,7 @@ class ConversationCursor:
     active_code_node_id: uuid.UUID | None
     history_revision: int
     message_cursor_initialized: bool = False
+    graph_cursor_initialized: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -208,6 +226,7 @@ class ConversationCursor:
             "active_code_node_id": str(self.active_code_node_id) if self.active_code_node_id else None,
             "history_revision": self.history_revision,
             "message_cursor_initialized": self.message_cursor_initialized,
+            "graph_cursor_initialized": self.graph_cursor_initialized,
         }
 
     @classmethod
@@ -224,6 +243,7 @@ class ConversationCursor:
             active_code_node_id=parse_uuid(data.get("active_code_node_id")),
             history_revision=int(data.get("history_revision", 0)),
             message_cursor_initialized=bool(data.get("message_cursor_initialized", False)),
+            graph_cursor_initialized=bool(data.get("graph_cursor_initialized", False)),
         )
 
 
