@@ -106,6 +106,18 @@ class CheckpointRestoreService:
         root: Path,
     ) -> tuple[list[dict[str, Any]], dict[str, FileVersionRef]]:
         checkpoints = await self.checkpoints.store.list_checkpoints(conversation_id)
+        # A previous rollback is itself an AI-owned workspace transition.  When the
+        # user switches back to a later node, the current bytes may therefore differ
+        # from that node's post-image without being a manual edit.  Keep the hashes
+        # produced by completed rollback operations as trusted transition states;
+        # all other unexpected hashes remain conflicts and are skipped.
+        known_rollback_hashes: dict[str, set[str | None]] = {}
+        for operation in await self.checkpoints.store.list_operations(conversation_id):
+            if operation.status not in {"completed", "partial"}:
+                continue
+            for result in operation.file_results:
+                if result.action in {"restored", "deleted"}:
+                    known_rollback_hashes.setdefault(result.path, set()).add(result.target_sha256)
         try:
             target_index = next(i for i, item in enumerate(checkpoints) if item.id == target.id)
         except StopIteration as exc:
@@ -124,7 +136,12 @@ class CheckpointRestoreService:
             current = target_path.read_bytes() if target_path.is_file() else None
             current_sha = _sha256(current)
             expected_sha = expected.get(path)
-            conflict = (current_sha != expected_sha) if expected_exists.get(path, False) else current is not None
+            trusted_transition = current_sha in known_rollback_hashes.get(path, set())
+            conflict = (
+                False
+                if trusted_transition
+                else ((current_sha != expected_sha) if expected_exists.get(path, False) else current is not None)
+            )
             action = "skip_conflict" if conflict else ("delete" if not target_ref.exists else "restore")
             item: dict[str, Any] = {
                 "path": path,

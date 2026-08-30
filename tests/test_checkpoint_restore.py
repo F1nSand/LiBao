@@ -115,3 +115,57 @@ async def test_manual_conflict_is_skipped(tmp_path: Path):
     assert result["status"] == "partial"
     assert result["skipped_conflicts"] == ["note.txt"]
     assert target.read_text(encoding="utf-8") == "manual edit"
+
+
+@pytest.mark.asyncio
+async def test_rollback_can_switch_back_to_a_later_checkpoint(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation_id = uuid.uuid4()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "note.txt"
+
+    async def mutate_before_turn(before: bytes, after: bytes) -> object:
+        target.write_bytes(before)
+        checkpoint = await checkpoint_service.create_anchor(
+            conversation_id=conversation_id,
+            user_message_id=uuid.uuid4(),
+            workspace_identity=f"session:{workspace}",
+            anchor_message_head_id=None,
+        )
+        await checkpoint_store.prepare_file(
+            conversation_id,
+            checkpoint.id,
+            "note.txt",
+            before,
+            tool_call_id=str(uuid.uuid4()),
+            planned_after_sha256=hashlib.sha256(after).hexdigest(),
+        )
+        target.write_bytes(after)
+        await checkpoint_store.finalize_file(
+            conversation_id,
+            checkpoint.id,
+            "note.txt",
+            final_after_sha256=hashlib.sha256(after).hexdigest(),
+        )
+        return checkpoint
+
+    await mutate_before_turn(b"a", b"b")
+    checkpoint_b = await mutate_before_turn(b"b", b"c")
+    checkpoint_c = await mutate_before_turn(b"c", b"d")
+
+    service = CheckpointRestoreService(checkpoint_service)
+    conversation = _conversation(conversation_id)
+    first_preview = await service.preview_checkpoint(
+        _Db(), conversation, target_checkpoint_id=checkpoint_b.id, mode="code_only", workspace_root=str(workspace)
+    )
+    await service.execute_preview(_Db(), conversation, uuid.UUID(first_preview["preview_id"]))
+    assert target.read_bytes() == b"b"
+
+    second_preview = await service.preview_checkpoint(
+        _Db(), conversation, target_checkpoint_id=checkpoint_c.id, mode="code_only", workspace_root=str(workspace)
+    )
+    assert second_preview["files"][0]["conflict"] is False
+    await service.execute_preview(_Db(), conversation, uuid.UUID(second_preview["preview_id"]))
+    assert target.read_bytes() == b"c"
