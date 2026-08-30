@@ -453,6 +453,135 @@ async def test_code_modes_still_reject_workspace_identity_mismatch(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_execute_rejects_mode_mismatch_without_side_effects(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation_id = uuid.uuid4()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "note.txt"
+    target.write_bytes(b"after")
+    checkpoint = await checkpoint_service.create_anchor(
+        conversation_id=conversation_id,
+        user_message_id=uuid.uuid4(),
+        workspace_identity=f"session:{workspace}",
+        anchor_message_head_id=None,
+    )
+    await checkpoint_store.prepare_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        b"before",
+        tool_call_id="call",
+        planned_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    await checkpoint_store.finalize_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        final_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    conversation = _conversation(conversation_id)
+    service = CheckpointRestoreService(checkpoint_service)
+    request_id = uuid.uuid4()
+    preview = await service.preview_checkpoint(
+        _Db(),
+        conversation,
+        target_checkpoint_id=checkpoint.id,
+        mode="code_only",
+        workspace_root=str(workspace),
+        client_request_id=request_id,
+    )
+    before_cursor = _cursor_for_test(conversation)
+
+    with pytest.raises(AppError) as exc:
+        await service.execute_preview(
+            _Db(),
+            conversation,
+            uuid.UUID(preview["preview_id"]),
+            expected_mode="both",
+            client_request_id=request_id,
+        )
+
+    assert exc.value.code == 40936
+    assert target.read_bytes() == b"after"
+    assert _cursor_for_test(conversation) == before_cursor
+    assert await checkpoint_store.list_operations(conversation_id) == []
+
+    with pytest.raises(AppError) as request_exc:
+        await service.execute_preview(
+            _Db(),
+            conversation,
+            uuid.UUID(preview["preview_id"]),
+            expected_mode="code_only",
+            client_request_id=uuid.uuid4(),
+        )
+    assert request_exc.value.code == 40936
+
+
+@pytest.mark.asyncio
+async def test_execute_uses_confirmed_file_plan_and_is_idempotent(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation_id = uuid.uuid4()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    note = workspace / "note.txt"
+    extra = workspace / "extra.txt"
+    note.write_bytes(b"after")
+    extra.write_bytes(b"extra-after")
+    checkpoint = await checkpoint_service.create_anchor(
+        conversation_id=conversation_id,
+        user_message_id=uuid.uuid4(),
+        workspace_identity=f"session:{workspace}",
+        anchor_message_head_id=None,
+    )
+    await checkpoint_store.prepare_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        b"before",
+        tool_call_id="call-note",
+        planned_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    await checkpoint_store.finalize_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        final_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    service = CheckpointRestoreService(checkpoint_service)
+    conversation = _conversation(conversation_id)
+    preview = await service.preview_checkpoint(
+        _Db(), conversation, target_checkpoint_id=checkpoint.id, mode="code_only", workspace_root=str(workspace)
+    )
+    # Simulate a late manifest update after the user confirmed the preview.  It
+    # must not expand the already-confirmed restore plan.
+    await checkpoint_store.prepare_file(
+        conversation_id,
+        checkpoint.id,
+        "extra.txt",
+        b"extra-before",
+        tool_call_id="call-extra",
+        planned_after_sha256=hashlib.sha256(b"extra-after").hexdigest(),
+    )
+    await checkpoint_store.finalize_file(
+        conversation_id,
+        checkpoint.id,
+        "extra.txt",
+        final_after_sha256=hashlib.sha256(b"extra-after").hexdigest(),
+    )
+
+    first = await service.execute_preview(_Db(), conversation, uuid.UUID(preview["preview_id"]))
+    second = await service.execute_preview(_Db(), conversation, uuid.UUID(preview["preview_id"]))
+
+    assert note.read_bytes() == b"before"
+    assert extra.read_bytes() == b"extra-after"
+    assert second == first
+    assert len(await checkpoint_store.list_operations(conversation_id)) == 1
+
+
+@pytest.mark.asyncio
 async def test_preview_cannot_be_executed_by_another_conversation(tmp_path: Path):
     checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
     checkpoint_service = CheckpointService(checkpoint_store)

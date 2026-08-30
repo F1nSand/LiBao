@@ -22,5 +22,6 @@ class Conversation(Row):
     active_message_head_id: uuid.UUID | None = None
     message_cursor_initialized: bool = False
     active_graph_checkpoint_id: str | None = None
+    graph_cursor_initialized: bool = False
     active_code_node_id: uuid.UUID | None = None
     history_revision: int = 0

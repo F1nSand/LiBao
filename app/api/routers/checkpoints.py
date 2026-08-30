@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.api.deps import get_current_user, get_db
 from app.api.envelope import ok
@@ -81,20 +81,19 @@ async def list_checkpoints(
 async def create_restore_preview(
     conversation_id: uuid.UUID,
     req: RestorePreviewRequest,
+    request: Request = None,  # type: ignore[assignment]
     user: User = Depends(get_current_user),
     db: Any = Depends(get_db),
 ):
     conversation = await ConversationService().get_owned(db, conversation_id, user.id)
-    target_id = req.target_checkpoint_id or req.target_id
-    if target_id is None:
-        from app.core.errors import AppError
-
-        raise AppError(40031, "必须提供 target_checkpoint_id 或 target_id")
+    resolver = getattr(getattr(request, "app", None), "state", None)
+    graph_checkpoint_resolver = getattr(resolver, "checkpointer", None)
+    service = CheckpointRestoreService(graph_checkpoint_resolver=graph_checkpoint_resolver)
     if req.target_type == "rollback_operation_before":
         root, _ = await _workspace_context(db, user, conversation)
         return ok(
-            await CheckpointRestoreService().preview_operation_before(
-                db, conversation, target_id, root
+            await service.preview_operation_before(
+                db, conversation, req.target_id, root, client_request_id=req.client_request_id
             )
         )
     if req.mode == "conversation_only":
@@ -102,13 +101,14 @@ async def create_restore_preview(
     else:
         root, workspace_id = await _workspace_context(db, user, conversation)
     return ok(
-        await CheckpointRestoreService().preview_checkpoint(
+        await service.preview_checkpoint(
             db,
             conversation,
-            target_checkpoint_id=target_id,
+            target_checkpoint_id=req.target_checkpoint_id,
             mode=req.mode,
             workspace_root=root,
             workspace_id=workspace_id,
+            client_request_id=req.client_request_id,
         )
     )
 
@@ -117,8 +117,19 @@ async def create_restore_preview(
 async def execute_restore(
     conversation_id: uuid.UUID,
     req: RestoreExecuteRequest,
+    request: Request = None,  # type: ignore[assignment]
     user: User = Depends(get_current_user),
     db: Any = Depends(get_db),
 ):
     conversation = await ConversationService().get_owned(db, conversation_id, user.id)
-    return ok(await CheckpointRestoreService().execute_preview(db, conversation, req.preview_id))
+    resolver = getattr(getattr(request, "app", None), "state", None)
+    graph_checkpoint_resolver = getattr(resolver, "checkpointer", None)
+    return ok(
+        await CheckpointRestoreService(graph_checkpoint_resolver=graph_checkpoint_resolver).execute_preview(
+            db,
+            conversation,
+            req.preview_id,
+            expected_mode=req.expected_mode,
+            client_request_id=req.client_request_id,
+        )
+    )

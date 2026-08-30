@@ -5,7 +5,7 @@ import uuid
 import pytest
 
 from app.api.routers import checkpoints
-from app.api.schemas.checkpoints import RestorePreviewRequest
+from app.api.schemas.checkpoints import CheckpointRestorePreviewRequest
 from app.storage.models.conversation import Conversation
 from app.storage.models.user import User
 
@@ -28,6 +28,9 @@ async def test_conversation_only_preview_succeeds_when_workspace_is_missing(monk
         raise AssertionError("conversation_only must not resolve a workspace")
 
     class FakeRestoreService:
+        def __init__(self, **kwargs):
+            assert "graph_checkpoint_resolver" in kwargs
+
         async def preview_checkpoint(self, db, conversation, **kwargs):
             assert kwargs["mode"] == "conversation_only"
             assert kwargs["workspace_root"] is None
@@ -40,7 +43,12 @@ async def test_conversation_only_preview_succeeds_when_workspace_is_missing(monk
 
     response = await checkpoints.create_restore_preview(
         conversation.id,
-        RestorePreviewRequest(target_checkpoint_id=uuid.uuid4(), mode="conversation_only"),
+        CheckpointRestorePreviewRequest(
+            target_type="checkpoint",
+            target_checkpoint_id=uuid.uuid4(),
+            mode="conversation_only",
+            client_request_id=uuid.uuid4(),
+        ),
         user=user,
         db=object(),
     )

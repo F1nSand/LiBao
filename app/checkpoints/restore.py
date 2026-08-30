@@ -40,6 +40,13 @@ class RestoreConflict(AppError):
 
 _PREVIEWS: dict[str, dict[str, Any]] = {}
 _PREVIEW_TTL = timedelta(minutes=10)
+_RESTORE_LOCKS: dict[str, Any] = {}
+
+
+def _restore_lock(conversation_id: uuid.UUID) -> Any:
+    import asyncio
+
+    return _RESTORE_LOCKS.setdefault(str(conversation_id), asyncio.Lock())
 
 
 def _sha256(data: bytes | None) -> str | None:
@@ -78,12 +85,13 @@ def _write_atomic(path: Path, payload: bytes) -> None:
 
 
 class CheckpointRestoreService:
-    def __init__(self, checkpoint_service: Any | None = None) -> None:
+    def __init__(self, checkpoint_service: Any | None = None, graph_checkpoint_resolver: Any | None = None) -> None:
         if checkpoint_service is not None:
             self.checkpoints = checkpoint_service
         else:
             settings = get_settings()
             self.checkpoints = get_checkpoint_service(settings.agent_data_dir, settings.checkpoint_retention_days)
+        self.graph_checkpoint_resolver = graph_checkpoint_resolver
 
     async def _active_tasks(self, db: Any, conversation_id: uuid.UUID) -> list[Any]:
         tasks = await TaskRepository(db).table.list(limit=None)
@@ -285,6 +293,7 @@ class CheckpointRestoreService:
         mode: RollbackMode,
         workspace_root: str | None,
         workspace_id: str | None = None,
+        client_request_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         if mode not in {"code_only", "conversation_only", "both"}:
             raise AppError(40031, "不支持的回滚模式")
@@ -305,6 +314,7 @@ class CheckpointRestoreService:
         expires_at = datetime.now(UTC) + _PREVIEW_TTL
         payload = {
             "preview_id": str(preview_id),
+            "client_request_id": str(client_request_id or uuid.uuid4()),
             "target": {
                 "type": "checkpoint",
                 "id": str(target.id),
@@ -315,6 +325,9 @@ class CheckpointRestoreService:
             "target_checkpoint_id": str(target.id),
             "expires_at": expires_at.isoformat(),
             "conversation_revision": conversation.history_revision,
+            "active_code_node_id": (
+                str(conversation.active_code_node_id) if conversation.active_code_node_id else None
+            ),
             "conversation": conversation_plan,
             "files": files if mode in {"code_only", "both"} else [],
             "warnings": [
@@ -331,22 +344,60 @@ class CheckpointRestoreService:
         }
         return payload
 
-    async def execute_preview(self, db: Any, conversation: Conversation, preview_id: uuid.UUID) -> dict[str, Any]:
+    async def execute_preview(
+        self,
+        db: Any,
+        conversation: Conversation,
+        preview_id: uuid.UUID,
+        *,
+        expected_mode: RollbackMode | None = None,
+        client_request_id: uuid.UUID | None = None,
+    ) -> dict[str, Any]:
+        async with _restore_lock(conversation.id):
+            return await self._execute_preview_unlocked(
+                db,
+                conversation,
+                preview_id,
+                expected_mode=expected_mode,
+                client_request_id=client_request_id,
+            )
+
+    async def _execute_preview_unlocked(
+        self,
+        db: Any,
+        conversation: Conversation,
+        preview_id: uuid.UUID,
+        *,
+        expected_mode: RollbackMode | None = None,
+        client_request_id: uuid.UUID | None = None,
+    ) -> dict[str, Any]:
         record = _PREVIEWS.get(str(preview_id))
         if record is None:
             raise AppError(40933, "preview 不存在或已过期，请重新预览")
+        record_mode = record.get("mode")
+        if expected_mode is not None and expected_mode != record_mode:
+            raise AppError(40936, "确认模式与预览不一致，请重新预览")
+        record_request_id = record.get("client_request_id")
+        if client_request_id is not None and record_request_id != str(client_request_id):
+            raise AppError(40936, "确认请求与预览不一致，请重新预览")
+        if record.get("conversation_id") != str(conversation.id):
+            raise AppError(40935, "preview 与当前会话不匹配")
+        if record.get("result") is not None:
+            return record["result"]
         expires_at = datetime.fromisoformat(record["expires_at"])
         if expires_at < datetime.now(UTC):
             _PREVIEWS.pop(str(preview_id), None)
             raise AppError(40933, "preview 不存在或已过期，请重新预览")
-        if record.get("conversation_id") != str(conversation.id):
-            raise AppError(40935, "preview 与当前会话不匹配")
         if record.get("conversation_revision") != conversation.history_revision:
             raise AppError(40934, "会话已发生变化，请重新预览")
+        expected_code_node = record.get("active_code_node_id")
+        current_code_node = str(conversation.active_code_node_id) if conversation.active_code_node_id else None
+        if expected_code_node != current_code_node:
+            raise AppError(40934, "会话代码节点已变化，请重新预览")
         await self._assert_idle(db, conversation)
         if record.get("kind") == "operation_before":
             return await self._execute_operation_preview(db, conversation, record, preview_id)
-        mode = record["mode"]
+        mode = record_mode
         root: Path | None = None
         if mode in {"code_only", "both"}:
             workspace_root = record.get("workspace_root")
@@ -361,7 +412,8 @@ class CheckpointRestoreService:
         target_refs: dict[str, FileVersionRef] = {}
         files: list[dict[str, Any]] = []
         if root is not None:
-            files, target_refs = await self._file_plan(conversation.id, target, root)
+            files = list(record.get("files") or [])
+            target_refs = dict(record.get("target_refs") or {})
         before_cursor = _cursor(conversation)
         undo_files: dict[str, FileVersionRef] = {}
         results: list[FileRestoreResult] = []
@@ -430,8 +482,7 @@ class CheckpointRestoreService:
         )
         await self.checkpoints.store.create_operation(operation)
         await db.commit()
-        _PREVIEWS.pop(str(preview_id), None)
-        return {
+        result = {
             "operation_id": str(operation.id),
             "status": operation.status,
             "restored_files": restored,
@@ -444,9 +495,19 @@ class CheckpointRestoreService:
             "undo_available": True,
             "history_revision": conversation.history_revision,
         }
+        result["preview_id"] = str(preview_id)
+        result["client_request_id"] = record.get("client_request_id")
+        record["result"] = result
+        return result
 
     async def preview_operation_before(
-        self, db: Any, conversation: Conversation, operation_id: uuid.UUID, workspace_root: str
+        self,
+        db: Any,
+        conversation: Conversation,
+        operation_id: uuid.UUID,
+        workspace_root: str,
+        *,
+        client_request_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         await self._assert_idle(db, conversation)
         operation = await self.checkpoints.store.read_operation(conversation.id, operation_id)
@@ -477,6 +538,7 @@ class CheckpointRestoreService:
         preview_id = uuid.uuid4()
         payload = {
             "preview_id": str(preview_id),
+            "client_request_id": str(client_request_id or uuid.uuid4()),
             "target": {"type": "rollback_operation_before", "id": str(operation.id), "message_id": None},
             "mode": operation.mode,
             "target_message_id": (
@@ -485,6 +547,9 @@ class CheckpointRestoreService:
                 else None
             ),
             "conversation_revision": conversation.history_revision,
+            "active_code_node_id": (
+                str(conversation.active_code_node_id) if conversation.active_code_node_id else None
+            ),
             "expires_at": (datetime.now(UTC) + _PREVIEW_TTL).isoformat(),
             "conversation": {
                 "action": "restore_cursor",
@@ -579,8 +644,7 @@ class CheckpointRestoreService:
         )
         await self.checkpoints.store.create_operation(inverse)
         await db.commit()
-        _PREVIEWS.pop(str(preview_id), None)
-        return {
+        result = {
             "operation_id": str(inverse.id),
             "status": inverse.status,
             "restored_files": restored,
@@ -601,3 +665,7 @@ class CheckpointRestoreService:
             "undo_available": True,
             "history_revision": conversation.history_revision,
         }
+        result["preview_id"] = str(preview_id)
+        result["client_request_id"] = record.get("client_request_id")
+        record["result"] = result
+        return result
