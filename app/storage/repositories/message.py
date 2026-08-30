@@ -32,7 +32,13 @@ class MessageRepository:
         return rows[:limit] if limit is not None else rows
 
     async def list_active(
-        self, conversation_id: uuid.UUID, head_id: uuid.UUID | None, *, limit: int = 500, offset: int = 0
+        self,
+        conversation_id: uuid.UUID,
+        head_id: uuid.UUID | None,
+        *,
+        cursor_initialized: bool = False,
+        limit: int = 500,
+        offset: int = 0,
     ) -> list[Message]:
         """Return the active history-parent chain, hiding detached future branches.
 
@@ -40,6 +46,8 @@ class MessageRepository:
         this deliberately falls back to the legacy append-only list.
         """
         rows = await self.list_by_conversation(conversation_id, limit=None, offset=0)
+        if head_id is None and cursor_initialized:
+            return []
         if head_id is None:
             return rows[offset : offset + limit] if limit is not None else rows[offset:]
         by_id = {row.id: row for row in rows}
@@ -60,8 +68,14 @@ class MessageRepository:
         records = await self.store.jsonl_list(self._rel_path(conversation_id))
         return sum(1 for r in records if not r.get("deleted_at"))
 
-    async def count_active(self, conversation_id: uuid.UUID, head_id: uuid.UUID | None) -> int:
-        return len(await self.list_active(conversation_id, head_id, limit=None, offset=0))
+    async def count_active(
+        self, conversation_id: uuid.UUID, head_id: uuid.UUID | None, *, cursor_initialized: bool = False
+    ) -> int:
+        return len(
+            await self.list_active(
+                conversation_id, head_id, cursor_initialized=cursor_initialized, limit=None, offset=0
+            )
+        )
 
     async def create(
         self,

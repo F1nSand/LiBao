@@ -65,10 +65,15 @@ class ConversationService:
         msgs = await repo.list_active(
             conversation.id,
             conversation.active_message_head_id,
+            cursor_initialized=conversation.message_cursor_initialized,
             limit=page_size,
             offset=(page - 1) * page_size,
         )
-        total = await repo.count_active(conversation.id, conversation.active_message_head_id)
+        total = await repo.count_active(
+            conversation.id,
+            conversation.active_message_head_id,
+            cursor_initialized=conversation.message_cursor_initialized,
+        )
         from app.checkpoints.runtime import get_checkpoint_service
         from app.core.config import get_settings
 
@@ -104,7 +109,11 @@ class ConversationService:
         before_seq 加载更早一页；has_more 表示还有更早。
         """
         msgs = await MessageRepository(db).list_active(
-            conversation.id, conversation.active_message_head_id, limit=10000, offset=0
+            conversation.id,
+            conversation.active_message_head_id,
+            cursor_initialized=conversation.message_cursor_initialized,
+            limit=10000,
+            offset=0,
         )
         nodes = [serialize_trajectory_node(m, seq) for seq, m in enumerate(msgs, 1)]
         candidates = [n for n in nodes if n["seq"] < before_seq] if before_seq is not None else nodes

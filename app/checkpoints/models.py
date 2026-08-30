@@ -199,6 +199,7 @@ class ConversationCursor:
     active_graph_checkpoint_id: str | None
     active_code_node_id: uuid.UUID | None
     history_revision: int
+    message_cursor_initialized: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -206,6 +207,7 @@ class ConversationCursor:
             "active_graph_checkpoint_id": self.active_graph_checkpoint_id,
             "active_code_node_id": str(self.active_code_node_id) if self.active_code_node_id else None,
             "history_revision": self.history_revision,
+            "message_cursor_initialized": self.message_cursor_initialized,
         }
 
     @classmethod
@@ -221,6 +223,7 @@ class ConversationCursor:
             active_graph_checkpoint_id=data.get("active_graph_checkpoint_id"),
             active_code_node_id=parse_uuid(data.get("active_code_node_id")),
             history_revision=int(data.get("history_revision", 0)),
+            message_cursor_initialized=bool(data.get("message_cursor_initialized", False)),
         )
 
 

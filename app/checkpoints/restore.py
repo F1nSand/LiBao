@@ -47,6 +47,7 @@ def _sha256(data: bytes | None) -> str | None:
 def _cursor(conversation: Conversation) -> ConversationCursor:
     return ConversationCursor(
         active_message_head_id=conversation.active_message_head_id,
+        message_cursor_initialized=conversation.message_cursor_initialized,
         active_graph_checkpoint_id=conversation.active_graph_checkpoint_id,
         active_code_node_id=conversation.active_code_node_id,
         history_revision=conversation.history_revision,
@@ -200,7 +201,11 @@ class CheckpointRestoreService:
                 raise AppError(40932, "checkpoint 与当前工作区不匹配")
             files, target_refs = await self._file_plan(conversation.id, target, Path(workspace_root))
         messages = await MessageRepository(db).list_active(
-            conversation.id, conversation.active_message_head_id, limit=None, offset=0
+            conversation.id,
+            conversation.active_message_head_id,
+            cursor_initialized=conversation.message_cursor_initialized,
+            limit=None,
+            offset=0,
         )
         try:
             target_position = next(i for i, message in enumerate(messages) if message.id == target.user_message_id)

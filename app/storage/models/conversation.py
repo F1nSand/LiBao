@@ -20,6 +20,7 @@ class Conversation(Row):
     # Claude Code-style active branch/cursor.  Old conversation rows deserialize
     # with these defaults, so enabling checkpoints is backward compatible.
     active_message_head_id: uuid.UUID | None = None
+    message_cursor_initialized: bool = False
     active_graph_checkpoint_id: str | None = None
     active_code_node_id: uuid.UUID | None = None
     history_revision: int = 0

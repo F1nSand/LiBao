@@ -281,6 +281,7 @@ async def chat_stream_events(
         await _backfill_attachments(db, [a["attachment_id"] for a in att_refs], conversation.id, user_msg.id)
     await ConversationRepository(db).touch_last_message(conversation.id)
     conversation.active_message_head_id = user_msg.id
+    conversation.message_cursor_initialized = True
     conversation.history_revision += 1
     # 标题兜底：默认标题会话（新建按钮/API 创建）在首条消息后自动用首句命名（与前端 truncate 同语义）
     if conversation.title == "新会话" and content.strip():
