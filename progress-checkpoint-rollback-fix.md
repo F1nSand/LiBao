@@ -9,7 +9,7 @@
 - [complete] Task 3：固化会话 workspace 绑定（commit `cbe0577`；绑定定向 3 passed，Ruff 通过）
 - [complete] Task 4：在首帧返回用户消息 checkpoint 锚点（commit `5c70ae1`；chat/interrupt/task-events 定向 21 passed，Ruff 通过）
 - [complete] Task 5：绑定 restore preview 所属会话（commit `87ec4e6`；restore 定向 7 passed，Ruff 通过）
-- [complete] Task 6：后端回归与交付门禁（最终文档/简化提交待归档）
+- [complete] Task 6：后端回归与交付门禁（commit `18eaa24`；计划、执行账本与简化收尾已归档）
 
 ## 验证记录
 
