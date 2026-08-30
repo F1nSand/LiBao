@@ -226,3 +226,104 @@ async def test_code_modes_still_reject_workspace_identity_mismatch(tmp_path: Pat
                 workspace_root=str(workspace),
             )
         assert exc.value.code == 40932
+
+
+@pytest.mark.asyncio
+async def test_preview_cannot_be_executed_by_another_conversation(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation_id = uuid.uuid4()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "note.txt"
+    checkpoint = await checkpoint_service.create_anchor(
+        conversation_id=conversation_id,
+        user_message_id=uuid.uuid4(),
+        workspace_identity=f"session:{workspace}",
+        anchor_message_head_id=None,
+    )
+    target.write_bytes(b"before")
+    await checkpoint_store.prepare_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        b"before",
+        tool_call_id="call",
+        planned_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    target.write_bytes(b"after")
+    await checkpoint_store.finalize_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        final_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    service = CheckpointRestoreService(checkpoint_service)
+    owner = _conversation(conversation_id)
+    preview = await service.preview_checkpoint(
+        _Db(), owner, target_checkpoint_id=checkpoint.id, mode="code_only", workspace_root=str(workspace)
+    )
+    other = _conversation(uuid.uuid4())
+    before_cursor = _cursor_for_test(other)
+
+    with pytest.raises(AppError) as exc:
+        await service.execute_preview(_Db(), other, uuid.UUID(preview["preview_id"]))
+
+    assert exc.value.code == 40935
+    assert target.read_bytes() == b"after"
+    assert _cursor_for_test(other) == before_cursor
+
+
+@pytest.mark.asyncio
+async def test_operation_before_preview_is_bound_to_owner_conversation(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation_id = uuid.uuid4()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "note.txt"
+    checkpoint = await checkpoint_service.create_anchor(
+        conversation_id=conversation_id,
+        user_message_id=uuid.uuid4(),
+        workspace_identity=f"session:{workspace}",
+        anchor_message_head_id=None,
+    )
+    target.write_bytes(b"before")
+    await checkpoint_store.prepare_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        b"before",
+        tool_call_id="call",
+        planned_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    target.write_bytes(b"after")
+    await checkpoint_store.finalize_file(
+        conversation_id,
+        checkpoint.id,
+        "note.txt",
+        final_after_sha256=hashlib.sha256(b"after").hexdigest(),
+    )
+    service = CheckpointRestoreService(checkpoint_service)
+    owner = _conversation(conversation_id)
+    first = await service.preview_checkpoint(
+        _Db(), owner, target_checkpoint_id=checkpoint.id, mode="code_only", workspace_root=str(workspace)
+    )
+    result = await service.execute_preview(_Db(), owner, uuid.UUID(first["preview_id"]))
+    before_preview = await service.preview_operation_before(
+        _Db(), owner, uuid.UUID(result["operation_id"]), str(workspace)
+    )
+
+    with pytest.raises(AppError) as exc:
+        await service.execute_preview(_Db(), _conversation(uuid.uuid4()), uuid.UUID(before_preview["preview_id"]))
+
+    assert exc.value.code == 40935
+
+
+def _cursor_for_test(conversation: Conversation) -> tuple[object, ...]:
+    return (
+        conversation.active_message_head_id,
+        conversation.active_graph_checkpoint_id,
+        conversation.active_code_node_id,
+        conversation.history_revision,
+    )

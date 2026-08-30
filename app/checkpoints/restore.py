@@ -248,7 +248,9 @@ class CheckpointRestoreService:
         if expires_at < datetime.now(UTC):
             _PREVIEWS.pop(str(preview_id), None)
             raise AppError(40933, "preview 不存在或已过期，请重新预览")
-        if record["conversation_revision"] != conversation.history_revision:
+        if record.get("conversation_id") != str(conversation.id):
+            raise AppError(40935, "preview 与当前会话不匹配")
+        if record.get("conversation_revision") != conversation.history_revision:
             raise AppError(40934, "会话已发生变化，请重新预览")
         await self._assert_idle(db, conversation)
         if record.get("kind") == "operation_before":
@@ -385,6 +387,7 @@ class CheckpointRestoreService:
                 if operation.before_cursor.active_message_head_id
                 else None
             ),
+            "conversation_revision": conversation.history_revision,
             "expires_at": (datetime.now(UTC) + _PREVIEW_TTL).isoformat(),
             "conversation": {"truncate_after_message_id": None, "hidden_message_count": 0},
             "files": files,
