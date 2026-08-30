@@ -17,3 +17,9 @@ class Conversation(Row):
     retention_days: int = 180
     last_message_at: datetime | None = None
     workspace_id: uuid.UUID | None = None  # 工作区对话（M7-B）
+    # Claude Code-style active branch/cursor.  Old conversation rows deserialize
+    # with these defaults, so enabling checkpoints is backward compatible.
+    active_message_head_id: uuid.UUID | None = None
+    active_graph_checkpoint_id: str | None = None
+    active_code_node_id: uuid.UUID | None = None
+    history_revision: int = 0

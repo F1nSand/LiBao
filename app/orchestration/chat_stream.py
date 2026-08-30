@@ -13,6 +13,8 @@ from typing import Any
 
 from langgraph.types import Command
 
+from app.checkpoints.runtime import get_checkpoint_service
+from app.core.config import get_settings
 from app.core.events import sse_emitter
 from app.orchestration.document_context import (
     PreparedDocumentContext,
@@ -90,6 +92,7 @@ def _graph_config(
     image_context: PreparedImageInput | None = None,
     force_image_context: bool = False,
     document_context: PreparedDocumentContext | None = None,
+    checkpoint_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     cfg: dict[str, Any] = {
         "configurable": {
@@ -98,6 +101,8 @@ def _graph_config(
             "assistant_msg_id": str(assistant_msg_id),
         }
     }
+    if checkpoint_id is not None:
+        cfg["configurable"]["code_checkpoint_id"] = str(checkpoint_id)
     if model_override is not None:
         cfg["configurable"]["model"] = model_override
     # 多模态：图片 b64 载荷只进 configurable（不落 checkpoint）。新路径使用共享准备结果；
@@ -189,6 +194,27 @@ async def chat_stream_events(
         await _clear_prestart_cancel()
         return
 
+    checkpoint_service = get_checkpoint_service(
+        get_settings().agent_data_dir, get_settings().checkpoint_retention_days
+    )
+    user_message_id = uuid.uuid4()
+    checkpoint_id = uuid.uuid4()
+    previous_head = conversation.active_message_head_id
+    if previous_head is None:
+        existing_messages = await msg_repo.list_by_conversation(conversation.id, limit=None, offset=0)
+        previous_head = existing_messages[-1].id if existing_messages else None
+    workspace_identity = (
+        f"{workspace.get('id') if workspace else 'session'}:"
+        f"{workspace.get('root_path') if workspace else ''}"
+    )
+    checkpoint = await checkpoint_service.create_anchor(
+        conversation_id=conversation.id,
+        user_message_id=user_message_id,
+        workspace_identity=workspace_identity,
+        anchor_message_head_id=previous_head,
+        checkpoint_id=checkpoint_id,
+    )
+
     async def _persist_round(round_msg: dict[str, Any]) -> None:
         """即时落库（docs 03 §3）：每轮工具结果齐后同步写该轮 Message（任务中 DB 已有已完成轮次）。"""
         row = await msg_repo.create(
@@ -199,10 +225,13 @@ async def chat_stream_events(
             tool_calls=round_msg["tool_calls"],
             token_usage=round_msg.get("token_usage"),
             parent_id=user_msg.id,
+            history_parent_id=conversation.active_message_head_id,
             trace_id=trace_id,
             round=round_msg["round"],
+            message_id=uuid.UUID(round_msg["id"]),
         )
-        row.id = uuid.UUID(round_msg["id"])
+        conversation.active_message_head_id = row.id
+        conversation.history_revision += 1
         await db.commit()
 
     # ---- ① 开头持久化用户消息（message-as-log，刷新可回放）----
@@ -229,25 +258,35 @@ async def chat_stream_events(
     att_refs = att_refs or []
     persisted_file_refs = [{"path": path} for path in (file_refs or [])]
     user_msg = await msg_repo.create(
+        message_id=user_message_id,
         conversation_id=conversation.id,
         role="user",
         content=content,
         attachments=att_refs,
         file_refs=persisted_file_refs,
         trace_id=trace_id,
+        checkpoint_id=checkpoint.id,
+        history_parent_id=previous_head,
     )
     await db.flush()  # uuid4 default 在 flush 应用——回填需 user_msg.id（C8 单事务内不 commit）
     if att_refs:
         await _backfill_attachments(db, [a["attachment_id"] for a in att_refs], conversation.id, user_msg.id)
     await ConversationRepository(db).touch_last_message(conversation.id)
+    conversation.active_message_head_id = user_msg.id
+    conversation.history_revision += 1
     # 标题兜底：默认标题会话（新建按钮/API 创建）在首条消息后自动用首句命名（与前端 truncate 同语义）
     if conversation.title == "新会话" and content.strip():
         conversation.title = _title_from(content)
     if task is not None:
-        task.input = {**(task.input or {}), "user_message_id": str(user_msg.id)}
+        task.input = {
+            **(task.input or {}),
+            "user_message_id": str(user_msg.id),
+            "checkpoint_id": str(checkpoint.id),
+        }
     await db.commit()
 
     if await _task_cancelled():
+        await checkpoint_service.seal_checkpoint(conversation.id, checkpoint.id, interrupted=True)
         await _clear_prestart_cancel()
         return
 
@@ -269,6 +308,7 @@ async def chat_stream_events(
         model_override=model_override,
         image_context=prepared_images,
         document_context=prepared_documents,
+        checkpoint_id=checkpoint.id,
     )
 
     async def on_interrupt(value: dict[str, Any]) -> str:
@@ -292,6 +332,8 @@ async def chat_stream_events(
                     "attachment_ids": list(attachments or []),
                     "file_refs": persisted_file_refs,
                     "document_refs": list(prepared_documents.refs),
+                    "user_message_id": str(user_msg.id),
+                    "checkpoint_id": str(checkpoint.id),
                 },
                 value=value,
                 conversation_id=conversation.id,
@@ -313,6 +355,7 @@ async def chat_stream_events(
             current_task = await TaskRepository(db).get_by_id(task.id)
             if current_task is None or current_task.status == "cancelled":
                 # 取消与 done 竞态：取消获胜时禁止补 assistant 消息/覆盖任务终态。
+                await checkpoint_service.seal_checkpoint(conversation.id, checkpoint.id, interrupted=True)
                 return {}
         fm = final_state.get("final_message", {}) or {}
         totals = final_state.get("totals") or {}
@@ -324,6 +367,7 @@ async def chat_stream_events(
             ((getattr(last_ai, "additional_kwargs", {}) or {}).get("reasoning_content") or "") if last_ai else ""
         )
         final_row = await msg_repo.create(
+            message_id=assistant_msg_id,
             conversation_id=conversation.id,
             role="assistant",
             content=fm.get("content", ""),
@@ -331,14 +375,19 @@ async def chat_stream_events(
             tool_calls=[],  # 最终轮本身无工具
             token_usage=fm.get("token_usage") or totals,
             parent_id=user_msg.id,
+            history_parent_id=conversation.active_message_head_id,
             trace_id=trace_id,
             round=len(round_sink) + 1,
         )
-        final_row.id = assistant_msg_id
+        conversation.active_message_head_id = final_row.id
+        conversation.active_code_node_id = checkpoint.id
+        conversation.active_graph_checkpoint_id = str(checkpoint.id)
+        conversation.history_revision += 1
         for log in final_state.get("run_logs", []):
             await RunLogRepository(db).create(session_id=conversation.id, **log)
         await ConversationRepository(db).touch_last_message(conversation.id)
         await db.commit()
+        await checkpoint_service.store.seal_checkpoint(conversation.id, checkpoint.id)
         # 主动记忆：流结束 spawn 后台提取分支（独立 LLM 推理，不阻塞 SSE；resume 续流不触发防重复评估）
         _spawn_memory_extract(final_state, user, trace_id, conversation.id, workspace)
         payload = _done_payload(assistant_msg_id, fm.get("token_usage") or totals, serialize_message(final_row))
@@ -363,6 +412,7 @@ async def chat_stream_events(
         return payload
 
     async def on_error(exc: Exception) -> None:
+        await checkpoint_service.store.seal_checkpoint(conversation.id, checkpoint.id, interrupted=True)
         if task is None:
             return
         await db.rollback()
@@ -475,6 +525,19 @@ async def resume_stream_events(
     )
     conversation_id = uuid.UUID(conversation_raw) if conversation_raw else None
     task_service = TaskService()
+    checkpoint_service = get_checkpoint_service(
+        get_settings().agent_data_dir, get_settings().checkpoint_retention_days
+    )
+    checkpoint_id: uuid.UUID | None = None
+    raw_checkpoint = (task.input or {}).get("checkpoint_id")
+    if raw_checkpoint:
+        try:
+            checkpoint_id = uuid.UUID(str(raw_checkpoint))
+        except (AttributeError, ValueError):
+            checkpoint_id = None
+    conversation_row = None
+    if conversation_id:
+        conversation_row = await ConversationRepository(db).table.get(conversation_id)
 
     # checkpoint 只保存轻量 document_ref；恢复时按 task input 重新读取当前轮正文，
     # 并以原 ref_id 绑定，避免 document_ref 原样落到模型 provider。
@@ -545,6 +608,7 @@ async def resume_stream_events(
         if not conversation_id:
             return
         row = await MessageRepository(db).create(
+            message_id=uuid.UUID(round_msg["id"]),
             conversation_id=conversation_id,
             role="assistant",
             content=round_msg["content"],
@@ -552,10 +616,13 @@ async def resume_stream_events(
             tool_calls=round_msg["tool_calls"],
             token_usage=round_msg.get("token_usage"),
             parent_id=parent_id,
+            history_parent_id=conversation_row.active_message_head_id if conversation_row else None,
             trace_id=trace_id,
             round=round_offset + round_msg["round"],
         )
-        row.id = uuid.UUID(round_msg["id"])
+        if conversation_row is not None:
+            conversation_row.active_message_head_id = row.id
+            conversation_row.history_revision += 1
         await db.commit()
 
     recovery_images = None
@@ -579,6 +646,7 @@ async def resume_stream_events(
         # 普通 resume 的图片 b64 载荷不落 checkpoint；恢复任务则重新安全读取 owner 附件。
         force_image_context=not recovery,
         document_context=resume_documents,
+        checkpoint_id=checkpoint_id,
     )
 
     async def on_interrupt(value: dict[str, Any]) -> str:
@@ -628,6 +696,7 @@ async def resume_stream_events(
                 ((getattr(last_ai, "additional_kwargs", {}) or {}).get("reasoning_content") or "") if last_ai else ""
             )
             assistant_msg = await msg_repo.create(
+                message_id=assistant_msg_id,
                 conversation_id=conversation_id,
                 role="assistant",
                 content=fm.get("content", ""),
@@ -636,12 +705,18 @@ async def resume_stream_events(
                 token_usage=fm.get("token_usage") or totals,
                 trace_id=trace_id,
                 parent_id=parent_id,
+                history_parent_id=conversation_row.active_message_head_id if conversation_row else None,
                 round=round_offset + len(round_sink) + 1,
             )
-            assistant_msg.id = assistant_msg_id
+            if conversation_row is not None:
+                conversation_row.active_message_head_id = assistant_msg.id
+                conversation_row.history_revision += 1
             for log in final_state.get("run_logs", []):
                 await RunLogRepository(db).create(session_id=conversation_id, **log)
             await ConversationRepository(db).touch_last_message(conversation_id)
+            if checkpoint_id is not None and conversation_row is not None:
+                conversation_row.active_code_node_id = checkpoint_id
+                conversation_row.active_graph_checkpoint_id = str(checkpoint_id)
         # F10：重读任务行，避免覆盖并发取消（与 task_run 一致）
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status != "cancelled":
@@ -654,6 +729,8 @@ async def resume_stream_events(
         elif updated is not None:
             await push_event(str(task.id), "cancelled", {"status": "cancelled"})
             await db.commit()  # 拒绝分支无 set_done：此处落消息持久化（E5）
+        if checkpoint_id is not None and conversation_id:
+            await checkpoint_service.store.seal_checkpoint(conversation_id, checkpoint_id)
         # 2d：demo_notify 确认执行后落通知（工具结果产生源）
         await maybe_notify_from_tool_results(db, user.id, final_state)
         # 主动记忆：resume 完成同样触发提取（首次流中断时 on_final 未执行；提取按最后 user
@@ -670,6 +747,8 @@ async def resume_stream_events(
         # F5：SSE 轨 resume 图级异常 → 任务置 failed（与 task_run 一致）
         # E1：on_final 落库失败会毒化 session → 先 rollback，防 set_failed 也失败
         await db.rollback()
+        if checkpoint_id is not None and conversation_id:
+            await checkpoint_service.store.seal_checkpoint(conversation_id, checkpoint_id, interrupted=True)
         updated = await TaskRepository(db).get_by_id(task.id)
         if updated is not None and updated.status == "running":
             error_payload = {

@@ -24,7 +24,7 @@ from app.tools.builtin import (
     weather,
     web_search,
 )
-from app.tools.registry import SandboxLevel, ToolSpec, ToolType, get, register
+from app.tools.registry import SandboxLevel, ToolEffect, ToolSpec, ToolType, get, register
 
 
 def _register(spec: ToolSpec) -> None:
@@ -133,6 +133,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=30000,
             handler=kb_search.kb_search_handler,
+            effect=ToolEffect.MEMORY,
             meta=True,  # 平台元工具：RAG 检索始终对 LLM 可见（超限模式常驻注入，同 tool_search）
             builtin=True,
         )
@@ -189,6 +190,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=120000,
             handler=install_skill.install_skill_handler,
+            effect=ToolEffect.WORKSPACE_FILES,
             builtin=True,
         )
     )
@@ -462,6 +464,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=15000,
             handler=file_ops.read_file_handler,
+            effect=ToolEffect.READ_ONLY,
             builtin=True,
         )
     )
@@ -488,6 +491,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=15000,
             handler=file_ops.write_file_handler,
+            effect=ToolEffect.WORKSPACE_FILES,
             builtin=True,
         )
     )
@@ -515,6 +519,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=15000,
             handler=file_ops.edit_file_handler,
+            effect=ToolEffect.WORKSPACE_FILES,
             builtin=True,
         )
     )
@@ -539,6 +544,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=10000,
             handler=file_ops.undo_file_handler,
+            effect=ToolEffect.WORKSPACE_FILES,
             builtin=True,
         )
     )
@@ -562,6 +568,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=10000,
             handler=file_ops.glob_handler,
+            effect=ToolEffect.READ_ONLY,
             builtin=True,
         )
     )
@@ -588,6 +595,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=15000,
             handler=file_ops.grep_handler,
+            effect=ToolEffect.READ_ONLY,
             builtin=True,
         )
     )
@@ -674,6 +682,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=30000,
             handler=github_hotspot.tl_github_trending_handler,
+            effect=ToolEffect.WORKSPACE_FILES,
             builtin=True,
         )
     )
@@ -701,6 +710,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=20000,
             handler=github_hotspot.tl_github_search_handler,
+            effect=ToolEffect.READ_ONLY,
             builtin=True,
         )
     )
@@ -728,6 +738,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=20000,
             handler=github_hotspot.tl_github_repo_handler,
+            effect=ToolEffect.WORKSPACE_FILES,
             builtin=True,
         )
     )
@@ -761,6 +772,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=15000,
             handler=memory_tool.remember_memory_handler,
+            effect=ToolEffect.MEMORY,
             builtin=True,
         )
     )
@@ -792,6 +804,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=15000,
             handler=memory_tool.recall_memory_handler,
+            effect=ToolEffect.MEMORY,
             builtin=True,
         )
     )
@@ -822,6 +835,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=10000,
             handler=memory_tool.forget_memory_handler,
+            effect=ToolEffect.MEMORY,
             builtin=True,
         )
     )

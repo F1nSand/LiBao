@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 
+from app.checkpoints.mutation import get_workspace_mutation_gateway
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.tools.context import get_tool_shell_mode, get_tool_workspace_root
@@ -113,8 +114,14 @@ async def write_file_handler(path: str, content: str) -> dict[str, Any]:
     except AppError as exc:
         return {"error": exc.message}
     target.parent.mkdir(parents=True, exist_ok=True)
-    backup = _backup_file(root, target)  # 覆盖已存在文件前备份（回滚用）
-    target.write_text(content[:_MAX_WRITE], encoding="utf-8")
+    payload = content[:_MAX_WRITE].encode("utf-8")
+    gateway = get_workspace_mutation_gateway()
+    if gateway.enabled:
+        await gateway.write_bytes(path, payload)
+        backup = None
+    else:
+        backup = _backup_file(root, target)  # 兼容无会话上下文的直接调用
+        target.write_bytes(payload)
     result: dict[str, Any] = {"path": path, "written": min(len(content), _MAX_WRITE)}
     if backup:
         result["note"] = f"已备份旧版（{backup}），如需撤销用 undo_file('{path}')"
@@ -134,8 +141,14 @@ async def edit_file_handler(path: str, old_str: str, new_str: str) -> dict[str, 
     text = target.read_text(encoding="utf-8")
     if old_str not in text:
         return {"error": "old_str 未在文件中找到"}
-    backup = _backup_file(root, target)  # 写前备份（回滚用）
-    target.write_text(text.replace(old_str, new_str, 1), encoding="utf-8")
+    payload = text.replace(old_str, new_str, 1).encode("utf-8")
+    gateway = get_workspace_mutation_gateway()
+    if gateway.enabled:
+        await gateway.write_bytes(path, payload)
+        backup = None
+    else:
+        backup = _backup_file(root, target)  # 兼容无会话上下文的直接调用
+        target.write_bytes(payload)
     result: dict[str, Any] = {"path": path, "edited": True}
     if backup:
         result["note"] = f"已备份旧版（{backup}），如需撤销用 undo_file('{path}')"
@@ -163,9 +176,13 @@ async def undo_file_handler(path: str) -> dict[str, Any]:
         content = latest.read_text(encoding="utf-8")
     except OSError as exc:
         return {"error": f"备份读取失败: {exc}"}
-    _backup_file(root, target)  # 恢复前备份当前内容（undo 可逆）
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    gateway = get_workspace_mutation_gateway()
+    if gateway.enabled:
+        await gateway.write_bytes(path, content.encode("utf-8"))
+    else:
+        _backup_file(root, target)  # 兼容无会话上下文的直接调用
+        target.write_text(content, encoding="utf-8")
     return {"path": path, "restored": True, "from": latest.name, "note": f"已从备份恢复（{latest.name}）"}
 
 

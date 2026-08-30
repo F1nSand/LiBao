@@ -8,8 +8,10 @@ dispatch ctx 由 stream_graph_events 在 producer 启动前设置：tl_dispatch_
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any
 
 TOOL_ORG_ID: ContextVar[str | None] = ContextVar("tool_org_id", default=None)
@@ -18,6 +20,27 @@ TOOL_WORKSPACE_ROOT: ContextVar[str | None] = ContextVar("tool_workspace_root", 
 TOOL_USER_ID: ContextVar[str | None] = ContextVar("tool_user_id", default=None)
 TOOL_WORKSPACE_ID: ContextVar[str | None] = ContextVar("tool_workspace_id", default=None)
 TOOL_SHELL_MODE: ContextVar[str | None] = ContextVar("tool_shell_mode", default=None)
+
+
+@dataclass(frozen=True)
+class CheckpointToolContext:
+    """AI-only mutation scope. User/editor code never sets this context."""
+
+    conversation_id: uuid.UUID
+    checkpoint_id: uuid.UUID
+    workspace_root: str
+    tool_call_id: str
+
+
+TOOL_CHECKPOINT: ContextVar[CheckpointToolContext | None] = ContextVar("tool_checkpoint", default=None)
+
+
+def set_tool_checkpoint(value: CheckpointToolContext | None) -> None:
+    TOOL_CHECKPOINT.set(value)
+
+
+def get_tool_checkpoint() -> CheckpointToolContext | None:
+    return TOOL_CHECKPOINT.get()
 
 
 def set_tool_org(org_id: str | None) -> None:

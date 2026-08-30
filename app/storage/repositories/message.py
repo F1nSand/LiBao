@@ -31,9 +31,37 @@ class MessageRepository:
             rows = rows[offset:]
         return rows[:limit] if limit is not None else rows
 
+    async def list_active(
+        self, conversation_id: uuid.UUID, head_id: uuid.UUID | None, *, limit: int = 500, offset: int = 0
+    ) -> list[Message]:
+        """Return the active history-parent chain, hiding detached future branches.
+
+        Conversations written before checkpoint support have no cursor; in that case
+        this deliberately falls back to the legacy append-only list.
+        """
+        rows = await self.list_by_conversation(conversation_id, limit=None, offset=0)
+        if head_id is None:
+            return rows[offset : offset + limit] if limit is not None else rows[offset:]
+        by_id = {row.id: row for row in rows}
+        chain: list[Message] = []
+        current = head_id
+        seen: set[uuid.UUID] = set()
+        while current in by_id and current not in seen:
+            row = by_id[current]
+            chain.append(row)
+            seen.add(current)
+            current = row.history_parent_id
+        if not chain:
+            return rows[offset : offset + limit] if limit is not None else rows[offset:]
+        chain.reverse()
+        return chain[offset : offset + limit] if limit is not None else chain[offset:]
+
     async def count(self, conversation_id: uuid.UUID) -> int:
         records = await self.store.jsonl_list(self._rel_path(conversation_id))
         return sum(1 for r in records if not r.get("deleted_at"))
+
+    async def count_active(self, conversation_id: uuid.UUID, head_id: uuid.UUID | None) -> int:
+        return len(await self.list_active(conversation_id, head_id, limit=None, offset=0))
 
     async def create(
         self,
@@ -49,8 +77,12 @@ class MessageRepository:
         parent_id: uuid.UUID | None = None,
         trace_id: str | None = None,
         round: int = 1,
+        message_id: uuid.UUID | None = None,
+        checkpoint_id: uuid.UUID | None = None,
+        history_parent_id: uuid.UUID | None = None,
     ) -> Message:
         msg = Message(
+            id=message_id or uuid.uuid4(),
             conversation_id=conversation_id,
             role=role,
             content=content,
@@ -62,6 +94,8 @@ class MessageRepository:
             parent_id=parent_id,
             round=round,
             trace_id=trace_id,
+            checkpoint_id=checkpoint_id,
+            history_parent_id=history_parent_id,
         )
         await self.store.jsonl_append(self._rel_path(conversation_id), msg.to_dict())
         return msg

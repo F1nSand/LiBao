@@ -30,6 +30,15 @@ class ToolGateAction(enum.StrEnum):
     BLOCK = "block"
 
 
+class ToolEffect(enum.StrEnum):
+    """副作用分类；只有 WORKSPACE_FILES 进入代码 checkpoint。"""
+
+    READ_ONLY = "read_only"
+    WORKSPACE_FILES = "workspace_files"
+    EXTERNAL = "external"
+    MEMORY = "memory"
+
+
 @dataclass(frozen=True)
 class ToolGateDecision:
     action: ToolGateAction
@@ -60,6 +69,7 @@ class ToolSpec:
     preflight: Callable[[dict[str, Any], dict[str, Any]], ToolGateDecision] | None = None
     meta: bool = False  # 平台元工具（tool_search）：超限模式常驻注入 ACI + 执行守卫放行（M2.5）
     builtin: bool = False  # 内置工具（平台拥有）：DB 行可绑定（I4 查重豁免 tl_ 前缀的显式表达）
+    effect: ToolEffect = ToolEffect.EXTERNAL
 
     def aci(self) -> dict[str, Any]:
         """OpenAI function schema（ACI）。函数名 = spec.name。"""

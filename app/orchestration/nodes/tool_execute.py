@@ -8,6 +8,7 @@ interrupt() 返回 {approved: bool}；拒绝分支不执行，写 cancelled Tool
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Optional
 
 from langchain_core.messages import ToolMessage
@@ -18,13 +19,15 @@ from app.orchestration.state_schema import AgentState
 from app.tools import executor
 from app.tools.builtin.tool_search import selected_names
 from app.tools.context import (
+    CheckpointToolContext,
+    set_tool_checkpoint,
     set_tool_org,
     set_tool_shell_mode,
     set_tool_user_id,
     set_tool_workspace_id,
     set_tool_workspace_root,
 )
-from app.tools.registry import ToolGateAction, ToolGateDecision, agent_can_use, get, get_by_name
+from app.tools.registry import ToolEffect, ToolGateAction, ToolGateDecision, agent_can_use, get, get_by_name
 
 
 def _result(
@@ -154,6 +157,22 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
         set_tool_workspace_id(agent_cfg.get("workspace_id"))
         set_tool_user_id(state.get("user_id"))
         set_tool_shell_mode(agent_cfg.get("shell_mode"))
+        config_values = (config or {}).get("configurable", {}) if config else {}
+        checkpoint_context = None
+        raw_checkpoint_id = config_values.get("code_checkpoint_id")
+        raw_conversation_id = config_values.get("thread_id")
+        workspace_root = agent_cfg.get("workspace_root")
+        if spec.effect == ToolEffect.WORKSPACE_FILES and raw_checkpoint_id and raw_conversation_id and workspace_root:
+            try:
+                checkpoint_context = CheckpointToolContext(
+                    conversation_id=uuid.UUID(str(raw_conversation_id)),
+                    checkpoint_id=uuid.UUID(str(raw_checkpoint_id)),
+                    workspace_root=str(workspace_root),
+                    tool_call_id=str(tc["id"]),
+                )
+            except (AttributeError, ValueError):
+                checkpoint_context = None
+        set_tool_checkpoint(checkpoint_context)
         try:
             result = await executor.execute(
                 spec,
@@ -167,6 +186,7 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
             set_tool_workspace_id(None)
             set_tool_user_id(None)
             set_tool_shell_mode(None)
+            set_tool_checkpoint(None)
 
         # M2.5：LLM 调用元工具（tool_search）后 → 选中写入 selected_tool_names（两段式 ACI 注入）。
         # M1：空结果 → [] 清空旧选中；一轮内多次调用合并（去重保序）。契约见 tool_search.selected_names。

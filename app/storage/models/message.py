@@ -23,3 +23,5 @@ class Message(Row):
     parent_id: uuid.UUID | None = None
     round: int = 1  # 轮次（docs 03 §3 逐轮消息扩展）
     trace_id: str | None = None
+    checkpoint_id: uuid.UUID | None = None
+    history_parent_id: uuid.UUID | None = None

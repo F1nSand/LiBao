@@ -14,6 +14,7 @@ from typing import Any, Literal
 CheckpointStatus = Literal["open", "sealed", "interrupted", "expired"]
 MutationStatus = Literal["prepared", "applied", "failed"]
 ContentKind = Literal["text", "binary"]
+RollbackMode = Literal["code_only", "conversation_only", "both"]
 
 
 def _utcnow() -> datetime:
@@ -100,7 +101,7 @@ class CodeCheckpoint:
     conversation_id: uuid.UUID
     user_message_id: uuid.UUID
     workspace_identity: str
-    anchor_message_head_id: uuid.UUID
+    anchor_message_head_id: uuid.UUID | None
     graph_input_checkpoint_id: str | None = None
     status: CheckpointStatus = "open"
     files: dict[str, FileMutationRecord] = field(default_factory=dict)
@@ -114,7 +115,9 @@ class CodeCheckpoint:
             "conversation_id": str(self.conversation_id),
             "user_message_id": str(self.user_message_id),
             "workspace_identity": self.workspace_identity,
-            "anchor_message_head_id": str(self.anchor_message_head_id),
+            "anchor_message_head_id": (
+                str(self.anchor_message_head_id) if self.anchor_message_head_id is not None else None
+            ),
             "graph_input_checkpoint_id": self.graph_input_checkpoint_id,
             "status": self.status,
             "files": {path: record.to_dict() for path, record in self.files.items()},
@@ -138,7 +141,11 @@ class CodeCheckpoint:
                 conversation_id=uuid.UUID(str(data["conversation_id"])),
                 user_message_id=uuid.UUID(str(data["user_message_id"])),
                 workspace_identity=str(data.get("workspace_identity") or ""),
-                anchor_message_head_id=uuid.UUID(str(data["anchor_message_head_id"])),
+                anchor_message_head_id=(
+                    uuid.UUID(str(data["anchor_message_head_id"]))
+                    if data.get("anchor_message_head_id")
+                    else None
+                ),
                 graph_input_checkpoint_id=(
                     str(data["graph_input_checkpoint_id"]) if data.get("graph_input_checkpoint_id") else None
                 ),
@@ -183,4 +190,108 @@ class CheckpointIndex:
             checkpoint_ids=parse_ids(data.get("checkpoint_ids")),
             operation_ids=parse_ids(data.get("operation_ids")),
             last_active_at=_parse_dt(data.get("last_active_at")) or _utcnow(),
+        )
+
+
+@dataclass
+class ConversationCursor:
+    active_message_head_id: uuid.UUID | None
+    active_graph_checkpoint_id: str | None
+    active_code_node_id: uuid.UUID | None
+    history_revision: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "active_message_head_id": str(self.active_message_head_id) if self.active_message_head_id else None,
+            "active_graph_checkpoint_id": self.active_graph_checkpoint_id,
+            "active_code_node_id": str(self.active_code_node_id) if self.active_code_node_id else None,
+            "history_revision": self.history_revision,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ConversationCursor:
+        def parse_uuid(value: Any) -> uuid.UUID | None:
+            try:
+                return uuid.UUID(str(value)) if value else None
+            except (TypeError, ValueError):
+                return None
+
+        return cls(
+            active_message_head_id=parse_uuid(data.get("active_message_head_id")),
+            active_graph_checkpoint_id=data.get("active_graph_checkpoint_id"),
+            active_code_node_id=parse_uuid(data.get("active_code_node_id")),
+            history_revision=int(data.get("history_revision", 0)),
+        )
+
+
+@dataclass
+class FileRestoreResult:
+    path: str
+    action: Literal["restored", "deleted", "skipped_conflict", "failed"]
+    reason: str | None = None
+    current_sha256: str | None = None
+    target_sha256: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "action": self.action,
+            "reason": self.reason,
+            "current_sha256": self.current_sha256,
+            "target_sha256": self.target_sha256,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FileRestoreResult:
+        return cls(
+            path=str(data.get("path", "")),
+            action=data.get("action", "failed"),
+            reason=data.get("reason"),
+            current_sha256=data.get("current_sha256"),
+            target_sha256=data.get("target_sha256"),
+        )
+
+
+@dataclass
+class RollbackOperation:
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    target_checkpoint_id: uuid.UUID
+    mode: RollbackMode
+    before_cursor: ConversationCursor
+    after_cursor: ConversationCursor | None
+    undo_files: dict[str, FileVersionRef]
+    file_results: list[FileRestoreResult]
+    status: Literal["prepared", "completed", "partial", "failed_partial"]
+    created_at: datetime = field(default_factory=_utcnow)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "conversation_id": str(self.conversation_id),
+            "target_checkpoint_id": str(self.target_checkpoint_id),
+            "mode": self.mode,
+            "before_cursor": self.before_cursor.to_dict(),
+            "after_cursor": self.after_cursor.to_dict() if self.after_cursor else None,
+            "undo_files": {path: ref.to_dict() for path, ref in self.undo_files.items()},
+            "file_results": [item.to_dict() for item in self.file_results],
+            "status": self.status,
+            "created_at": self.created_at.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RollbackOperation:
+        return cls(
+            id=uuid.UUID(str(data["id"])),
+            conversation_id=uuid.UUID(str(data["conversation_id"])),
+            target_checkpoint_id=uuid.UUID(str(data["target_checkpoint_id"])),
+            mode=data.get("mode", "both"),
+            before_cursor=ConversationCursor.from_dict(data.get("before_cursor") or {}),
+            after_cursor=(
+                ConversationCursor.from_dict(data["after_cursor"]) if data.get("after_cursor") else None
+            ),
+            undo_files={path: FileVersionRef.from_dict(ref) for path, ref in (data.get("undo_files") or {}).items()},
+            file_results=[FileRestoreResult.from_dict(item) for item in data.get("file_results") or []],
+            status=data.get("status", "failed_partial"),
+            created_at=_parse_dt(data.get("created_at")) or _utcnow(),
         )

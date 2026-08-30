@@ -47,6 +47,10 @@ def serialize_conversation(conv: Conversation) -> dict[str, Any]:
         "workspace_id": str(conv.workspace_id) if conv.workspace_id else None,  # 工作区对话（M7-B）
         "last_message_at": _dt(conv.last_message_at),
         "created_at": _dt(conv.created_at),
+        "active_message_head_id": str(conv.active_message_head_id) if conv.active_message_head_id else None,
+        "active_graph_checkpoint_id": conv.active_graph_checkpoint_id,
+        "active_code_node_id": str(conv.active_code_node_id) if conv.active_code_node_id else None,
+        "history_revision": conv.history_revision,
     }
 
 
@@ -64,6 +68,8 @@ def serialize_message(msg: Message) -> dict[str, Any]:
         "cost": msg.token_usage.get("cost", 0.0) if isinstance(msg.token_usage, dict) else 0.0,
         "round": getattr(msg, "round", 1),  # 轮次（docs 03 §3 逐轮消息扩展）
         "trace_id": msg.trace_id,
+        "checkpoint_id": str(msg.checkpoint_id) if getattr(msg, "checkpoint_id", None) else None,
+        "history_parent_id": str(msg.history_parent_id) if getattr(msg, "history_parent_id", None) else None,
         "created_at": _dt(msg.created_at),
     }
 

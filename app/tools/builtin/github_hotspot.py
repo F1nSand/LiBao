@@ -10,12 +10,39 @@ trending 走 gtrending 库（爬 github.com/trending，无官方 API）；搜索
 from __future__ import annotations
 
 import asyncio
+import json
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+from app.checkpoints.mutation import get_workspace_mutation_gateway
 from app.services import github_hotspot as gh
 from app.tools.context import get_tool_workspace_root
 
 _SINCE_DAYS = {"daily": 1, "weekly": 7, "monthly": 30}
+
+
+async def _persist_trending(root: str, since: str, markdown: str) -> str:
+    gateway = get_workspace_mutation_gateway()
+    if not gateway.enabled:
+        return gh.persist_trending(root, since, markdown)
+    date_str = datetime.now(UTC).strftime("%Y-%m-%d")
+    rel = f"github-hotspot/trending/{date_str}_{since}.md"
+    await gateway.write_bytes(rel, markdown.encode("utf-8"))
+    index = gh._read_index(root)  # noqa: SLF001 - same bounded workspace cache
+    index.setdefault("trending", {})[since] = datetime.now(UTC).isoformat()
+    index_bytes = json.dumps(index, ensure_ascii=False, indent=2).encode("utf-8")
+    await gateway.write_bytes("github-hotspot/index.json", index_bytes)
+    return str(Path(root) / rel)
+
+
+async def _persist_repo(root: str, owner: str, repo: str, markdown: str) -> str:
+    gateway = get_workspace_mutation_gateway()
+    if not gateway.enabled:
+        return gh.persist_repo(root, owner, repo, markdown)
+    rel = f"github-hotspot/repos/{owner}__{repo}.md"
+    await gateway.write_bytes(rel, markdown.encode("utf-8"))
+    return str(Path(root) / rel)
 
 
 async def tl_github_trending_handler(
@@ -39,7 +66,7 @@ async def tl_github_trending_handler(
             )
             md += gh.format_trending_md(approx["items"], since, language)
             if root:
-                path = gh.persist_trending(root, since, md)
+                path = await _persist_trending(root, since, md)
                 return f"{md}\n\n> 已落库 {path}"
             return md
         if root:
@@ -52,7 +79,7 @@ async def tl_github_trending_handler(
     md = gh.format_trending_md(repos, since, language)
     note = f"> 实时抓取 · {len(repos)} 个仓库"
     if root:
-        note += f" · 已落库 {gh.persist_trending(root, since, md)}"
+        note += f" · 已落库 {await _persist_trending(root, since, md)}"
     return f"{md}\n\n{note}"
 
 
@@ -80,5 +107,5 @@ async def tl_github_repo_handler(owner: str, repo: str, refresh: bool = False) -
     md = gh.format_repo_md(result)
     notes = [n for n in (result.get("note"),) if n]
     if root:
-        notes.append(f"已落库 {gh.persist_repo(root, owner, repo, md)}")
+        notes.append(f"已落库 {await _persist_repo(root, owner, repo, md)}")
     return f"{md}\n\n> " + " · ".join(notes) if notes else md

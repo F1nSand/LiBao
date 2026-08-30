@@ -44,6 +44,20 @@ class CheckpointService:
                 count += 1
         return count
 
+    async def recover_open_checkpoints(self) -> int:
+        """Startup crash recovery: open manifests remain usable but are marked interrupted."""
+        total = 0
+        if not self.store.root.is_dir():
+            return total
+        for session_dir in self.store.root.iterdir():
+            if not session_dir.is_dir():
+                continue
+            try:
+                total += await self.mark_interrupted_open(uuid.UUID(session_dir.name))
+            except (ValueError, OSError):
+                continue
+        return total
+
     async def cleanup_expired(self, *, now: datetime | None = None) -> int:
         """按会话最后活动时间删除过期 checkpoint 目录。"""
         now = now or datetime.now(UTC)

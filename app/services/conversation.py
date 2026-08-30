@@ -62,11 +62,38 @@ class ConversationService:
         self, db: Any, conversation: Conversation, page: int, page_size: int
     ) -> dict[str, Any]:
         repo = MessageRepository(db)
-        msgs = await repo.list_by_conversation(conversation.id, limit=page_size, offset=(page - 1) * page_size)
-        total = await repo.count(conversation.id)
+        msgs = await repo.list_active(
+            conversation.id,
+            conversation.active_message_head_id,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+        )
+        total = await repo.count_active(conversation.id, conversation.active_message_head_id)
+        from app.checkpoints.runtime import get_checkpoint_service
+        from app.core.config import get_settings
+
+        checkpoint_service = get_checkpoint_service(
+            get_settings().agent_data_dir, get_settings().checkpoint_retention_days
+        )
+        checkpoints = {
+            item.id: item for item in await checkpoint_service.store.list_checkpoints(conversation.id)
+        }
+        serialized = []
+        for message in msgs:
+            item = serialize_message(message)
+            checkpoint = checkpoints.get(getattr(message, "checkpoint_id", None))
+            if checkpoint is not None:
+                item["checkpoint"] = {
+                    "id": str(checkpoint.id),
+                    "status": checkpoint.status,
+                    "changed_file_count": len(checkpoint.files),
+                    "can_restore_code": checkpoint.status in {"open", "sealed", "interrupted"},
+                    "can_restore_conversation": True,
+                }
+            serialized.append(item)
         from app.api.schemas.common import paged
 
-        return paged([serialize_message(m) for m in msgs], total, page, page_size)
+        return paged(serialized, total, page, page_size)
 
     async def trajectory(
         self, db: Any, conversation: Conversation, before_seq: int | None = None, limit: int = 50
@@ -76,7 +103,9 @@ class ConversationService:
         seq 为按消息序的前端派生索引（非持久化；新消息插入会移位，可接受）。
         before_seq 加载更早一页；has_more 表示还有更早。
         """
-        msgs = await MessageRepository(db).list_by_conversation(conversation.id, limit=10000, offset=0)
+        msgs = await MessageRepository(db).list_active(
+            conversation.id, conversation.active_message_head_id, limit=10000, offset=0
+        )
         nodes = [serialize_trajectory_node(m, seq) for seq, m in enumerate(msgs, 1)]
         candidates = [n for n in nodes if n["seq"] < before_seq] if before_seq is not None else nodes
         return {

@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from app.checkpoints.mutation import get_workspace_mutation_gateway
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.services.skill import global_skills_dir, parse_skill_md, validate_skill_name, workspace_skills_dirs
@@ -101,8 +102,14 @@ async def install_skill_handler(url: str, target: str = "global") -> dict[str, A
     else:
         dest_dir = global_skills_dir() / name
     try:
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        (dest_dir / "SKILL.md").write_text(text, encoding="utf-8")
+        dest_file = dest_dir / "SKILL.md"
+        gateway = get_workspace_mutation_gateway() if target == "workspace" else None
+        if gateway is not None and gateway.enabled and root:
+            relative = dest_file.relative_to(Path(root)).as_posix()
+            await gateway.write_bytes(relative, text.encode("utf-8"))
+        else:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest_file.write_text(text, encoding="utf-8")
     except OSError as exc:
         return {"error": f"写入失败: {exc}"}
     return {

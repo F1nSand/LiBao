@@ -22,6 +22,7 @@ from app.checkpoints.models import (
     CodeCheckpoint,
     FileMutationRecord,
     FileVersionRef,
+    RollbackOperation,
 )
 
 
@@ -79,6 +80,9 @@ class CodeCheckpointStore:
     def _index_path(self, conversation_id: uuid.UUID | str) -> Path:
         return self.session_dir(conversation_id) / "index.json"
 
+    def _operation_path(self, conversation_id: uuid.UUID | str, operation_id: uuid.UUID | str) -> Path:
+        return self.session_dir(conversation_id) / "operations" / f"{operation_id}.json"
+
     def _blob_path(self, conversation_id: uuid.UUID | str, sha256: str) -> Path:
         return self.session_dir(conversation_id) / "blobs" / "sha256" / sha256[:2] / sha256
 
@@ -125,6 +129,47 @@ class CodeCheckpointStore:
                 return CodeCheckpoint.from_dict(json.loads(path.read_text(encoding="utf-8")))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 raise CheckpointStoreError("checkpoint manifest 无法安全读取") from exc
+
+    async def create_operation(self, operation: RollbackOperation) -> RollbackOperation:
+        async with self._lock(operation.conversation_id):
+            path = self._operation_path(operation.conversation_id, operation.id)
+            if path.exists():
+                try:
+                    return RollbackOperation.from_dict(json.loads(path.read_text(encoding="utf-8")))
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                    raise CheckpointStoreError("rollback operation 已损坏") from exc
+            _atomic_write_json(path, operation.to_dict())
+            index = await self._read_index_unlocked(operation.conversation_id)
+            if operation.id not in index.operation_ids:
+                index.operation_ids.append(operation.id)
+            await self._write_index_unlocked(index)
+            return operation
+
+    async def read_operation(
+        self, conversation_id: uuid.UUID | str, operation_id: uuid.UUID | str
+    ) -> RollbackOperation | None:
+        path = self._operation_path(conversation_id, operation_id)
+        if not path.exists():
+            return None
+        async with self._lock(conversation_id):
+            try:
+                return RollbackOperation.from_dict(json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise CheckpointStoreError("rollback operation 无法安全读取") from exc
+
+    async def list_operations(self, conversation_id: uuid.UUID | str) -> list[RollbackOperation]:
+        async with self._lock(conversation_id):
+            index = await self._read_index_unlocked(conversation_id)
+            result: list[RollbackOperation] = []
+            for operation_id in index.operation_ids:
+                path = self._operation_path(conversation_id, operation_id)
+                if not path.exists():
+                    continue
+                try:
+                    result.append(RollbackOperation.from_dict(json.loads(path.read_text(encoding="utf-8"))))
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+                    continue
+            return result
 
     async def list_checkpoints(self, conversation_id: uuid.UUID | str) -> list[CodeCheckpoint]:
         async with self._lock(conversation_id):
