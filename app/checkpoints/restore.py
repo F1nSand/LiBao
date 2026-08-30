@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from app.checkpoints.identity import build_workspace_identity, workspace_identity_matches
 from app.checkpoints.models import (
     CodeCheckpoint,
     ConversationCursor,
@@ -97,7 +98,7 @@ class CheckpointRestoreService:
 
     @staticmethod
     def _identity(root: str, workspace_id: str | None) -> str:
-        return f"{workspace_id or 'session'}:{root}"
+        return build_workspace_identity(root, workspace_id)
 
     async def _file_plan(
         self,
@@ -194,7 +195,7 @@ class CheckpointRestoreService:
         target = await self.checkpoints.store.read_checkpoint(conversation.id, target_checkpoint_id)
         if target is None:
             raise AppError(40431, "checkpoint 不存在或已过期")
-        if target.workspace_identity != self._identity(workspace_root, workspace_id):
+        if not workspace_identity_matches(target.workspace_identity, workspace_root, workspace_id):
             raise AppError(40932, "checkpoint 与当前工作区不匹配")
         files, target_refs = await self._file_plan(conversation.id, target, Path(workspace_root))
         messages = await MessageRepository(db).list_active(

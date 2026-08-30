@@ -13,6 +13,7 @@ from typing import Any
 
 from langgraph.types import Command
 
+from app.checkpoints.identity import build_workspace_identity
 from app.checkpoints.runtime import get_checkpoint_service
 from app.core.config import get_settings
 from app.core.events import sse_emitter
@@ -203,9 +204,9 @@ async def chat_stream_events(
     if previous_head is None:
         existing_messages = await msg_repo.list_by_conversation(conversation.id, limit=None, offset=0)
         previous_head = existing_messages[-1].id if existing_messages else None
-    workspace_identity = (
-        f"{workspace.get('id') if workspace else 'session'}:"
-        f"{workspace.get('root_path') if workspace else ''}"
+    workspace_identity = build_workspace_identity(
+        workspace.get("root_path") if workspace else "",
+        workspace.get("id") if workspace else None,
     )
     checkpoint = await checkpoint_service.create_anchor(
         conversation_id=conversation.id,
