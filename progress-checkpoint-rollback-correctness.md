@@ -11,14 +11,14 @@
 - [complete] Task 5：将文件恢复和逆恢复改成 Durable WAL（commit `f26d131`；WAL/store/restore → 22 passed；Ruff、compileall 通过）
 - [complete] Task 6：准确表达写入、删除和 finalize 后状态（commit `577dad9`；mutation/store/restore/附件 → 37 passed, 1 skipped；Ruff、compileall 通过）
 - [complete] Task 7：旧会话与 v1 Manifest 的安全兼容（commit `45ae379`；兼容/restore/WAL/API → 32 passed；Ruff、compileall 通过）
-- [complete] Task 8：端到端回归与交付 Gate（commits `0ad8b8a`, `eea1112`, `1e864ee`；全量 pytest 748 passed, 4 skipped；Ruff、compileall、diff check 通过）
+- [complete] Task 8：端到端回归与交付 Gate（commits `0ad8b8a`, `eea1112`, `1e864ee`, `9fb1b3b`；全量 pytest 748 passed, 4 skipped；Ruff、compileall、diff check 通过）
 
 ## 验证记录
 
 - Task 8 定向回归：`.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_checkpoint_restore.py tests/test_checkpoint_api.py tests/test_chat_stream.py tests/test_interrupt_stream.py tests/test_code_checkpoint_store.py` → 46 passed。
 - Task 8 新增游标边界回归：`.\\.venv\\Scripts\\python.exe -m pytest -q tests/test_conversation_service.py tests/test_chat_stream.py::test_empty_message_cursor_does_not_resurrect_legacy_history` → 5 passed。
 - 全量测试（修复前）：`.\\.venv\\Scripts\\python.exe -m pytest -q` → 744 passed, 4 skipped。
-- 全量测试（最终）：`.\\.venv\\Scripts\\python.exe -m pytest -q` → 747 passed, 4 skipped, 38 warnings。
+- 全量测试（最终）：`.\\.venv\\Scripts\\python.exe -m pytest -q` → 748 passed, 4 skipped, 38 warnings。
 - 静态检查：`.\\.venv\\Scripts\\ruff.exe check app tests`、`.\\.venv\\Scripts\\python.exe -m compileall -q app`、`git diff --check` → PASS。
 - 内置 `verify`、`/code-review`、`mattpocock-skills:code-review`、`/simplify` 工具未在当前运行时暴露；以定向/全量行为测试、静态检查及人工安全/规范审查完成等价 gate。
 - WAL recovery hardening：先以失败测试复现“after_cursor 已持久化但 applying 状态被误判 failed_partial”，修复后新增测试通过；恢复过程不触碰工作区字节。
