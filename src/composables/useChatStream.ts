@@ -1,7 +1,7 @@
 import { computed, reactive, ref, type ComputedRef } from 'vue'
 import { streamChatAt, streamTaskEvents, streamTaskResume } from '@/api/sse'
 import { cancelTask, getTaskStatus, recoverTask, type CancelTaskResult } from '@/api/task-control'
-import type { ChatRequest, SseEnvelope, Task, TaskError, TaskStatus, TokenUsage } from '@/types'
+import type { ChatRequest, CheckpointAnchor, SseEnvelope, Task, TaskError, TaskStatus, TokenUsage } from '@/types'
 import type { AgentSwitchPayload, DonePayload, Message, MessageSealPayload, ModelRetryPayload, ToolResultPayload } from '@/types'
 import { flushNow, throttleByRaf } from '@/utils/rAF'
 
@@ -119,6 +119,8 @@ export interface UseChatStreamOptions {
   placeholderTtlMs?: number
   /** done 事件携带最终持久化消息时回调（触发 chat store 刷新） */
   onPersistedMessage?: (message: unknown) => void
+  /** 首帧携带持久化用户消息 checkpoint 锚点时回调；旧后端/恢复流可缺省 */
+  onCheckpointAnchor?: (anchor: CheckpointAnchor) => void
   /** 长任务对账/事件订阅收敛到终态时通知（done → 视图层 reload 会话消息/轨迹） */
   onTaskSettled?: (info: { taskId: string; conversationId: string | null; status: TaskStatus }) => void
 }
@@ -386,6 +388,17 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
         s.interrupted = null
         s.streaming = true
         s.confirming = false
+        if (
+          typeof p.conversation_id === 'string' && p.conversation_id &&
+          typeof p.user_message_id === 'string' && p.user_message_id &&
+          typeof p.checkpoint_id === 'string' && p.checkpoint_id
+        ) {
+          opts.onCheckpointAnchor?.({
+            conversationId: p.conversation_id,
+            userMessageId: p.user_message_id,
+            checkpointId: p.checkpoint_id,
+          })
+        }
         upsertActivity(ctx, { kind: 'status', label: '开始执行', status: 'active', startedAt: Date.now() })
         break
       }

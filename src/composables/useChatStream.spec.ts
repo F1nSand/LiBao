@@ -71,6 +71,67 @@ beforeEach(() => {
 })
 
 describe('useChatStream 状态机', () => {
+  it('message_start 带 checkpoint 锚点时回调字段映射准确', async () => {
+    const onCheckpointAnchor = vi.fn()
+    const cs = useChatStream({ onCheckpointAnchor })
+    await cs.start(chatReq as never)
+
+    chatHandlers!.onEvent(ev('message_start', 1, {
+      message_id: 'assistant-1',
+      agent_id: 'a',
+      conversation_id: 'conversation-1',
+      task_id: 'task-1',
+      user_message_id: 'user-1',
+      checkpoint_id: 'checkpoint-1',
+    }))
+
+    expect(onCheckpointAnchor).toHaveBeenCalledTimes(1)
+    expect(onCheckpointAnchor).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      userMessageId: 'user-1',
+      checkpointId: 'checkpoint-1',
+    })
+    expect(cs.state.value.messageId).toBe('assistant-1')
+  })
+
+  it('message_start replay 可再次通知下游，但不改变 assistant messageId', async () => {
+    const onCheckpointAnchor = vi.fn()
+    const cs = useChatStream({ onCheckpointAnchor })
+    await cs.start(chatReq as never)
+    const payload = {
+      message_id: 'assistant-1',
+      agent_id: 'a',
+      conversation_id: 'conversation-1',
+      task_id: 'task-1',
+      user_message_id: 'user-1',
+      checkpoint_id: 'checkpoint-1',
+    }
+
+    chatHandlers!.onEvent(ev('message_start', 1, payload))
+    chatHandlers!.onEvent(ev('message_start', 1, payload))
+
+    expect(onCheckpointAnchor).toHaveBeenCalledTimes(2)
+    expect(cs.state.value.messageId).toBe('assistant-1')
+  })
+
+  it('旧 message_start 缺少任一锚点字段时保持兼容且不触发回调', async () => {
+    const onCheckpointAnchor = vi.fn()
+    const cs = useChatStream({ onCheckpointAnchor })
+    await cs.start(chatReq as never)
+
+    chatHandlers!.onEvent(ev('message_start', 1, {
+      message_id: 'assistant-1',
+      agent_id: 'a',
+      conversation_id: 'conversation-1',
+      task_id: 'task-1',
+      user_message_id: 'user-1',
+    }))
+
+    expect(onCheckpointAnchor).not.toHaveBeenCalled()
+    expect(cs.state.value.messageId).toBe('assistant-1')
+    expect(cs.state.value.conversationId).toBe('conversation-1')
+  })
+
   it('stopAll 会中止 shell 内所有会话流', () => {
     const signals: AbortSignal[] = []
     streamChat.mockImplementation((_url: unknown, _req: unknown, _h: SseHandlers, signal: AbortSignal) => {

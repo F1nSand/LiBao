@@ -39,6 +39,15 @@ export interface MessageStartPayload {
   conversation_id: string
   /** 普通聊天运行对应的可取消 Task id；兼容旧后端时仍允许缺省。 */
   task_id?: string
+  /** 持久化用户消息锚点；旧后端/恢复流可缺省。 */
+  user_message_id?: string
+  checkpoint_id?: string
+}
+
+export interface CheckpointAnchor {
+  conversationId: string
+  userMessageId: string
+  checkpointId: string
 }
 
 export interface TokenPayload {
