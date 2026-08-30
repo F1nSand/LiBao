@@ -23,4 +23,4 @@
 - 静态检查：`.\\.venv\\Scripts\\ruff.exe check app tests`、`.\\.venv\\Scripts\\python.exe -m compileall -q app`、`git diff --check` → PASS。
 - 内置 `verify`、`/code-review`、`mattpocock-skills:code-review`、`/simplify` 工具未在当前运行时暴露；以定向/全量行为测试、静态检查及人工安全/规范审查完成等价 gate。
 - WAL recovery hardening：先以失败测试复现“after_cursor 已持久化但 applying 状态被误判 failed_partial”，修复后新增测试通过；恢复过程不触碰工作区字节。
-- 422 根因：`CheckpointRestorePreviewRequest` 原先把前端 opaque token 错误声明为 UUID，`RestoreExecuteRequest` 也把旧 bundle 不会发送的 `expected_mode/client_request_id` 声明为必填；已补失败测试并修复为字符串兼容契约。
+- 422 根因：`CheckpointRestorePreviewRequest` 原先把前端 opaque token 错误声明为 UUID，首版 bundle 还省略 `target_type`；`RestoreExecuteRequest` 也把旧 bundle 不会发送的 `expected_mode/client_request_id` 声明为必填。已补失败测试并修复为字符串兼容契约，旧 preview 仅按 `target_checkpoint_id` 安全推断 checkpoint 分支。

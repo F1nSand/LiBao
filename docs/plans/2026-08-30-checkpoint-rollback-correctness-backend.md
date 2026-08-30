@@ -96,7 +96,7 @@ Preview 与 execute 统一返回以下 conversation 结构：
 
 Execute 额外返回 `operation_id`、`target_message_id`、文件统计、`undo_available` 和新 `history_revision`。后端在 restore lock 内验证 `expected_mode == preview.mode`、request id、conversation owner、target、revision、active code cursor、workspace identity、TTL 和 preview 文件 hashes。
 
-兼容策略：`client_request_id` 作为不透明字符串（UUID 仍可用）；preview 缺省时由服务端生成。`expected_mode` 与 execute 的 request id 在旧静态 bundle 缺失时允许为空，但只要 v2 客户端提交，服务端仍严格执行 mode/request-id 绑定校验。
+兼容策略：`client_request_id` 作为不透明字符串（UUID 仍可用）；preview 缺省时由服务端生成。首版静态 bundle 还省略了 preview 的 `target_type`，服务端仅在存在 `target_checkpoint_id` 且类型字段缺失时推断为 `checkpoint`，其他未知/不完整 payload 仍由 discriminated union 拒绝。`expected_mode` 与 execute 的 request id 在旧静态 bundle 缺失时允许为空，但只要 v2 客户端提交，服务端仍严格执行 mode/request-id 绑定校验。
 
 ---
 

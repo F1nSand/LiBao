@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from pydantic import TypeAdapter
 
 from app.api.routers import checkpoints
-from app.api.schemas.checkpoints import CheckpointRestorePreviewRequest, RestoreExecuteRequest
+from app.api.schemas.checkpoints import CheckpointRestorePreviewRequest, RestoreExecuteRequest, RestorePreviewRequest
 from app.storage.models.conversation import Conversation
 from app.storage.models.user import User
 
@@ -68,3 +69,15 @@ def test_restore_requests_accept_frontend_string_request_ids_and_legacy_execute_
     legacy_execute = RestoreExecuteRequest(preview_id=uuid.uuid4())
     assert legacy_execute.expected_mode is None
     assert legacy_execute.client_request_id is None
+
+
+def test_legacy_preview_payload_infers_checkpoint_discriminator():
+    checkpoint_id = uuid.uuid4()
+    request = TypeAdapter(RestorePreviewRequest).validate_python(
+        {"target_checkpoint_id": str(checkpoint_id), "mode": "both"}
+    )
+
+    assert isinstance(request, CheckpointRestorePreviewRequest)
+    assert request.target_type == "checkpoint"
+    assert request.target_checkpoint_id == checkpoint_id
+    assert request.client_request_id

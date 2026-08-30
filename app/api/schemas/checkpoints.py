@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Discriminator, Field, Tag
 
 RollbackMode = Literal["code_only", "conversation_only", "both"]
 
@@ -14,6 +14,23 @@ def _coerce_request_id(value: object) -> str | None:
 
 ClientRequestId = Annotated[str, BeforeValidator(_coerce_request_id)]
 OptionalClientRequestId = Annotated[str | None, BeforeValidator(_coerce_request_id)]
+
+
+def _get_restore_preview_target_type(value: object) -> str | None:
+    """Resolve the preview branch, including the pre-v2 payload shape.
+
+    The first static bundle shipped this endpoint with only
+    ``target_checkpoint_id`` and ``mode``.  That payload is unambiguous, so
+    select the checkpoint branch while leaving all malformed/unknown payloads
+    to strict discriminated-union validation below.
+    """
+    if isinstance(value, dict):
+        target_type = value.get("target_type")
+        if target_type is not None:
+            return str(target_type)
+        if "target_checkpoint_id" in value:
+            return "checkpoint"
+    return None
 
 
 class CheckpointRestorePreviewRequest(BaseModel):
@@ -35,8 +52,9 @@ class OperationBeforeRestorePreviewRequest(BaseModel):
 
 
 RestorePreviewRequest = Annotated[
-    CheckpointRestorePreviewRequest | OperationBeforeRestorePreviewRequest,
-    Field(discriminator="target_type"),
+    Annotated[CheckpointRestorePreviewRequest, Tag("checkpoint")]
+    | Annotated[OperationBeforeRestorePreviewRequest, Tag("rollback_operation_before")],
+    Discriminator(_get_restore_preview_target_type),
 ]
 
 
