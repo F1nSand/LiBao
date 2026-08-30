@@ -9,7 +9,7 @@ import {
   deleteConversation as apiDeleteConversation,
 } from '@/api/chat'
 import { TOKEN_LIMIT } from '@/types'
-import type { Conversation, FileRef, Message } from '@/types'
+import type { CheckpointAnchor, Conversation, FileRef, Message } from '@/types'
 import { truncate } from '@/utils/format'
 import { useMediaQuery } from '@/composables/useMediaQuery'
 import { NARROW_LAYOUT_MQ } from '@/constants/layout'
@@ -19,6 +19,7 @@ import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
 import AttachmentUploader, { type PendingAttachment } from '@/components/business/AttachmentUploader.vue'
 import InterruptConfirmDialog from '@/components/business/InterruptConfirmDialog.vue'
 import AgentRunStatus from '@/components/common/AgentRunStatus.vue'
+import CheckpointRestoreDialog from '@/components/business/CheckpointRestoreDialog.vue'
 import WorkspaceConvList from './WorkspaceConvList.vue'
 import WorkspaceFileRefPicker from './WorkspaceFileRefPicker.vue'
 
@@ -30,6 +31,7 @@ import WorkspaceFileRefPicker from './WorkspaceFileRefPicker.vue'
 const props = defineProps<{ workspaceId: string }>()
 
 const stream = useChatStream({
+  onCheckpointAnchor: reconcileCheckpointAnchor,
   onPersistedMessage: (m) => {
     const m0 = (m ?? {}) as Partial<Message>
     if (m0.conversation_id && m0.conversation_id !== currentId.value) return
@@ -82,6 +84,8 @@ const lastFailedDraft = ref<{ content: string; attachments: PendingAttachment[];
 const fileRefs = ref<FileRef[]>([])
 const refPickerVisible = ref(false)
 const interruptVisible = ref(false)
+const restoreVisible = ref(false)
+const restoreMessage = ref<Message | null>(null)
 /** 会话 | 轨迹 视图切换 */
 const mode = ref<'chat' | 'trajectory'>('chat')
 
@@ -101,6 +105,8 @@ watch(
   () => {
     messageRequestVersion.value += 1
     stream.stopAll()
+    restoreVisible.value = false
+    restoreMessage.value = null
     currentId.value = null
     messages.value = []
     conversations.value = []
@@ -128,6 +134,8 @@ async function loadConversations() {
 async function selectConversation(id: string) {
   currentId.value = id
   stream.setConversation(id)
+  restoreVisible.value = false
+  restoreMessage.value = null
   resetDraftForConversationChange()
   messages.value = []
   messageError.value = null
@@ -317,6 +325,25 @@ function retryMessages() {
   void loadMessages(id)
 }
 
+function reconcileCheckpointAnchor(anchor: CheckpointAnchor): boolean {
+  if (!currentId.value || anchor.conversationId !== currentId.value) return false
+  for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+    const message = messages.value[index]
+    if (
+      message.role === 'user' &&
+      message.conversation_id === anchor.conversationId &&
+      message.id.startsWith('local_') &&
+      !message.checkpoint_id &&
+      !message.checkpoint
+    ) {
+      message.id = anchor.userMessageId
+      message.checkpoint_id = anchor.checkpointId
+      return true
+    }
+  }
+  return false
+}
+
 async function stop() {
   try {
     const result = await stream.stop()
@@ -326,6 +353,28 @@ async function stop() {
   } catch (e) {
     ElMessage.error(e instanceof Error ? `中断失败：${e.message}` : '中断失败，请重试')
   }
+}
+
+async function onRollback(message: Message) {
+  if (composerDisabled.value) {
+    await stop()
+    if (composerDisabled.value) {
+      ElMessage.warning('当前任务尚未停止，请稍后再试')
+      return
+    }
+  }
+  const checkpointId = message.checkpoint_id ?? message.checkpoint?.id
+  if (!checkpointId || !currentId.value) return
+  restoreMessage.value = message
+  restoreVisible.value = true
+}
+
+async function onRestoreCompleted() {
+  const id = currentId.value
+  restoreVisible.value = false
+  restoreMessage.value = null
+  if (id) await loadMessages(id)
+  await loadConversations()
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -383,7 +432,22 @@ async function onInterruptConfirm(approved: boolean) {
         <AgentRunStatus :phase="currentStream.phase" :detail="currentStream.phaseDetail" />
       </div>
 
-      <MessageList v-show="mode === 'chat'" :messages="messages" :stream="currentStream" :loading="messageLoading" />
+      <MessageList
+        v-show="mode === 'chat'"
+        :messages="messages"
+        :stream="currentStream"
+        :loading="messageLoading"
+        @rollback="onRollback"
+      />
+
+      <CheckpointRestoreDialog
+        v-if="restoreMessage && currentId"
+        v-model="restoreVisible"
+        :conversation-id="currentId"
+        :checkpoint-id="restoreMessage.checkpoint_id ?? restoreMessage.checkpoint?.id ?? ''"
+        :message-id="restoreMessage.id"
+        @completed="onRestoreCompleted"
+      />
 
       <div v-if="mode === 'chat' && messageError" class="stream-error" role="alert">
         <span>消息加载失败：{{ messageError }}</span>

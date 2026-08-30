@@ -1,17 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import { ref } from 'vue'
-import type { FileRef, Message, Paged } from '@/types'
+import { reactive, ref } from 'vue'
+import type { CheckpointAnchor, FileRef, Message, Paged } from '@/types'
 import type { PendingAttachment } from '@/components/business/AttachmentUploader.vue'
 
-const { listConversations, listMessages, streamState, setConversation, start, stop, stopAll } = vi.hoisted(() => ({
+const { listConversations, listMessages, streamState, streamOptions, setConversation, start, stop, stopAll, useChatStream } = vi.hoisted(() => ({
   listConversations: vi.fn(),
   listMessages: vi.fn(),
   streamState: { value: { streaming: false, interrupted: null, error: null, status: 'idle', phase: 'idle', phaseDetail: null, cancelling: false, taskId: null, messageId: null, partialText: '', segments: [], toolCalls: [], finished: false } },
+  streamOptions: { value: null as { onCheckpointAnchor?: (anchor: CheckpointAnchor) => void } | null },
   setConversation: vi.fn(),
   start: vi.fn(),
   stop: vi.fn(),
   stopAll: vi.fn(),
+  useChatStream: vi.fn(),
 }))
 
 vi.mock('@/api/chat', () => ({
@@ -21,14 +23,17 @@ vi.mock('@/api/chat', () => ({
   deleteConversation: vi.fn(),
 }))
 vi.mock('@/composables/useChatStream', () => ({
-  useChatStream: vi.fn(() => ({
+  useChatStream: useChatStream.mockImplementation((options: { onCheckpointAnchor?: (anchor: CheckpointAnchor) => void }) => {
+    streamOptions.value = options
+    return {
     state: streamState,
     setConversation,
     start,
     stop,
     stopAll,
     confirmInterrupt: vi.fn(),
-  })),
+    }
+  }),
 }))
 vi.mock('@/composables/useMediaQuery', () => ({
   useMediaQuery: () => ref(false),
@@ -49,6 +54,38 @@ function message(conversationId: string, content: string): Message {
 
 function page(conversationId: string, content: string): Paged<Message> {
   return { items: [message(conversationId, content)], total: 1, page: 1, page_size: 100 }
+}
+
+function checkpointUserMessage(conversationId: string, id = `${conversationId}-user`): Message {
+  return {
+    id,
+    conversation_id: conversationId,
+    role: 'user',
+    content: '回滚到这里',
+    checkpoint_id: 'cp_1',
+    checkpoint: { id: 'cp_1', status: 'sealed', changed_file_count: 0, can_restore_code: true, can_restore_conversation: true },
+    tool_calls: [],
+    created_at: '2026-08-30T00:00:00.000Z',
+  }
+}
+
+function streamValue(overrides: Record<string, unknown> = {}) {
+  return reactive({
+    streaming: false,
+    interrupted: null,
+    error: null,
+    status: 'idle',
+    phase: 'idle',
+    phaseDetail: null,
+    cancelling: false,
+    taskId: null,
+    messageId: null,
+    partialText: '',
+    segments: [],
+    toolCalls: [],
+    finished: false,
+    ...overrides,
+  })
 }
 
 function mountShell() {
@@ -72,7 +109,16 @@ function mountShell() {
         },
         MessageList: {
           props: ['messages', 'loading'],
-          template: '<div data-testid="messages" :data-loading="loading">{{ messages.map((item) => item.content).join("|") }}</div>',
+          template: `<div data-testid="messages" :data-loading="loading">
+            {{ messages.map((item) => item.content).join("|") }}
+            <button v-if="messages.length && messages[messages.length - 1].checkpoint_id" data-testid="rollback" @click="$emit('rollback', messages[messages.length - 1])">rollback</button>
+          </div>`,
+        },
+        CheckpointRestoreDialog: {
+          props: ['modelValue', 'conversationId', 'checkpointId', 'messageId'],
+          template: `<div v-if="modelValue" data-testid="restore-dialog" :data-conversation-id="conversationId" :data-checkpoint-id="checkpointId">
+            <button data-testid="restore-complete" @click="$emit('completed', { status: 'completed' })">complete</button>
+          </div>`,
         },
         'el-radio-group': true,
         'el-radio-button': true,
@@ -93,7 +139,8 @@ describe('WorkspaceShell conversation loading races', () => {
     start.mockReset()
     stop.mockReset()
     stopAll.mockReset()
-    streamState.value = { streaming: false, interrupted: null, error: null, status: 'idle', phase: 'idle', phaseDetail: null, cancelling: false, taskId: null, messageId: null, partialText: '', segments: [], toolCalls: [], finished: false }
+    streamState.value = streamValue()
+    streamOptions.value = null
     listConversations.mockResolvedValue({
       items: [
         { id: 'c_a', title: 'A' },
@@ -252,5 +299,83 @@ describe('WorkspaceShell conversation loading races', () => {
     })
     await flushPromises()
     expect(wrapper.find('[data-conversation-id="c_ws1-late"]').exists()).toBe(false)
+  })
+
+  it('消息列表发出 rollback 后打开 checkpoint restore dialog', async () => {
+    listMessages.mockResolvedValue({ items: [checkpointUserMessage('c_a')], total: 1, page: 1, page_size: 100 })
+    const wrapper = mountShell()
+    await flushPromises()
+    await wrapper.find('[data-conversation-id="c_a"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="rollback"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="restore-dialog"]').attributes('data-conversation-id')).toBe('c_a')
+    expect(wrapper.get('[data-testid="restore-dialog"]').attributes('data-checkpoint-id')).toBe('cp_1')
+  })
+
+  it('回滚时若停止后仍在运行，不打开 dialog', async () => {
+    listMessages.mockResolvedValue({ items: [checkpointUserMessage('c_a')], total: 1, page: 1, page_size: 100 })
+    streamState.value = streamValue({ streaming: true })
+    stop.mockResolvedValue('cancelled')
+    const wrapper = mountShell()
+    await flushPromises()
+    await wrapper.find('[data-conversation-id="c_a"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="rollback"]').trigger('click')
+    await flushPromises()
+
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="restore-dialog"]').exists()).toBe(false)
+  })
+
+  it('restore completed 后关闭 dialog 并重新加载消息和工作区会话', async () => {
+    listMessages
+      .mockResolvedValueOnce({ items: [checkpointUserMessage('c_a')], total: 1, page: 1, page_size: 100 })
+      .mockResolvedValueOnce({ items: [message('c_a', '恢复后的消息')], total: 1, page: 1, page_size: 100 })
+    const wrapper = mountShell()
+    await flushPromises()
+    await wrapper.find('[data-conversation-id="c_a"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="rollback"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="restore-complete"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="restore-dialog"]').exists()).toBe(false)
+    expect(listMessages).toHaveBeenCalledTimes(2)
+    expect(listConversations).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-testid="messages"]').text()).toContain('恢复后的消息')
+  })
+
+  it('首帧 anchor 只回填当前工作区会话的最后一条本地用户消息，replay 不增消息', async () => {
+    listMessages.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 })
+    const wrapper = mountShell()
+    await flushPromises()
+    await wrapper.find('[data-conversation-id="c_a"]').trigger('click')
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { messages: Message[]; currentId: string | null }
+    vm.messages.push({
+      id: 'local_workspace_user',
+      conversation_id: 'c_a',
+      role: 'user',
+      content: '创建文件',
+      tool_calls: [],
+      created_at: '2026-08-30T00:00:00.000Z',
+    })
+    const onCheckpointAnchor = streamOptions.value?.onCheckpointAnchor
+    expect(onCheckpointAnchor).toBeDefined()
+
+    onCheckpointAnchor!({ conversationId: 'c_b', userMessageId: 'user_b', checkpointId: 'cp_b' })
+    expect(vm.messages[0]?.id).toBe('local_workspace_user')
+    onCheckpointAnchor!({ conversationId: 'c_a', userMessageId: 'user_a', checkpointId: 'cp_a' })
+    onCheckpointAnchor!({ conversationId: 'c_a', userMessageId: 'user_a', checkpointId: 'cp_a' })
+
+    expect(vm.messages).toHaveLength(1)
+    expect(vm.messages[0]).toMatchObject({ id: 'user_a', checkpoint_id: 'cp_a', content: '创建文件' })
   })
 })
