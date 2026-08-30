@@ -13,7 +13,6 @@ from app.api.schemas.chat import ChatRequest
 from app.core.config import get_settings
 from app.core.errors import (
     ERR_CONVERSATION_WORKSPACE_CONFLICT,
-    ERR_STATE_NOT_CANCELLABLE,
     ERR_WORKSPACE_FILE_REF_INVALID,
     AppError,
 )
@@ -112,16 +111,13 @@ async def chat_stream(
         att = await att_service.get_attachment(db, user, aid)
         attachments.append(str(att.id))
 
-    pending = await TaskService().get_waiting_confirm_for_conversation(db, user.id, conversation.id)
-    if pending is not None:
-        raise AppError(ERR_STATE_NOT_CANCELLABLE, "当前会话仍有待确认操作，请先确认或拒绝")
-
     # 普通聊天也建立 Task：停止按钮必须能路由到正在执行的 graph，而不是只断开 SSE。
     task_service = TaskService()
-    task = await task_service.submit(
+    task = await task_service.submit_for_conversation(
         db,
         user,
         agent.id,
+        conversation.id,
         {
             "conversation_id": str(conversation.id),
             "message": req.message.content,

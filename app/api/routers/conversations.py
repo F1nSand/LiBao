@@ -12,7 +12,8 @@ from app.api.envelope import ok
 from app.api.schemas.conversations import CreateConversationRequest
 from app.services.agent import AgentService
 from app.services.conversation import ConversationService
-from app.services.serializers import serialize_conversation
+from app.services.serializers import serialize_active_task, serialize_conversation
+from app.services.task import TaskService
 from app.storage.models.user import User
 
 router = APIRouter()
@@ -39,6 +40,24 @@ async def create_conversation(
     agent = await AgentService().get_default(db, user.org_id)
     conv = await ConversationService().create(db, user, agent, req.title, workspace_id=req.workspace_id)
     return ok(serialize_conversation(conv))
+
+
+@router.get("/conversations/{conversation_id}/active-task")
+async def get_active_task(
+    conversation_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Any = Depends(get_db),
+):
+    """Return the owner-scoped task needed to reconnect a conversation after refresh."""
+    await ConversationService().get_owned(db, conversation_id, user.id)
+    task, relation = await TaskService().get_current_for_conversation(db, user.id, conversation_id)
+    return ok(
+        {
+            "conversation_id": str(conversation_id),
+            "relation": relation,
+            "task": serialize_active_task(task) if task is not None else None,
+        }
+    )
 
 
 @router.get("/conversations/{conversation_id}")

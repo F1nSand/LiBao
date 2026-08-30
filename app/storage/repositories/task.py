@@ -23,6 +23,7 @@ class TaskRepository:
         *,
         user_id: uuid.UUID,
         agent_id: uuid.UUID,
+        conversation_id: uuid.UUID | None = None,
         input: dict[str, Any],
         status: str = "pending",
         pending_confirm: dict[str, Any] | None = None,
@@ -30,6 +31,7 @@ class TaskRepository:
         task = Task(
             user_id=user_id,
             agent_id=agent_id,
+            conversation_id=conversation_id,
             input=input,
             status=status,
             pending_confirm=pending_confirm,
@@ -84,6 +86,67 @@ class TaskRepository:
             limit=1,
         )
         return items[0] if items else None
+
+    @staticmethod
+    def _conversation_matches(task: Task, conversation_id: uuid.UUID) -> bool:
+        """Match new explicit binding and legacy input/pending-confirm bindings."""
+        if task.conversation_id is not None:
+            return task.conversation_id == conversation_id
+        task_input = task.input if isinstance(task.input, dict) else {}
+        pending = task.pending_confirm if isinstance(task.pending_confirm, dict) else {}
+        return str(task_input.get("conversation_id") or pending.get("conversation_id") or "") == str(conversation_id)
+
+    @staticmethod
+    def _sort_key(task: Task) -> tuple[Any, Any]:
+        return (task.updated_at or task.created_at, task.created_at)
+
+    async def get_current_for_conversation(
+        self, user_id: uuid.UUID, conversation_id: uuid.UUID
+    ) -> tuple[Task | None, str | None]:
+        """Return the newest active task, or a recoverable failed task as fallback.
+
+        The relation distinguishes a live run from a process-restart task that
+        requires an explicit user recovery action. Legacy rows are matched from
+        their input/pending-confirm payload until they are rewritten.
+        """
+        items = await self.table.list(
+            filter_fn=lambda t: (
+                t.user_id == user_id
+                and t.deleted_at is None
+                and self._conversation_matches(t, conversation_id)
+            ),
+            sort_key=self._sort_key,
+            desc=True,
+        )
+        for task in items:
+            if task.status in {"pending", "running", "waiting_confirm"}:
+                return task, "active"
+        for task in items:
+            error = task.error if isinstance(task.error, dict) else {}
+            if task.status == "failed" and bool(error.get("recoverable")):
+                return task, "recoverable"
+        return None, None
+
+    async def list_for_conversation(
+        self,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        *,
+        statuses: set[str] | None = None,
+        limit: int | None = None,
+    ) -> list[Task]:
+        """List owner-scoped tasks for a conversation with legacy binding fallback."""
+        return await self.table.list(
+            filter_fn=lambda t: (
+                t.user_id == user_id
+                and t.deleted_at is None
+                and self._conversation_matches(t, conversation_id)
+                and (statuses is None or t.status in statuses)
+            ),
+            sort_key=self._sort_key,
+            desc=True,
+            limit=limit,
+        )
 
     async def update_status(self, task: Task, status: str, *, progress: float | None = None) -> None:
         task.status = status

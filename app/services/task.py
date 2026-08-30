@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.config import get_settings
-from app.core.errors import ERR_STATE_NOT_CANCELLABLE, ERR_TASK_NOT_FOUND, AppError
+from app.core.errors import ERR_STATE_NOT_CANCELLABLE, ERR_TASK_NOT_FOUND, ERR_TASK_RUNNING, AppError
 from app.services.notification import NotificationService
 from app.services.serializers import serialize_task
 from app.services.task_events import (
@@ -31,10 +31,15 @@ logger = logging.getLogger(__name__)
 TERMINAL_EVENTS = {"done", "error", "cancelled"}
 
 _transition_locks: dict[str, asyncio.Lock] = {}
+_conversation_locks: dict[str, asyncio.Lock] = {}
 
 
 def _transition_lock(task_id: uuid.UUID | str) -> asyncio.Lock:
     return _transition_locks.setdefault(str(task_id), asyncio.Lock())
+
+
+def _conversation_lock(conversation_id: uuid.UUID | str) -> asyncio.Lock:
+    return _conversation_locks.setdefault(str(conversation_id), asyncio.Lock())
 
 
 async def push_event(task_id: str, event_type: str, payload: dict[str, Any]) -> None:
@@ -80,6 +85,35 @@ class TaskService:
         await db.refresh(task)
         return task
 
+    async def get_current_for_conversation(
+        self, db: Any, user_id: uuid.UUID, conversation_id: uuid.UUID
+    ) -> tuple[Task | None, str | None]:
+        return await TaskRepository(db).get_current_for_conversation(user_id, conversation_id)
+
+    async def submit_for_conversation(
+        self,
+        db: Any,
+        user: User,
+        agent_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        input: dict[str, Any],
+    ) -> Task:
+        """Atomically reserve the conversation for one non-terminal task."""
+        async with _conversation_lock(conversation_id):
+            current, _ = await TaskRepository(db).get_current_for_conversation(user.id, conversation_id)
+            if current is not None:
+                raise AppError(ERR_TASK_RUNNING, "当前会话已有未完成任务，请等待其结束或先恢复/取消")
+            task = await TaskRepository(db).create(
+                user_id=user.id,
+                agent_id=agent_id,
+                conversation_id=conversation_id,
+                input=input,
+                status="pending",
+            )
+            await db.commit()
+            await db.refresh(task)
+            return task
+
     async def create_waiting_confirm(
         self,
         db: Any,
@@ -99,6 +133,7 @@ class TaskService:
         task = await TaskRepository(db).create(
             user_id=user.id,
             agent_id=agent_id,
+            conversation_id=conversation_id,
             input=input,
             status="waiting_confirm",
             pending_confirm=payload,
