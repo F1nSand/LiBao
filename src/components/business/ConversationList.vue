@@ -56,6 +56,7 @@ async function onDelete(id: string) {
         class="conv-item"
         :data-conversation-id="c.id"
         :class="{ active: c.id === chat.currentId }"
+        @click.self="onSelect(c.id)"
       >
         <button
           type="button"

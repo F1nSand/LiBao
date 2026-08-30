@@ -55,6 +55,33 @@ describe('ConversationList 键盘语义', () => {
     expect(wrapper.find('.conv-item-more').element.tagName).toBe('BUTTON')
   })
 
+  it('点击会话行留白区域也能切换，标题按钮不会重复触发', async () => {
+    const wrapper = mount(ConversationList, {
+      global: {
+        stubs: {
+          ElButton: { template: '<button><slot /></button>' },
+          ElInput: { template: '<input />' },
+          ElDropdown: { template: '<div><slot /><slot name="dropdown" /></div>' },
+          ElDropdownMenu: { template: '<div><slot /></div>' },
+          ElDropdownItem: { template: '<div><slot /></div>' },
+          ElIcon: { template: '<span><slot /></span>' },
+          MoreFilled: true,
+          Plus: true,
+          Search: true,
+        },
+      },
+    })
+
+    await wrapper.findAll('.conv-item')[1].trigger('click')
+    expect(chat.selectConversation).toHaveBeenCalledTimes(1)
+    expect(chat.selectConversation).toHaveBeenCalledWith('c2')
+
+    vi.clearAllMocks()
+    await wrapper.findAll('.conv-item-select')[1].trigger('click')
+    expect(chat.selectConversation).toHaveBeenCalledTimes(1)
+    expect(chat.selectConversation).toHaveBeenCalledWith('c2')
+  })
+
   it('消息请求未完成时也立即跳转到聊天页', async () => {
     route.value.path = '/kb'
     chat.selectConversation.mockReturnValue(new Promise<void>(() => undefined))
