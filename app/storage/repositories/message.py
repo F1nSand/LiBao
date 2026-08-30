@@ -31,6 +31,13 @@ class MessageRepository:
             rows = rows[offset:]
         return rows[:limit] if limit is not None else rows
 
+    async def get_in_conversation(
+        self, conversation_id: uuid.UUID, message_id: uuid.UUID
+    ) -> Message | None:
+        """Return a message only when it belongs to the requested conversation."""
+        rows = await self.list_by_conversation(conversation_id, limit=None, offset=0)
+        return next((row for row in rows if row.id == message_id), None)
+
     async def list_active(
         self,
         conversation_id: uuid.UUID,

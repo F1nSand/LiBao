@@ -27,6 +27,8 @@ from app.checkpoints.runtime import get_checkpoint_service
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.storage.models.conversation import Conversation
+from app.storage.models.message import Message
+from app.storage.repositories.attachment import AttachmentRepository
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.task import TaskRepository
 
@@ -97,6 +99,103 @@ class CheckpointRestoreService:
         tasks = await self._active_tasks(db, conversation.id)
         if tasks:
             raise RestoreConflict()
+
+    async def _draft_for_message(self, db: Any, conversation: Conversation, message: Message) -> dict[str, Any]:
+        """Build an authoritative composer draft without mutating attachment ownership."""
+        attachments: list[dict[str, Any]] = []
+        attachment_repo = AttachmentRepository(db)
+        for raw_ref in message.attachments or []:
+            ref = raw_ref if isinstance(raw_ref, dict) else {"attachment_id": str(raw_ref)}
+            raw_id = ref.get("attachment_id") or ref.get("id")
+            attachment_id = str(raw_id or "")
+            row = None
+            try:
+                if raw_id:
+                    row = await attachment_repo.get(conversation.user_id, uuid.UUID(str(raw_id)))
+            except (TypeError, ValueError):
+                row = None
+            historical_name = ref.get("name") or ref.get("filename") or ""
+            historical_mime = ref.get("mime_type") or ref.get("content_type")
+            historical_size = ref.get("size")
+            if row is None:
+                available = False
+                status = ref.get("status")
+                unavailable_reason = "附件已不可用"
+            else:
+                available = row.status != "failed"
+                status = row.status
+                unavailable_reason = None if available else (row.error or "附件处理失败")
+                if not historical_name:
+                    historical_name = row.filename
+                if not historical_mime:
+                    historical_mime = row.content_type
+                if historical_size is None:
+                    historical_size = row.size_bytes
+            attachments.append(
+                {
+                    "attachment_id": attachment_id,
+                    "name": historical_name,
+                    "mime_type": historical_mime,
+                    "size": historical_size,
+                    "status": status,
+                    "available": available,
+                    "unavailable_reason": unavailable_reason,
+                }
+            )
+        return {
+            "source_message_id": str(message.id),
+            "content": message.content,
+            "attachments": attachments,
+            "file_refs": [dict(item) if isinstance(item, dict) else item for item in (message.file_refs or [])],
+        }
+
+    async def _conversation_plan(
+        self, db: Any, conversation: Conversation, target: CodeCheckpoint, mode: RollbackMode
+    ) -> dict[str, Any]:
+        """Validate the checkpoint/message binding and derive the post-restore branch."""
+        if mode == "code_only":
+            # Code-only switching is intentionally usable for detached/future nodes,
+            # including legacy manifests that predate persisted message rows.
+            return {
+                "action": "unchanged",
+                "active_message_head_after_id": (
+                    str(conversation.active_message_head_id) if conversation.active_message_head_id else None
+                ),
+                "withdrawn_from_message_id": None,
+                "hidden_message_count": 0,
+                "draft": None,
+            }
+        current_messages = await MessageRepository(db).list_active(
+            conversation.id,
+            conversation.active_message_head_id,
+            cursor_initialized=conversation.message_cursor_initialized,
+            limit=None,
+            offset=0,
+        )
+        target_message = await MessageRepository(db).get_in_conversation(conversation.id, target.user_message_id)
+        if target_message is None or target_message.role != "user":
+            raise AppError(40936, "checkpoint 与目标用户消息不匹配")
+        if (
+            target_message.checkpoint_id != target.id
+            or target_message.history_parent_id != target.anchor_message_head_id
+        ):
+            raise AppError(40936, "checkpoint 与目标用户消息不匹配")
+        try:
+            target_position = next(i for i, message in enumerate(current_messages) if message.id == target_message.id)
+        except StopIteration as exc:
+            raise AppError(40936, "目标消息不在当前会话分支") from exc
+        if not target.graph_parent_bound:
+            raise AppError(40937, "checkpoint 缺少可验证的对话图游标")
+        hidden = max(0, len(current_messages) - target_position)
+        return {
+            "action": "withdraw_from_target",
+            "active_message_head_after_id": (
+                str(target.anchor_message_head_id) if target.anchor_message_head_id else None
+            ),
+            "withdrawn_from_message_id": str(target_message.id),
+            "hidden_message_count": hidden,
+            "draft": await self._draft_for_message(db, conversation, target_message),
+        }
 
     async def _file_plan(
         self,
@@ -201,32 +300,22 @@ class CheckpointRestoreService:
             ):
                 raise AppError(40932, "checkpoint 与当前工作区不匹配")
             files, target_refs = await self._file_plan(conversation.id, target, Path(workspace_root))
-        messages = await MessageRepository(db).list_active(
-            conversation.id,
-            conversation.active_message_head_id,
-            cursor_initialized=conversation.message_cursor_initialized,
-            limit=None,
-            offset=0,
-        )
-        try:
-            target_position = next(i for i, message in enumerate(messages) if message.id == target.user_message_id)
-        except StopIteration:
-            target_position = len(messages) - 1
-        hidden = max(0, len(messages) - target_position - 1)
+        conversation_plan = await self._conversation_plan(db, conversation, target, mode)
         preview_id = uuid.uuid4()
         expires_at = datetime.now(UTC) + _PREVIEW_TTL
         payload = {
             "preview_id": str(preview_id),
-            "target": {"type": "checkpoint", "id": str(target.id)},
+            "target": {
+                "type": "checkpoint",
+                "id": str(target.id),
+                "message_id": str(target.user_message_id),
+            },
             "mode": mode,
             "target_message_id": str(target.user_message_id),
             "target_checkpoint_id": str(target.id),
             "expires_at": expires_at.isoformat(),
             "conversation_revision": conversation.history_revision,
-            "conversation": {
-                "truncate_after_message_id": str(target.user_message_id),
-                "hidden_message_count": hidden if mode in {"conversation_only", "both"} else 0,
-            },
+            "conversation": conversation_plan,
             "files": files if mode in {"code_only", "both"} else [],
             "warnings": [
                 "仅恢复 AI 直接文件工具产生的工作区文件；手动编辑/外部进程冲突文件将跳过。",
@@ -268,6 +357,7 @@ class CheckpointRestoreService:
         target = await self.checkpoints.store.read_checkpoint(conversation.id, target_id)
         if target is None:
             raise AppError(40431, "checkpoint 不存在或已过期")
+        conversation_plan = record.get("conversation") or await self._conversation_plan(db, conversation, target, mode)
         target_refs: dict[str, FileVersionRef] = {}
         files: list[dict[str, Any]] = []
         if root is not None:
@@ -316,14 +406,16 @@ class CheckpointRestoreService:
                 deleted += 1
                 results.append(FileRestoreResult(item["path"], "deleted", None, current_sha, None))
 
-        after_cursor = _cursor(conversation)
         if mode in {"conversation_only", "both"}:
-            conversation.active_message_head_id = target.user_message_id
-            conversation.active_graph_checkpoint_id = target.graph_input_checkpoint_id
-            conversation.active_code_node_id = target.id
-            conversation.history_revision += 1
+            conversation.active_message_head_id = target.anchor_message_head_id
+            conversation.message_cursor_initialized = True
+            conversation.active_graph_checkpoint_id = target.graph_parent_checkpoint_id
+            conversation.graph_cursor_initialized = target.graph_parent_bound
+            if mode == "both":
+                conversation.active_code_node_id = target.id
         elif mode == "code_only":
             conversation.active_code_node_id = target.id
+        conversation.history_revision += 1
         after_cursor = _cursor(conversation)
         operation = RollbackOperation(
             id=uuid.uuid4(),
@@ -345,7 +437,10 @@ class CheckpointRestoreService:
             "restored_files": restored,
             "deleted_files": deleted,
             "skipped_conflicts": [r.path for r in results if r.action == "skipped_conflict"],
-            "hidden_message_count": record["conversation"]["hidden_message_count"],
+            "target_message_id": str(target.user_message_id),
+            "mode": mode,
+            "conversation": conversation_plan,
+            "hidden_message_count": conversation_plan["hidden_message_count"],
             "undo_available": True,
             "history_revision": conversation.history_revision,
         }
@@ -382,7 +477,7 @@ class CheckpointRestoreService:
         preview_id = uuid.uuid4()
         payload = {
             "preview_id": str(preview_id),
-            "target": {"type": "rollback_operation_before", "id": str(operation.id)},
+            "target": {"type": "rollback_operation_before", "id": str(operation.id), "message_id": None},
             "mode": operation.mode,
             "target_message_id": (
                 str(operation.before_cursor.active_message_head_id)
@@ -391,7 +486,17 @@ class CheckpointRestoreService:
             ),
             "conversation_revision": conversation.history_revision,
             "expires_at": (datetime.now(UTC) + _PREVIEW_TTL).isoformat(),
-            "conversation": {"truncate_after_message_id": None, "hidden_message_count": 0},
+            "conversation": {
+                "action": "restore_cursor",
+                "active_message_head_after_id": (
+                    str(operation.before_cursor.active_message_head_id)
+                    if operation.before_cursor.active_message_head_id
+                    else None
+                ),
+                "withdrawn_from_message_id": None,
+                "hidden_message_count": 0,
+                "draft": None,
+            },
             "files": files,
             "warnings": [
                 "仅恢复 AI 直接文件工具产生的工作区文件；手动编辑/外部进程冲突文件将跳过。",
@@ -455,7 +560,9 @@ class CheckpointRestoreService:
                 results.append(FileRestoreResult(item["path"], "deleted", None, current_sha, None))
         desired = operation.before_cursor
         conversation.active_message_head_id = desired.active_message_head_id
+        conversation.message_cursor_initialized = desired.message_cursor_initialized
         conversation.active_graph_checkpoint_id = desired.active_graph_checkpoint_id
+        conversation.graph_cursor_initialized = desired.graph_cursor_initialized
         conversation.active_code_node_id = desired.active_code_node_id
         conversation.history_revision += 1
         after_cursor = _cursor(conversation)
@@ -479,6 +586,17 @@ class CheckpointRestoreService:
             "restored_files": restored,
             "deleted_files": deleted,
             "skipped_conflicts": [r.path for r in results if r.action == "skipped_conflict"],
+            "target_message_id": None,
+            "mode": operation.mode,
+            "conversation": {
+                "action": "restore_cursor",
+                "active_message_head_after_id": (
+                    str(desired.active_message_head_id) if desired.active_message_head_id else None
+                ),
+                "withdrawn_from_message_id": None,
+                "hidden_message_count": 0,
+                "draft": None,
+            },
             "hidden_message_count": 0,
             "undo_available": True,
             "history_revision": conversation.history_revision,
