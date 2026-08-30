@@ -83,6 +83,17 @@ def _title_from(content: str, max_chars: int = 20) -> str:
     return f"{text[:max_chars]}…" if len(text) > max_chars else text
 
 
+async def _resolve_previous_message_head(
+    conversation: Conversation, message_repo: MessageRepository
+) -> uuid.UUID | None:
+    """Resolve the parent for a new user turn without resurrecting withdrawn history."""
+    previous_head = conversation.active_message_head_id
+    if previous_head is None and not conversation.message_cursor_initialized:
+        existing_messages = await message_repo.list_by_conversation(conversation.id, limit=None, offset=0)
+        previous_head = existing_messages[-1].id if existing_messages else None
+    return previous_head
+
+
 def _graph_config(
     *,
     thread_id: str,
@@ -96,6 +107,7 @@ def _graph_config(
     force_image_context: bool = False,
     document_context: PreparedDocumentContext | None = None,
     checkpoint_id: uuid.UUID | None = None,
+    code_checkpoint_id: uuid.UUID | None = None,
     graph_parent_checkpoint_id: str | None = None,
     start_graph_from_root: bool = False,
 ) -> dict[str, Any]:
@@ -106,8 +118,12 @@ def _graph_config(
             "assistant_msg_id": str(assistant_msg_id),
         }
     }
-    if checkpoint_id is not None:
-        cfg["configurable"]["code_checkpoint_id"] = str(checkpoint_id)
+    # ``checkpoint_id`` is kept as a compatibility alias for existing callers;
+    # the v2 contract names this independent cursor explicitly
+    # ``code_checkpoint_id`` so it cannot be confused with LangGraph's parent.
+    effective_code_checkpoint_id = code_checkpoint_id if code_checkpoint_id is not None else checkpoint_id
+    if effective_code_checkpoint_id is not None:
+        cfg["configurable"]["code_checkpoint_id"] = str(effective_code_checkpoint_id)
     if graph_parent_checkpoint_id is not None:
         cfg["configurable"]["checkpoint_id"] = str(graph_parent_checkpoint_id)
     elif start_graph_from_root:
@@ -246,10 +262,11 @@ async def chat_stream_events(
         elif conversation.history_revision == 0:
             # A brand-new conversation without a compiled checkpointer is an explicit graph root.
             graph_parent_bound = True
-    previous_head = conversation.active_message_head_id
-    if previous_head is None:
-        existing_messages = await msg_repo.list_by_conversation(conversation.id, limit=None, offset=0)
-        previous_head = existing_messages[-1].id if existing_messages else None
+    # ``message_cursor_initialized=True, head=None`` is an intentional empty
+    # branch (for example after rolling back the first user turn).  Only legacy
+    # conversations without a cursor may infer their anchor from append-only
+    # history; otherwise a new turn would resurrect withdrawn messages.
+    previous_head = await _resolve_previous_message_head(conversation, msg_repo)
     if workspace:
         workspace_root = workspace["root_path"]
         workspace_id = workspace.get("id")

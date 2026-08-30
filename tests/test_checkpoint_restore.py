@@ -324,6 +324,27 @@ async def test_conversation_modes_withdraw_target_to_anchor_and_return_full_draf
     )
     assert [message.id for message in active] == [u1.id, a1.id]
 
+    # A replacement turn is appended from the restored anchor.  The withdrawn
+    # target and its assistant response remain historical rows but are absent
+    # from both the active branch and the next model context.
+    replacement = await MessageRepository().create(
+        conversation_id=conversation.id,
+        role="user",
+        content="第二条（重发）",
+        history_parent_id=conversation.active_message_head_id,
+    )
+    conversation.active_message_head_id = replacement.id
+    active_after_resend = await MessageRepository().list_active(
+        conversation.id,
+        conversation.active_message_head_id,
+        cursor_initialized=conversation.message_cursor_initialized,
+        limit=None,
+        offset=0,
+    )
+    assert [message.id for message in active_after_resend] == [u1.id, a1.id, replacement.id]
+    assert u2.id not in [message.id for message in active_after_resend]
+    assert a2.id not in [message.id for message in active_after_resend]
+
 
 @pytest.mark.asyncio
 async def test_withdraw_first_user_message_leaves_empty_active_history_and_trajectory(tmp_path: Path):

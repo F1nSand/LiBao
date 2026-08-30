@@ -59,6 +59,28 @@ async def test_uninitialized_null_head_keeps_legacy_append_only_fallback(monkeyp
     assert [row.content for row in active] == ["first", "second"]
 
 
+@pytest.mark.asyncio
+async def test_initialized_unknown_head_does_not_fallback_to_append_only_history(monkeypatch):
+    conversation_id = uuid.uuid4()
+    rows = _messages(conversation_id)
+    repo = MessageRepository()
+
+    async def fake_list(*_args, **_kwargs):
+        return [row.to_dict() for row in rows]
+
+    monkeypatch.setattr(repo.store, "jsonl_list", fake_list)
+
+    active = await repo.list_active(
+        conversation_id,
+        uuid.uuid4(),
+        cursor_initialized=True,
+        limit=None,
+        offset=0,
+    )
+
+    assert active == []
+
+
 def test_conversation_cursor_round_trip_preserves_initialized_empty_head():
     cursor = ConversationCursor(
         active_message_head_id=None,

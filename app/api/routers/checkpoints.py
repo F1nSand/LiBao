@@ -46,6 +46,8 @@ async def list_checkpoints(
                     str(conversation.active_message_head_id) if conversation.active_message_head_id else None
                 ),
                 "active_graph_checkpoint_id": conversation.active_graph_checkpoint_id,
+                "message_cursor_initialized": conversation.message_cursor_initialized,
+                "graph_cursor_initialized": conversation.graph_cursor_initialized,
                 "active_code_node_id": str(conversation.active_code_node_id)
                 if conversation.active_code_node_id
                 else None,
@@ -56,9 +58,14 @@ async def list_checkpoints(
                     "kind": "checkpoint",
                     "id": str(item.id),
                     "user_message_id": str(item.user_message_id),
+                    "message_id": str(item.user_message_id),
                     "status": item.status,
                     "changed_file_count": len(item.files),
                     "created_at": item.created_at.isoformat(),
+                    "can_restore_code": item.status in {"open", "sealed", "interrupted"},
+                    "can_restore_conversation": (
+                        item.status in {"open", "sealed", "interrupted"} and item.graph_parent_bound
+                    ),
                 }
                 for item in checkpoints
             ]

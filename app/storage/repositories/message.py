@@ -67,6 +67,11 @@ class MessageRepository:
             seen.add(current)
             current = row.history_parent_id
         if not chain:
+            if cursor_initialized:
+                # An initialized cursor is authoritative. If its head was
+                # deleted or belongs to another branch, fail closed instead of
+                # resurrecting the append-only history.
+                return []
             return rows[offset : offset + limit] if limit is not None else rows[offset:]
         chain.reverse()
         return chain[offset : offset + limit] if limit is not None else chain[offset:]

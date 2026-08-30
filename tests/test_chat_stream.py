@@ -7,12 +7,13 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from langchain_core.messages import AIMessage
 
 from app.core.errors import AppError
-from app.orchestration.chat_stream import _graph_config, chat_stream_events
+from app.orchestration.chat_stream import _graph_config, _resolve_previous_message_head, chat_stream_events
 from app.orchestration.checkpointer import JsonFileSaver
 from app.orchestration.graph import build_graph
 from app.orchestration.task_worker import route_cancel, running_task
@@ -52,6 +53,50 @@ def test_graph_config_distinguishes_code_anchor_from_graph_parent():
     assert cfg["configurable"]["code_checkpoint_id"] == "11111111-1111-1111-1111-111111111111"
     assert cfg["configurable"]["checkpoint_id"] == "graph-before-1"
     assert "start_graph_from_root" not in cfg["configurable"]
+
+
+def test_graph_config_accepts_explicit_code_checkpoint_id():
+    code_checkpoint_id = uuid.uuid4()
+    cfg = _graph_config(
+        thread_id="conversation-1",
+        trace_id="trace-1",
+        assistant_msg_id=uuid.uuid4(),
+        code_checkpoint_id=code_checkpoint_id,
+        graph_parent_checkpoint_id="graph-before-1",
+    )
+
+    assert cfg["configurable"]["code_checkpoint_id"] == str(code_checkpoint_id)
+    assert cfg["configurable"]["checkpoint_id"] == "graph-before-1"
+
+
+@pytest.mark.asyncio
+async def test_empty_message_cursor_does_not_resurrect_legacy_history():
+    class _Messages:
+        async def list_by_conversation(self, conversation_id, *, limit, offset):
+            return [SimpleNamespace(id=uuid.uuid4())]
+
+    conversation = SimpleNamespace(
+        id=uuid.uuid4(),
+        active_message_head_id=None,
+        message_cursor_initialized=True,
+    )
+    assert await _resolve_previous_message_head(conversation, _Messages()) is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_message_cursor_uses_append_only_tail_as_parent():
+    tail = uuid.uuid4()
+
+    class _Messages:
+        async def list_by_conversation(self, conversation_id, *, limit, offset):
+            return [SimpleNamespace(id=uuid.uuid4()), SimpleNamespace(id=tail)]
+
+    conversation = SimpleNamespace(
+        id=uuid.uuid4(),
+        active_message_head_id=None,
+        message_cursor_initialized=False,
+    )
+    assert await _resolve_previous_message_head(conversation, _Messages()) == tail
 
 
 def test_graph_config_marks_explicit_empty_graph_root():

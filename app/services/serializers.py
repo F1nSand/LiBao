@@ -48,7 +48,9 @@ def serialize_conversation(conv: Conversation) -> dict[str, Any]:
         "last_message_at": _dt(conv.last_message_at),
         "created_at": _dt(conv.created_at),
         "active_message_head_id": str(conv.active_message_head_id) if conv.active_message_head_id else None,
+        "message_cursor_initialized": conv.message_cursor_initialized,
         "active_graph_checkpoint_id": conv.active_graph_checkpoint_id,
+        "graph_cursor_initialized": conv.graph_cursor_initialized,
         "active_code_node_id": str(conv.active_code_node_id) if conv.active_code_node_id else None,
         "history_revision": conv.history_revision,
     }
