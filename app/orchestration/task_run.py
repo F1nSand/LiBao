@@ -76,11 +76,12 @@ async def _run_graph_common(
         # 不能硬编码 task.id——否则 JSON 轨 resume 打到无 checkpoint 的线程报 EmptyInputError
         thread_id = TaskService.resolve_execution_thread(task)
         task_input = task.input if isinstance(task.input, dict) else {}
-        conversation_id = (
+        conversation_id_raw = (
             task.conversation_id
             or (task.pending_confirm or {}).get("conversation_id")
             or task_input.get("conversation_id")
         )
+        conversation_id = str(conversation_id_raw) if conversation_id_raw is not None else None
         try:
             conversation_uuid = uuid.UUID(str(conversation_id)) if conversation_id else None
         except (AttributeError, ValueError):
