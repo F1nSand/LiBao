@@ -80,3 +80,54 @@ test.describe('checkpoint 消息操作栏（触屏）', () => {
     expect(box?.height).toBeGreaterThanOrEqual(44)
   })
 })
+
+test.describe('checkpoint live anchor', () => {
+  test('普通会话在首帧收到 anchor 后立即显示回滚/复制操作，无需刷新', async ({ page }) => {
+    await gotoChat(page)
+    await sendMessage(page, '首帧锚点普通会话')
+
+    const userMessage = page.locator('.msg.user').last()
+    await expect(userMessage.locator('.message-actions')).toHaveCount(1, { timeout: 10_000 })
+    await expect(userMessage.getByRole('button', { name: '回滚到此状态' })).toBeVisible()
+    await expect(userMessage.getByRole('button', { name: '复制消息' })).toBeVisible()
+
+    const buttons = userMessage.locator('.message-action')
+    await expect(buttons).toHaveCount(2)
+    await expect(buttons.nth(0)).toHaveAttribute('aria-label', '回滚到此状态')
+    await expect(buttons.nth(1)).toHaveAttribute('aria-label', '复制消息')
+
+    await page.evaluate(() => {
+      ;(window as unknown as { copied?: string }).copied = ''
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: async (text: string) => { (window as unknown as { copied?: string }).copied = text } },
+      })
+    })
+    await userMessage.hover()
+    await userMessage.getByRole('button', { name: '复制消息' }).click()
+    await expect.poll(() => page.evaluate(() => (window as unknown as { copied?: string }).copied)).toBe('首帧锚点普通会话')
+  })
+
+  test('WorkspaceShell 在首帧收到 anchor 后立即显示消息操作', async ({ page }) => {
+    await gotoChat(page)
+    await page.goto('/workspace')
+    await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
+    await expect(page).toHaveURL(/\/workspace\/ws_001/)
+
+    await page.locator('.composer textarea').fill('首帧锚点工作区会话')
+    await page.locator('.composer textarea').press('Enter')
+
+    const userMessage = page.locator('.msg.user').last()
+    await expect(userMessage.locator('.message-actions')).toHaveCount(1, { timeout: 10_000 })
+    await expect(userMessage.getByRole('button', { name: '回滚到此状态' })).toBeVisible()
+  })
+
+  test('[disconnect] replay 后不重复追加用户消息', async ({ page }) => {
+    await gotoChat(page)
+    await sendMessage(page, '[disconnect]')
+
+    await expect(page.locator('.msg.user .message-actions')).toHaveCount(1, { timeout: 10_000 })
+    await expect(page.locator('.run-status')).toContainText('已完成', { timeout: 15_000 })
+    await expect(page.locator('.msg.user')).toHaveCount(1)
+  })
+})

@@ -337,6 +337,15 @@ export const mockServer = {
       }
       ;(checkpointHistory[chatReq.conversation_id] ??= []).push({ kind: 'checkpoint', id: checkpointId, user_message_id: userMessage?.id, status: 'sealed', changed_file_count: 0, created_at: isoDate(0) })
       const script = buildChatScript(chatReq)
+      // 首帧把服务端已落库的用户消息与 checkpoint 一起交给前端；同一 script 也会进入 task event log，供 replay 幂等回放。
+      const first = script[0]
+      if (userMessage && first?.type === 'message_start' && typeof first.payload === 'object' && first.payload !== null) {
+        first.payload = {
+          ...(first.payload as Record<string, unknown>),
+          user_message_id: userMessage.id,
+          checkpoint_id: checkpointId,
+        }
+      }
       const taskId = String((script[0]?.payload as { task_id?: string } | undefined)?.task_id ?? '')
       if (taskId) {
         tasks.unshift({
