@@ -72,6 +72,7 @@ class WorkspaceMutationGateway:
                     rel,
                     tool_call_id=tool_call_id or self.context.tool_call_id,
                     planned_after_sha256=after_sha,
+                    planned_after_exists=True,
                 )
             else:
                 await store.prepare_file(
@@ -81,6 +82,7 @@ class WorkspaceMutationGateway:
                     before,
                     tool_call_id=tool_call_id or self.context.tool_call_id,
                     planned_after_sha256=after_sha,
+                    planned_after_exists=True,
                 )
             try:
                 _write_atomic(target, content)
@@ -91,6 +93,7 @@ class WorkspaceMutationGateway:
                     self.context.checkpoint_id,
                     rel,
                     final_after_sha256=hashlib.sha256(current).hexdigest() if current is not None else None,
+                    final_after_exists=current is not None,
                     status="failed",
                 )
                 raise
@@ -99,6 +102,7 @@ class WorkspaceMutationGateway:
                 self.context.checkpoint_id,
                 rel,
                 final_after_sha256=after_sha,
+                final_after_exists=True,
                 status="applied",
             )
 
@@ -121,6 +125,7 @@ class WorkspaceMutationGateway:
                 target.read_bytes(),
                 tool_call_id=tool_call_id or self.context.tool_call_id,
                 planned_after_sha256=None,
+                planned_after_exists=False,
             )
             try:
                 target.unlink()
@@ -130,6 +135,7 @@ class WorkspaceMutationGateway:
                     self.context.checkpoint_id,
                     rel,
                     final_after_sha256=hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None,
+                    final_after_exists=target.is_file(),
                     status="failed",
                 )
                 raise
@@ -138,6 +144,7 @@ class WorkspaceMutationGateway:
                 self.context.checkpoint_id,
                 rel,
                 final_after_sha256=None,
+                final_after_exists=False,
                 status="applied",
             )
 

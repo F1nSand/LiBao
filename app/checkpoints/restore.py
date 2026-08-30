@@ -274,8 +274,15 @@ class CheckpointRestoreService:
         for checkpoint in checkpoints[target_index:]:
             for path, mutation in checkpoint.files.items():
                 target_refs.setdefault(path, mutation.before)
-                expected[path] = mutation.final_after_sha256 or mutation.planned_after_sha256
-                expected_exists[path] = expected[path] is not None
+                after_state = mutation.final_after if mutation.final_after_recorded else mutation.planned_after
+                if after_state is None:
+                    # v1 manifests may have no explicit after-state.  Preserve the
+                    # old hash interpretation only for those records.
+                    expected[path] = mutation.final_after_sha256 or mutation.planned_after_sha256
+                    expected_exists[path] = expected[path] is not None
+                else:
+                    expected[path] = after_state.sha256
+                    expected_exists[path] = after_state.exists
         rows: list[dict[str, Any]] = []
         for path, target_ref in sorted(target_refs.items()):
             target_path = root / Path(path)

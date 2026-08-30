@@ -61,6 +61,34 @@ class FileVersionRef:
         )
 
 
+@dataclass(frozen=True)
+class FileAfterState:
+    """Observed post-mutation state; the bytes remain addressable only via before/undo refs."""
+
+    exists: bool
+    sha256: str | None
+    size_bytes: int | None = None
+    content_kind: ContentKind | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "exists": self.exists,
+            "sha256": self.sha256,
+            "size_bytes": self.size_bytes,
+            "content_kind": self.content_kind,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FileAfterState:
+        kind = data.get("content_kind")
+        return cls(
+            exists=bool(data.get("exists")),
+            sha256=str(data["sha256"]) if data.get("sha256") else None,
+            size_bytes=(max(0, int(data["size_bytes"])) if data.get("size_bytes") is not None else None),
+            content_kind="binary" if kind == "binary" else "text" if kind == "text" else None,
+        )
+
+
 @dataclass
 class FileMutationRecord:
     path: str
@@ -69,6 +97,9 @@ class FileMutationRecord:
     final_after_sha256: str | None = None
     tool_call_ids: list[str] = field(default_factory=list)
     status: MutationStatus = "prepared"
+    planned_after: FileAfterState | None = None
+    final_after: FileAfterState | None = None
+    final_after_recorded: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +109,9 @@ class FileMutationRecord:
             "final_after_sha256": self.final_after_sha256,
             "tool_call_ids": list(self.tool_call_ids),
             "status": self.status,
+            "planned_after": self.planned_after.to_dict() if self.planned_after else None,
+            "final_after": self.final_after.to_dict() if self.final_after else None,
+            "final_after_recorded": self.final_after_recorded,
         }
 
     @classmethod
@@ -85,13 +119,34 @@ class FileMutationRecord:
         status = data.get("status")
         if status not in {"prepared", "applied", "failed"}:
             status = "prepared"
+        status_value = status
+        planned_sha = str(data["planned_after_sha256"]) if data.get("planned_after_sha256") else None
+        final_sha = str(data["final_after_sha256"]) if data.get("final_after_sha256") else None
+        planned_after = (
+            FileAfterState.from_dict(data["planned_after"])
+            if isinstance(data.get("planned_after"), dict)
+            else FileAfterState(exists=planned_sha is not None, sha256=planned_sha)
+        )
+        final_recorded = (
+            bool(data.get("final_after_recorded"))
+            if "final_after_recorded" in data
+            else status_value in {"applied", "failed"}
+        )
+        final_after = (
+            FileAfterState.from_dict(data["final_after"])
+            if isinstance(data.get("final_after"), dict)
+            else (FileAfterState(exists=final_sha is not None, sha256=final_sha) if final_recorded else None)
+        )
         return cls(
             path=str(data.get("path") or ""),
             before=FileVersionRef.from_dict(data.get("before") or {}),
-            planned_after_sha256=(str(data["planned_after_sha256"]) if data.get("planned_after_sha256") else None),
-            final_after_sha256=(str(data["final_after_sha256"]) if data.get("final_after_sha256") else None),
+            planned_after_sha256=planned_sha,
+            final_after_sha256=final_sha,
             tool_call_ids=[str(v) for v in (data.get("tool_call_ids") or [])],
             status=status,
+            planned_after=planned_after,
+            final_after=final_after,
+            final_after_recorded=final_recorded,
         )
 
 
@@ -113,7 +168,7 @@ class CodeCheckpoint:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "id": str(self.id),
             "conversation_id": str(self.conversation_id),
             "user_message_id": str(self.user_message_id),

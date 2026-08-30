@@ -20,6 +20,7 @@ from typing import Any
 from app.checkpoints.models import (
     CheckpointIndex,
     CodeCheckpoint,
+    FileAfterState,
     FileMutationRecord,
     FileVersionRef,
     RollbackOperation,
@@ -245,7 +246,9 @@ class CodeCheckpointStore:
         *,
         tool_call_id: str,
         planned_after_sha256: str | None = None,
+        planned_after_exists: bool | None = None,
     ) -> FileMutationRecord:
+        planned_exists = planned_after_exists if planned_after_exists is not None else planned_after_sha256 is not None
         async with self._lock(conversation_id):
             checkpoint = await self._load_manifest_unlocked(conversation_id, checkpoint_id)
             existing = checkpoint.files.get(path)
@@ -260,6 +263,10 @@ class CodeCheckpointStore:
                         content_kind=_content_kind(content),
                     ),
                     planned_after_sha256=planned_after_sha256,
+                    planned_after=FileAfterState(
+                        exists=planned_exists,
+                        sha256=planned_after_sha256,
+                    ),
                     tool_call_ids=[tool_call_id],
                     status="prepared",
                 )
@@ -267,8 +274,12 @@ class CodeCheckpointStore:
             else:
                 if tool_call_id not in existing.tool_call_ids:
                     existing.tool_call_ids.append(tool_call_id)
-                if planned_after_sha256:
+                if planned_after_sha256 is not None or planned_after_exists is not None:
                     existing.planned_after_sha256 = planned_after_sha256
+                    existing.planned_after = FileAfterState(
+                        exists=planned_exists,
+                        sha256=planned_after_sha256,
+                    )
                 existing.status = "prepared"
             _atomic_write_json(self._manifest_path(conversation_id, checkpoint_id), checkpoint.to_dict())
             return existing
@@ -281,7 +292,9 @@ class CodeCheckpointStore:
         *,
         tool_call_id: str,
         planned_after_sha256: str | None = None,
+        planned_after_exists: bool | None = None,
     ) -> FileMutationRecord:
+        planned_exists = planned_after_exists if planned_after_exists is not None else planned_after_sha256 is not None
         async with self._lock(conversation_id):
             checkpoint = await self._load_manifest_unlocked(conversation_id, checkpoint_id)
             existing = checkpoint.files.get(path)
@@ -290,6 +303,10 @@ class CodeCheckpointStore:
                     path=path,
                     before=FileVersionRef(False, None, 0, "text"),
                     planned_after_sha256=planned_after_sha256,
+                    planned_after=FileAfterState(
+                        exists=planned_exists,
+                        sha256=planned_after_sha256,
+                    ),
                     tool_call_ids=[tool_call_id],
                     status="prepared",
                 )
@@ -297,8 +314,12 @@ class CodeCheckpointStore:
             else:
                 if tool_call_id not in existing.tool_call_ids:
                     existing.tool_call_ids.append(tool_call_id)
-                if planned_after_sha256:
+                if planned_after_sha256 is not None or planned_after_exists is not None:
                     existing.planned_after_sha256 = planned_after_sha256
+                    existing.planned_after = FileAfterState(
+                        exists=planned_exists,
+                        sha256=planned_after_sha256,
+                    )
                 existing.status = "prepared"
             _atomic_write_json(self._manifest_path(conversation_id, checkpoint_id), checkpoint.to_dict())
             return existing
@@ -311,6 +332,7 @@ class CodeCheckpointStore:
         *,
         final_after_sha256: str | None,
         status: str = "applied",
+        final_after_exists: bool | None = None,
     ) -> FileMutationRecord:
         if status not in {"prepared", "applied", "failed"}:
             raise ValueError("非法 mutation status")
@@ -321,6 +343,10 @@ class CodeCheckpointStore:
                 raise CheckpointStoreError("checkpoint mutation 不存在")
             record.final_after_sha256 = final_after_sha256
             record.status = status  # type: ignore[assignment]
+            if final_after_exists is None:
+                final_after_exists = final_after_sha256 is not None
+            record.final_after = FileAfterState(exists=final_after_exists, sha256=final_after_sha256)
+            record.final_after_recorded = status in {"applied", "failed"}
             _atomic_write_json(self._manifest_path(conversation_id, checkpoint_id), checkpoint.to_dict())
             return record
 
