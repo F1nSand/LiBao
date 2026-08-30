@@ -621,7 +621,7 @@ async def resume_stream_events(
         TaskService.resolve_execution_thread(task) if recovery else TaskService.resolve_resume_thread(task)
     )
     conversation_raw = (
-        ((task.input or {}).get("conversation_id") or task.conversation_id)
+        ((task.input or {}).get("conversation_id") or getattr(task, "conversation_id", None))
         if recovery
         else pending.get("conversation_id")
     )

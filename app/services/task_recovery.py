@@ -29,7 +29,7 @@ PROCESS_RESTART_KIND = "process_restart"
 
 def _conversation_id(task: Task) -> uuid.UUID | None:
     """Resolve a conversation binding from new and legacy task rows."""
-    raw = task.conversation_id
+    raw = getattr(task, "conversation_id", None)
     if raw is None:
         task_input = task.input if isinstance(task.input, dict) else {}
         pending = task.pending_confirm if isinstance(task.pending_confirm, dict) else {}
