@@ -11,7 +11,12 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import get_current_user, get_db
 from app.api.schemas.chat import ChatRequest
 from app.core.config import get_settings
-from app.core.errors import ERR_STATE_NOT_CANCELLABLE, ERR_WORKSPACE_FILE_REF_INVALID, AppError
+from app.core.errors import (
+    ERR_CONVERSATION_WORKSPACE_CONFLICT,
+    ERR_STATE_NOT_CANCELLABLE,
+    ERR_WORKSPACE_FILE_REF_INVALID,
+    AppError,
+)
 from app.core.logging import get_trace_id
 from app.orchestration.chat_stream import chat_stream_events
 from app.services.agent import AgentService
@@ -44,6 +49,15 @@ def _session_workspace(conv_id: str) -> dict[str, Any]:
     }
 
 
+def _resolve_workspace_id(conversation: Any, requested_workspace_id: Any) -> Any:
+    """Keep an existing conversation's persisted workspace binding immutable."""
+
+    bound_workspace_id = conversation.workspace_id
+    if requested_workspace_id is not None and requested_workspace_id != bound_workspace_id:
+        raise AppError(ERR_CONVERSATION_WORKSPACE_CONFLICT, "会话绑定的工作区与请求不一致")
+    return bound_workspace_id
+
+
 @router.post("/chat/stream")
 async def chat_stream(
     req: ChatRequest,
@@ -62,7 +76,7 @@ async def chat_stream(
     # M7-B：解析工作区（会话优先，其次请求）→ 项目级 agent + 文件工具；
     # 非工作区对话 → 隐式临时会话工作区（方案 A：普通对话也能生成文件，落地 cache/sessions/<conv_id>/）
     workspace = None
-    ws_id = conversation.workspace_id or req.workspace_id
+    ws_id = _resolve_workspace_id(conversation, req.workspace_id)
     if ws_id is not None:
         ws = await WorkspaceService().get_in_org(db, user.org_id, str(ws_id))
         overlay = discover_workspace_agent(ws.root_path)  # 工作区 `.agent/` 项目级能力叠加
