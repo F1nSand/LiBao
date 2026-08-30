@@ -178,6 +178,26 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
     expect(w.get('[aria-label="复制消息"]').attributes('title')).toBe('复制消息')
   })
 
+  it('操作栏使用稳定 class，不保留旧文字回滚入口', () => {
+    const w = mount(MessageBubble, {
+      props: {
+        message: {
+          id: 'u-stable-actions',
+          conversation_id: 'c1',
+          role: 'user',
+          content: '请修改',
+          checkpoint_id: 'cp-1',
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      },
+    })
+
+    expect(w.find('.message-actions').exists()).toBe(true)
+    expect(w.find('.message-action.rollback-action').exists()).toBe(true)
+    expect(w.find('.message-action.copy-action').exists()).toBe(true)
+    expect(w.find('.rollback-trigger').exists()).toBe(false)
+  })
+
   it('纯附件/纯引用消息不渲染空的用户文字气泡', () => {
     const userMsg: Message = {
       id: 'u-attachment',

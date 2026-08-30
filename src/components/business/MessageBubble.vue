@@ -317,6 +317,7 @@ const usageText = computed(() => {
   align-self: flex-end;
   min-height: 30px;
   margin-top: 4px;
+  pointer-events: none;
 }
 .message-action {
   display: inline-flex;
@@ -334,12 +335,18 @@ const usageText = computed(() => {
   cursor: pointer;
   opacity: 0;
   transform: translateY(-2px);
+  pointer-events: none;
   transition: opacity 140ms ease, transform 140ms ease, color 140ms ease, background 140ms ease;
 }
-.msg:hover .message-action,
-.message-actions:focus-within .message-action {
+.msg:hover .message-actions,
+.message-actions:has(.message-action:focus-visible) {
+  pointer-events: auto;
+}
+.msg:hover .message-actions .message-action,
+.message-actions:has(.message-action:focus-visible) .message-action {
   opacity: 1;
   transform: translateY(0);
+  pointer-events: auto;
 }
 .message-action:hover {
   border-color: color-mix(in srgb, var(--app-primary) 30%, var(--app-border-light));
@@ -347,9 +354,31 @@ const usageText = computed(() => {
   color: var(--app-link);
 }
 .message-action:focus-visible {
-  opacity: 1;
   outline: 2px solid var(--app-focus-ring);
   outline-offset: 2px;
+}
+
+@media (hover: none) {
+  .message-actions {
+    min-height: 44px;
+    pointer-events: auto;
+  }
+  .message-action {
+    width: 44px;
+    height: 44px;
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+  .message-action :deep(.el-icon) {
+    font-size: 16px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-action {
+    transition: none;
+  }
 }
 .msg-text {
   background: var(--app-content-bg);
