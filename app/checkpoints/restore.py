@@ -186,7 +186,7 @@ class CheckpointRestoreService:
         *,
         target_checkpoint_id: uuid.UUID,
         mode: RollbackMode,
-        workspace_root: str,
+        workspace_root: str | None,
         workspace_id: str | None = None,
     ) -> dict[str, Any]:
         if mode not in {"code_only", "conversation_only", "both"}:
@@ -195,9 +195,14 @@ class CheckpointRestoreService:
         target = await self.checkpoints.store.read_checkpoint(conversation.id, target_checkpoint_id)
         if target is None:
             raise AppError(40431, "checkpoint 不存在或已过期")
-        if not workspace_identity_matches(target.workspace_identity, workspace_root, workspace_id):
-            raise AppError(40932, "checkpoint 与当前工作区不匹配")
-        files, target_refs = await self._file_plan(conversation.id, target, Path(workspace_root))
+        files: list[dict[str, Any]] = []
+        target_refs: dict[str, FileVersionRef] = {}
+        if mode in {"code_only", "both"}:
+            if not workspace_root or not workspace_identity_matches(
+                target.workspace_identity, workspace_root, workspace_id
+            ):
+                raise AppError(40932, "checkpoint 与当前工作区不匹配")
+            files, target_refs = await self._file_plan(conversation.id, target, Path(workspace_root))
         messages = await MessageRepository(db).list_active(
             conversation.id, conversation.active_message_head_id, limit=None, offset=0
         )
@@ -248,20 +253,27 @@ class CheckpointRestoreService:
         await self._assert_idle(db, conversation)
         if record.get("kind") == "operation_before":
             return await self._execute_operation_preview(db, conversation, record, preview_id)
-        root = Path(record["workspace_root"])
+        mode = record["mode"]
+        root: Path | None = None
+        if mode in {"code_only", "both"}:
+            workspace_root = record.get("workspace_root")
+            if not workspace_root:
+                raise AppError(40932, "checkpoint 与当前工作区不匹配")
+            root = Path(workspace_root)
         target_id = uuid.UUID(record["target_checkpoint_id"])
         target = await self.checkpoints.store.read_checkpoint(conversation.id, target_id)
         if target is None:
             raise AppError(40431, "checkpoint 不存在或已过期")
-        files, target_refs = await self._file_plan(conversation.id, target, root)
-        mode = record["mode"]
-        if mode == "conversation_only":
-            files = []
+        target_refs: dict[str, FileVersionRef] = {}
+        files: list[dict[str, Any]] = []
+        if root is not None:
+            files, target_refs = await self._file_plan(conversation.id, target, root)
         before_cursor = _cursor(conversation)
         undo_files: dict[str, FileVersionRef] = {}
         results: list[FileRestoreResult] = []
         restored = deleted = conflicts = 0
         for item in files:
+            assert root is not None
             path = root / Path(item["path"])
             current = path.read_bytes() if path.is_file() else None
             current_sha = _sha256(current)

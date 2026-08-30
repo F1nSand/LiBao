@@ -90,13 +90,17 @@ async def create_restore_preview(
         from app.core.errors import AppError
 
         raise AppError(40031, "必须提供 target_checkpoint_id 或 target_id")
-    root, workspace_id = await _workspace_context(db, user, conversation)
     if req.target_type == "rollback_operation_before":
+        root, _ = await _workspace_context(db, user, conversation)
         return ok(
             await CheckpointRestoreService().preview_operation_before(
                 db, conversation, target_id, root
             )
         )
+    if req.mode == "conversation_only":
+        root, workspace_id = None, None
+    else:
+        root, workspace_id = await _workspace_context(db, user, conversation)
     return ok(
         await CheckpointRestoreService().preview_checkpoint(
             db,

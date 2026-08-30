@@ -9,6 +9,7 @@ import pytest
 from app.checkpoints.restore import CheckpointRestoreService
 from app.checkpoints.service import CheckpointService
 from app.checkpoints.store import CodeCheckpointStore
+from app.core.errors import AppError
 from app.storage.models.conversation import Conversation
 
 
@@ -103,9 +104,10 @@ async def test_manual_conflict_is_skipped(tmp_path: Path):
     target.write_text("manual edit", encoding="utf-8")
 
     service = CheckpointRestoreService(checkpoint_service)
+    conversation = _conversation(conversation_id)
     preview = await service.preview_checkpoint(
         _Db(),
-        _conversation(conversation_id),
+        conversation,
         target_checkpoint_id=checkpoint.id,
         mode="both",
         workspace_root=str(workspace),
@@ -169,3 +171,58 @@ async def test_rollback_can_switch_back_to_a_later_checkpoint(tmp_path: Path):
     assert second_preview["files"][0]["conflict"] is False
     await service.execute_preview(_Db(), conversation, uuid.UUID(second_preview["preview_id"]))
     assert target.read_bytes() == b"c"
+
+
+@pytest.mark.asyncio
+async def test_conversation_only_preview_ignores_workspace_identity_mismatch(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation_id = uuid.uuid4()
+    checkpoint = await checkpoint_service.create_anchor(
+        conversation_id=conversation_id,
+        user_message_id=uuid.uuid4(),
+        workspace_identity="foreign:/a/different/root",
+        anchor_message_head_id=None,
+    )
+
+    service = CheckpointRestoreService(checkpoint_service)
+    conversation = _conversation(conversation_id)
+    preview = await service.preview_checkpoint(
+        _Db(),
+        conversation,
+        target_checkpoint_id=checkpoint.id,
+        mode="conversation_only",
+        workspace_root=None,
+    )
+
+    assert preview["files"] == []
+    result = await service.execute_preview(_Db(), conversation, uuid.UUID(preview["preview_id"]))
+    assert result["status"] == "completed"
+    assert result["restored_files"] == 0
+
+
+@pytest.mark.asyncio
+async def test_code_modes_still_reject_workspace_identity_mismatch(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation_id = uuid.uuid4()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    checkpoint = await checkpoint_service.create_anchor(
+        conversation_id=conversation_id,
+        user_message_id=uuid.uuid4(),
+        workspace_identity=f"session:{tmp_path / 'other'}",
+        anchor_message_head_id=None,
+    )
+    service = CheckpointRestoreService(checkpoint_service)
+
+    for mode in ("code_only", "both"):
+        with pytest.raises(AppError) as exc:
+            await service.preview_checkpoint(
+                _Db(),
+                _conversation(conversation_id),
+                target_checkpoint_id=checkpoint.id,
+                mode=mode,
+                workspace_root=str(workspace),
+            )
+        assert exc.value.code == 40932
