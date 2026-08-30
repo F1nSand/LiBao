@@ -26,3 +26,5 @@
 - Task 4 验证：`tests/test_llm_transport_retry.py` 与 `tests/test_task_recovery.py` 共 7 个通过；Ruff 通过。
 - 后端全量回归：760 passed, 4 skipped；39 个既有弃用/依赖警告，无失败。
 - 前端 Task 5–7：等待用户在本线程直接授权后执行（安全审查拒绝了转述授权，当前未修改 FrontEnd）。
+- Review gate：发现并恢复基线 `tests/test_task_recovery.py` 的 3 个既有用例；随后该文件 6 个测试通过，Ruff 通过。
+- 最终后端全量回归（恢复基线用例后）：763 passed, 4 skipped；39 个既有弃用/依赖警告，无失败。
