@@ -216,6 +216,21 @@ async def chat_stream_events(
         graph_parent_checkpoint_id = conversation.active_graph_checkpoint_id
         graph_parent_bound = True
         start_graph_from_root = graph_parent_checkpoint_id is None
+        if graph_parent_checkpoint_id and getattr(graph_checkpointer, "aget_tuple", None) is not None:
+            verified = await graph_checkpointer.aget_tuple(
+                {
+                    "configurable": {
+                        "thread_id": str(conversation.id),
+                        "checkpoint_id": graph_parent_checkpoint_id,
+                    }
+                }
+            )
+            if verified is None:
+                # Never let a stale code-checkpoint UUID silently fall back to the
+                # thread's latest graph state; start an explicit empty graph instead.
+                graph_parent_checkpoint_id = None
+                graph_parent_bound = False
+                start_graph_from_root = True
     else:
         graph_tuple_resolver = getattr(graph_checkpointer, "aget_tuple", None)
         if graph_tuple_resolver is not None:

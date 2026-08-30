@@ -163,6 +163,39 @@ class CheckpointRestoreService:
             "file_refs": [dict(item) if isinstance(item, dict) else item for item in (message.file_refs or [])],
         }
 
+    async def _resolve_graph_parent(
+        self, conversation_id: uuid.UUID, target: CodeCheckpoint
+    ) -> tuple[str | None, bool]:
+        """Resolve a legacy input id to its actual parent, never treating input as parent."""
+        if target.graph_parent_bound:
+            return target.graph_parent_checkpoint_id, True
+        resolver = self.graph_checkpoint_resolver
+        candidate = target.graph_input_checkpoint_id or target.graph_parent_checkpoint_id
+        if resolver is None or not candidate:
+            return None, False
+        get_tuple = getattr(resolver, "aget_tuple", None)
+        if get_tuple is None:
+            return None, False
+        graph_tuple = await get_tuple(
+            {"configurable": {"thread_id": str(conversation_id), "checkpoint_id": str(candidate)}}
+        )
+        if graph_tuple is None or (graph_tuple.metadata or {}).get("source") != "input":
+            return None, False
+        checkpoint = graph_tuple.checkpoint or {}
+        raw_parent = checkpoint.get("parent_checkpoint_id")
+        parent_id = str(raw_parent) if raw_parent else None
+        target.graph_parent_checkpoint_id = parent_id
+        target.graph_parent_bound = True
+        with contextlib.suppress(Exception):
+            await self.checkpoints.store.bind_graph_run(
+                conversation_id,
+                target.id,
+                graph_parent_checkpoint_id=parent_id,
+                graph_parent_bound=True,
+                graph_output_checkpoint_id=target.graph_output_checkpoint_id,
+            )
+        return parent_id, True
+
     async def _conversation_plan(
         self, db: Any, conversation: Conversation, target: CodeCheckpoint, mode: RollbackMode
     ) -> dict[str, Any]:
@@ -198,7 +231,8 @@ class CheckpointRestoreService:
             target_position = next(i for i, message in enumerate(current_messages) if message.id == target_message.id)
         except StopIteration as exc:
             raise AppError(40936, "目标消息不在当前会话分支") from exc
-        if not target.graph_parent_bound:
+        _, graph_parent_bound = await self._resolve_graph_parent(conversation.id, target)
+        if not graph_parent_bound:
             raise AppError(40937, "checkpoint 缺少可验证的对话图游标")
         hidden = max(0, len(current_messages) - target_position)
         return {

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -431,6 +432,85 @@ async def test_restore_draft_preserves_attachment_metadata_and_availability(tmp_
     assert draft["attachments"][2]["available"] is True
     assert draft["attachments"][2]["status"] == "ready"
     assert draft["file_refs"] == [{"path": "src/main.py"}]
+
+
+@pytest.mark.asyncio
+async def test_legacy_graph_input_is_verified_and_migrated_to_parent(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation = _conversation(uuid.uuid4())
+    checkpoint, user_message = await _checkpoint_with_message(
+        checkpoint_service,
+        conversation,
+        content="旧图输入",
+        anchor_message_head_id=None,
+        history_parent_id=None,
+    )
+    loaded = await checkpoint_store.read_checkpoint(conversation.id, checkpoint.id)
+    assert loaded is not None
+    loaded.graph_parent_bound = False
+    loaded.graph_parent_checkpoint_id = None
+    loaded.graph_input_checkpoint_id = "legacy-input"
+    manifest = checkpoint_store._manifest_path(conversation.id, checkpoint.id)  # noqa: SLF001
+    manifest.write_text(__import__("json").dumps(loaded.to_dict()), encoding="utf-8")
+
+    class Resolver:
+        async def aget_tuple(self, config):
+            assert config["configurable"]["checkpoint_id"] == "legacy-input"
+            return SimpleNamespace(
+                metadata={"source": "input"},
+                checkpoint={"id": "legacy-input", "parent_checkpoint_id": "real-parent"},
+            )
+
+    service = CheckpointRestoreService(checkpoint_service, graph_checkpoint_resolver=Resolver())
+    parent, bound = await service._resolve_graph_parent(conversation.id, loaded)  # noqa: SLF001
+
+    assert parent == "real-parent"
+    assert bound is True
+    migrated = await checkpoint_store.read_checkpoint(conversation.id, checkpoint.id)
+    assert migrated is not None
+    assert migrated.graph_parent_checkpoint_id == "real-parent"
+    assert migrated.graph_parent_bound is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_graph_input_with_invalid_source_disables_conversation_restore(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation = _conversation(uuid.uuid4())
+    checkpoint, user_message = await _checkpoint_with_message(
+        checkpoint_service,
+        conversation,
+        content="无法验证的旧图",
+        anchor_message_head_id=None,
+        history_parent_id=None,
+    )
+    conversation.active_message_head_id = user_message.id
+    conversation.message_cursor_initialized = True
+    loaded = await checkpoint_store.read_checkpoint(conversation.id, checkpoint.id)
+    assert loaded is not None
+    loaded.graph_parent_bound = False
+    loaded.graph_input_checkpoint_id = "loop-node"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    loaded.workspace_identity = f"session:{workspace}"
+    manifest = checkpoint_store._manifest_path(conversation.id, checkpoint.id)  # noqa: SLF001
+    manifest.write_text(__import__("json").dumps(loaded.to_dict()), encoding="utf-8")
+
+    class Resolver:
+        async def aget_tuple(self, config):
+            return SimpleNamespace(metadata={"source": "loop"}, checkpoint={"id": "loop-node"})
+
+    service = CheckpointRestoreService(checkpoint_service, graph_checkpoint_resolver=Resolver())
+    with pytest.raises(AppError) as exc:
+        await service.preview_checkpoint(
+            _Db(), conversation, target_checkpoint_id=checkpoint.id, mode="conversation_only", workspace_root=None
+        )
+    assert exc.value.code == 40937
+    code_preview = await service.preview_checkpoint(
+        _Db(), conversation, target_checkpoint_id=checkpoint.id, mode="code_only", workspace_root=str(workspace)
+    )
+    assert code_preview["conversation"]["action"] == "unchanged"
 
 
 @pytest.mark.asyncio

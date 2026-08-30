@@ -17,6 +17,13 @@ from app.storage.repositories.message import MessageRepository
 
 
 class ConversationService:
+    @staticmethod
+    async def _ensure_message_cursor_initialized(db: Any, conversation: Conversation) -> None:
+        """Lazily mark legacy conversations with a known head as branch-aware."""
+        if not conversation.message_cursor_initialized and conversation.active_message_head_id is not None:
+            conversation.message_cursor_initialized = True
+            await db.commit()
+
     async def list(
         self,
         db: Any,
@@ -61,6 +68,7 @@ class ConversationService:
     async def messages(
         self, db: Any, conversation: Conversation, page: int, page_size: int
     ) -> dict[str, Any]:
+        await self._ensure_message_cursor_initialized(db, conversation)
         repo = MessageRepository(db)
         msgs = await repo.list_active(
             conversation.id,
@@ -93,7 +101,10 @@ class ConversationService:
                     "status": checkpoint.status,
                     "changed_file_count": len(checkpoint.files),
                     "can_restore_code": checkpoint.status in {"open", "sealed", "interrupted"},
-                    "can_restore_conversation": True,
+                    "can_restore_conversation": (
+                        checkpoint.status in {"open", "sealed", "interrupted"}
+                        and checkpoint.graph_parent_bound
+                    ),
                 }
             serialized.append(item)
         from app.api.schemas.common import paged
@@ -108,6 +119,7 @@ class ConversationService:
         seq 为按消息序的前端派生索引（非持久化；新消息插入会移位，可接受）。
         before_seq 加载更早一页；has_more 表示还有更早。
         """
+        await self._ensure_message_cursor_initialized(db, conversation)
         msgs = await MessageRepository(db).list_active(
             conversation.id,
             conversation.active_message_head_id,

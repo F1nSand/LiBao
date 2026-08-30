@@ -185,3 +185,27 @@ async def test_recover_incomplete_operations_marks_only_journals(tmp_path):
     assert recovered is not None
     assert recovered.status == "failed_partial"
     assert recovered.error and recovered.error["code"] == "incomplete_operation"
+
+
+def test_legacy_operation_reader_defaults_new_wal_fields():
+    raw = {
+        "id": str(uuid.uuid4()),
+        "conversation_id": str(uuid.uuid4()),
+        "target_checkpoint_id": str(uuid.uuid4()),
+        "mode": "code_only",
+        "before_cursor": ConversationCursor(None, None, None, 1).to_dict(),
+        "after_cursor": None,
+        "undo_files": {},
+        "file_results": [],
+        "status": "completed",
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+
+    operation = RollbackOperation.from_dict(raw)
+
+    assert operation.preview_id is None
+    assert operation.planned_files == []
+    assert operation.applied_paths == []
+    assert operation.planned_after_cursor is None
+    assert operation.error is None
+    assert operation.after_cursor is None
