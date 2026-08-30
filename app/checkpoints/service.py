@@ -77,6 +77,32 @@ class CheckpointService:
             for operation in await self.store.list_operations(conversation_id):
                 if operation.status not in {"prepared", "applying"}:
                     continue
+                planned_paths = {
+                    str(item.get("path"))
+                    for item in operation.planned_files
+                    if isinstance(item, dict) and item.get("path")
+                }
+                result_paths = {result.path for result in operation.file_results}
+                # If the cursor commit was durable and every planned path has a
+                # durable result, the only missing step is the terminal status
+                # write.  It is safe to finish that journal without touching
+                # workspace bytes.  Any uncovered path (or explicit failed
+                # result) remains a failed_partial operation requiring undo.
+                provably_complete = (
+                    operation.after_cursor is not None
+                    and planned_paths.issubset(result_paths)
+                    and not any(result.action == "failed" for result in operation.file_results)
+                )
+                if provably_complete:
+                    operation.status = (
+                        "partial"
+                        if any(result.action == "skipped_conflict" for result in operation.file_results)
+                        else "completed"
+                    )
+                    operation.error = None
+                    await self.store.update_operation(operation)
+                    total += 1
+                    continue
                 operation.status = "failed_partial"
                 operation.error = {
                     "code": "incomplete_operation",

@@ -187,6 +187,33 @@ async def test_recover_incomplete_operations_marks_only_journals(tmp_path):
     assert recovered.error and recovered.error["code"] == "incomplete_operation"
 
 
+@pytest.mark.asyncio
+async def test_recover_incomplete_operation_with_durable_after_cursor_is_completed(tmp_path):
+    store = CodeCheckpointStore(tmp_path / ".agent")
+    service = CheckpointService(store)
+    conversation_id = uuid.uuid4()
+    operation = RollbackOperation(
+        id=uuid.uuid4(),
+        conversation_id=conversation_id,
+        target_checkpoint_id=uuid.uuid4(),
+        mode="code_only",
+        before_cursor=ConversationCursor(None, None, None, 0),
+        planned_after_cursor=ConversationCursor(None, None, None, 1),
+        after_cursor=ConversationCursor(None, None, None, 1),
+        undo_files={},
+        file_results=[FileRestoreResult("a.txt", "restored")],
+        status="applying",
+        planned_files=[{"path": "a.txt"}],
+    )
+    await store.create_operation(operation)
+
+    assert await service.recover_incomplete_operations() == 1
+    recovered = await store.read_operation(conversation_id, operation.id)
+    assert recovered is not None
+    assert recovered.status == "completed"
+    assert recovered.error is None
+
+
 def test_legacy_operation_reader_defaults_new_wal_fields():
     raw = {
         "id": str(uuid.uuid4()),
