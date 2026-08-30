@@ -17,6 +17,7 @@ from app.orchestration.checkpointer import JsonFileSaver
 from app.orchestration.graph import build_graph
 from app.orchestration.task_worker import route_cancel, running_task
 from app.services.task import TaskService
+from app.services.task_events import list_task_events
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Conversation, User
 from app.storage.repositories.message import MessageRepository
@@ -113,6 +114,9 @@ async def test_chat_stream_event_sequence(chat_fixture):
         assert done["payload"]["message"]["round"] == 2
 
         msgs = await MessageRepository(session).list_by_conversation(conv.id)
+        start_payload = events[0]["payload"]
+        assert start_payload["user_message_id"] == str(msgs[0].id)
+        assert start_payload["checkpoint_id"] == str(msgs[0].checkpoint_id)
         roles = [m.role for m in msgs]
         assert roles == ["user", "assistant", "assistant"]  # 工具轮 + 最终轮各一条
         assert msgs[0].content == "现在几点？"
@@ -148,6 +152,12 @@ async def test_chat_task_lifecycle_exposes_id_and_finishes_done(chat_fixture):
         ]
         assert events[0]["type"] == "message_start"
         assert events[0]["payload"]["task_id"] == str(task.id)
+        assert events[0]["payload"]["user_message_id"]
+        assert events[0]["payload"]["checkpoint_id"]
+        stored_events = await list_task_events(str(task.id))
+        persisted_start = next(item for item in stored_events if item["type"] == "message_start")
+        assert persisted_start["payload"]["user_message_id"] == events[0]["payload"]["user_message_id"]
+        assert persisted_start["payload"]["checkpoint_id"] == events[0]["payload"]["checkpoint_id"]
         assert events[-1]["type"] == "done"
         stored = await TaskRepository(session).get_by_id(task.id)
         assert stored.status == "done"

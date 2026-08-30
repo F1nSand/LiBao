@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from langgraph.types import Command
@@ -204,10 +205,16 @@ async def chat_stream_events(
     if previous_head is None:
         existing_messages = await msg_repo.list_by_conversation(conversation.id, limit=None, offset=0)
         previous_head = existing_messages[-1].id if existing_messages else None
-    workspace_identity = build_workspace_identity(
-        workspace.get("root_path") if workspace else "",
-        workspace.get("id") if workspace else None,
-    )
+    if workspace:
+        workspace_root = workspace["root_path"]
+        workspace_id = workspace.get("id")
+    else:
+        # Direct callers (tests and recovery integrations) may omit the router's
+        # implicit session workspace; use the same isolated cache root here.
+        workspace_root = str(Path(get_settings().cache_dir) / "sessions" / str(conversation.id))
+        Path(workspace_root).mkdir(parents=True, exist_ok=True)
+        workspace_id = None
+    workspace_identity = build_workspace_identity(workspace_root, workspace_id)
     checkpoint = await checkpoint_service.create_anchor(
         conversation_id=conversation.id,
         user_message_id=user_message_id,
@@ -297,6 +304,8 @@ async def chat_stream_events(
         "agent_id": str(agent.id),
         "conversation_id": str(conversation.id),
         "task_id": str(task.id) if task is not None else None,
+        "user_message_id": str(user_msg.id),
+        "checkpoint_id": str(checkpoint.id),
     }
     if task is not None:
         await push_event(str(task.id), "message_start", message_start_payload)

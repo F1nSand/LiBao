@@ -35,6 +35,24 @@
 
 持久化事件类型包括 `message_start`、`model_retry`、`status`、`message`、`tool_call`、`tool_result`、`agent_switch`、`interrupt`、`done`、`error`、`cancelled`。`token`/`thinking` 仅存在于当前 SSE 连接，不推进任务游标；终态后应重新加载会话消息和轨迹。
 
+普通 `/chat/stream` 的首个 `message_start` 在用户消息成功持久化后携带可选回滚锚点：
+
+```json
+{
+  "type": "message_start",
+  "payload": {
+    "message_id": "<assistant-message-uuid>",
+    "agent_id": "<agent-uuid>",
+    "conversation_id": "<conversation-uuid>",
+    "task_id": "<task-uuid-or-null>",
+    "user_message_id": "<persisted-user-message-uuid>",
+    "checkpoint_id": "<code-checkpoint-uuid>"
+  }
+}
+```
+
+`message_id` 始终表示 assistant 消息；`user_message_id` 与 `checkpoint_id` 分别指向本轮真实用户消息和其 checkpoint。任务事件回放复用同一 payload；resume/恢复专用首帧可以省略这两个字段，旧客户端仍应按可选字段兼容。
+
 ## 从断点继续
 
 对 `failed` 且 `error.recoverable=true` 的任务：
