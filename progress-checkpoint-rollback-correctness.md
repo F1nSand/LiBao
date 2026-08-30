@@ -12,7 +12,7 @@
 - [complete] Task 6：准确表达写入、删除和 finalize 后状态（commit `577dad9`；mutation/store/restore/附件 → 37 passed, 1 skipped；Ruff、compileall 通过）
 - [complete] Task 7：旧会话与 v1 Manifest 的安全兼容（commit `45ae379`；兼容/restore/WAL/API → 32 passed；Ruff、compileall 通过）
 - [complete] Task 8：端到端回归与交付 Gate（commits `0ad8b8a`, `eea1112`, `1e864ee`, `9fb1b3b`；全量 pytest 748 passed, 4 skipped；Ruff、compileall、diff check 通过）
-- [complete] 422 兼容性跟进：前端使用不透明字符串 `client_request_id`，旧静态 bundle 缺少 execute 的新字段；schema 已支持有界字符串、preview 默认 request id、execute 兼容缺省值，同时保留 v2 请求的 mode/request-id 严格校验（本次修复提交后补充 commit hash；定向 2 passed，全量 749 passed, 4 skipped；Ruff、compileall、diff check 通过）。
+- [complete] 422 兼容性跟进：前端使用不透明字符串 `client_request_id`，旧静态 bundle 缺少 execute 的新字段；schema 已支持有界字符串、preview 默认 request id、execute 兼容缺省值，同时保留 v2 请求的 mode/request-id 严格校验（commit `095cf5e`；定向 2 passed，全量 749 passed, 4 skipped；Ruff、compileall、diff check 通过）。
 
 ## 验证记录
 
