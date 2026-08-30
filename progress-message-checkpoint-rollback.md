@@ -12,7 +12,7 @@
 
 ## Verification ledger
 
-- Backend: full `pytest -q` 706 passed, 4 skipped; targeted checkpoint/stream/file suites also passed.
+- Backend: full `pytest -q` 706 passed, 4 skipped; targeted checkpoint/stream/file suites also passed; historical node switching regression 3 passed.
 - Backend Ruff and `python -m compileall -q app`: passed.
 - Frontend: `npm run typecheck`, `npm run build`, serial `npx vitest run --maxWorkers=1 --minWorkers=1` 256 passed; ESLint clean except 2 pre-existing `any` warnings in mock server.
-- Commits: backend `55dbf68`, `849f69c`; frontend `e95686a`.
+- Commits: backend `55dbf68`, `849f69c`, `37e890a`, `54afe70`; frontend `e95686a`.
