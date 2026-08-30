@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     kb_root: str = f"{_LIB}/kb"  # KB 集合目录（index.json + documents/ + vectors.lance）
     cache_dir: str = f"{_LIB}/cache"  # 临时会话工作区（非工作区对话的文件落地；可 TTL 清理）
     cache_ttl_days: int = 7  # 临时会话工作区保留天数（超过即后台清理，见 core/session_cache.py）
+    checkpoint_retention_days: int = 30  # 消息级代码 checkpoint 非活跃会话保留天数
     frontend_dist: str = "frontend_dist"  # 前端构建产物（FastAPI 静态托管，源码目录）
 
     # ---- LLM（纯 OpenAI 协议，2026-08-27）----

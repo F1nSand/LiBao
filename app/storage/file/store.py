@@ -67,7 +67,14 @@ class FileStore:
 
     async def init(self) -> None:
         """目录骨架 + 预加载全部已注册表（运行期 register 不再有未加载覆盖风险）。"""
-        for rel in ("sessions", "checkpoints", "task_events", "memory/default/trace/_tasks", "data"):
+        for rel in (
+            "sessions",
+            "checkpoints",
+            "code-checkpoints",
+            "task_events",
+            "memory/default/trace/_tasks",
+            "data",
+        ):
             (self.root / rel).mkdir(parents=True, exist_ok=True)
         (self.kb_root).mkdir(parents=True, exist_ok=True)
         for name in list(self.tables):

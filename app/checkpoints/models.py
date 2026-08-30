@@ -1,0 +1,186 @@
+"""消息级代码 checkpoint 的纯数据模型。
+
+模型只描述可持久化的数据，不依赖 FastAPI、LangGraph 或工作区实现；blob 内容始终
+在 store 中按 bytes 读写，因而文本和二进制文件共享同一条恢复路径。
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any, Literal
+
+CheckpointStatus = Literal["open", "sealed", "interrupted", "expired"]
+MutationStatus = Literal["prepared", "applied", "failed"]
+ContentKind = Literal["text", "binary"]
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+def _dt(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+@dataclass(frozen=True)
+class FileVersionRef:
+    exists: bool
+    blob_sha256: str | None
+    size_bytes: int
+    content_kind: ContentKind
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "exists": self.exists,
+            "blob_sha256": self.blob_sha256,
+            "size_bytes": self.size_bytes,
+            "content_kind": self.content_kind,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FileVersionRef:
+        return cls(
+            exists=bool(data.get("exists")),
+            blob_sha256=str(data["blob_sha256"]) if data.get("blob_sha256") else None,
+            size_bytes=max(0, int(data.get("size_bytes") or 0)),
+            content_kind="binary" if data.get("content_kind") == "binary" else "text",
+        )
+
+
+@dataclass
+class FileMutationRecord:
+    path: str
+    before: FileVersionRef
+    planned_after_sha256: str | None = None
+    final_after_sha256: str | None = None
+    tool_call_ids: list[str] = field(default_factory=list)
+    status: MutationStatus = "prepared"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "before": self.before.to_dict(),
+            "planned_after_sha256": self.planned_after_sha256,
+            "final_after_sha256": self.final_after_sha256,
+            "tool_call_ids": list(self.tool_call_ids),
+            "status": self.status,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FileMutationRecord:
+        status = data.get("status")
+        if status not in {"prepared", "applied", "failed"}:
+            status = "prepared"
+        return cls(
+            path=str(data.get("path") or ""),
+            before=FileVersionRef.from_dict(data.get("before") or {}),
+            planned_after_sha256=(str(data["planned_after_sha256"]) if data.get("planned_after_sha256") else None),
+            final_after_sha256=(str(data["final_after_sha256"]) if data.get("final_after_sha256") else None),
+            tool_call_ids=[str(v) for v in (data.get("tool_call_ids") or [])],
+            status=status,
+        )
+
+
+@dataclass
+class CodeCheckpoint:
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    user_message_id: uuid.UUID
+    workspace_identity: str
+    anchor_message_head_id: uuid.UUID
+    graph_input_checkpoint_id: str | None = None
+    status: CheckpointStatus = "open"
+    files: dict[str, FileMutationRecord] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=_utcnow)
+    sealed_at: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "id": str(self.id),
+            "conversation_id": str(self.conversation_id),
+            "user_message_id": str(self.user_message_id),
+            "workspace_identity": self.workspace_identity,
+            "anchor_message_head_id": str(self.anchor_message_head_id),
+            "graph_input_checkpoint_id": self.graph_input_checkpoint_id,
+            "status": self.status,
+            "files": {path: record.to_dict() for path, record in self.files.items()},
+            "created_at": _dt(self.created_at),
+            "sealed_at": _dt(self.sealed_at),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CodeCheckpoint:
+        try:
+            status = data.get("status")
+            if status not in {"open", "sealed", "interrupted", "expired"}:
+                status = "interrupted"
+            files = {
+                str(path): FileMutationRecord.from_dict(record)
+                for path, record in (data.get("files") or {}).items()
+                if isinstance(record, dict)
+            }
+            return cls(
+                id=uuid.UUID(str(data["id"])),
+                conversation_id=uuid.UUID(str(data["conversation_id"])),
+                user_message_id=uuid.UUID(str(data["user_message_id"])),
+                workspace_identity=str(data.get("workspace_identity") or ""),
+                anchor_message_head_id=uuid.UUID(str(data["anchor_message_head_id"])),
+                graph_input_checkpoint_id=(
+                    str(data["graph_input_checkpoint_id"]) if data.get("graph_input_checkpoint_id") else None
+                ),
+                status=status,
+                files=files,
+                created_at=_parse_dt(data.get("created_at")) or _utcnow(),
+                sealed_at=_parse_dt(data.get("sealed_at")),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("代码 checkpoint manifest 无效") from exc
+
+
+@dataclass
+class CheckpointIndex:
+    conversation_id: uuid.UUID
+    checkpoint_ids: list[uuid.UUID] = field(default_factory=list)
+    operation_ids: list[uuid.UUID] = field(default_factory=list)
+    last_active_at: datetime = field(default_factory=_utcnow)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "conversation_id": str(self.conversation_id),
+            "checkpoint_ids": [str(v) for v in self.checkpoint_ids],
+            "operation_ids": [str(v) for v in self.operation_ids],
+            "last_active_at": _dt(self.last_active_at),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], conversation_id: uuid.UUID) -> CheckpointIndex:
+        def parse_ids(values: Any) -> list[uuid.UUID]:
+            out: list[uuid.UUID] = []
+            for value in values or []:
+                try:
+                    out.append(uuid.UUID(str(value)))
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+        return cls(
+            conversation_id=conversation_id,
+            checkpoint_ids=parse_ids(data.get("checkpoint_ids")),
+            operation_ids=parse_ids(data.get("operation_ids")),
+            last_active_at=_parse_dt(data.get("last_active_at")) or _utcnow(),
+        )
