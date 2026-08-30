@@ -252,7 +252,7 @@ class TaskService:
         """恢复普通 chat failed Task 时也命中 conversation thread；确认任务保持旧优先级。"""
         pending = task.pending_confirm or {}
         task_input = task.input if isinstance(task.input, dict) else {}
-        return str(pending.get("thread_id") or task_input.get("conversation_id") or task.id)
+        return str(pending.get("thread_id") or task.conversation_id or task_input.get("conversation_id") or task.id)
 
     async def recover_precheck(self, db: Any, task: Task, idempotency_key: str) -> str:
         """CAS failed→running；重复 key 在已有运行中时不重复启动 producer。"""
