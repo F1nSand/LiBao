@@ -71,6 +71,14 @@ class TaskRepository:
             )
         )
 
+    async def list_all(self, *, statuses: set[str] | None = None) -> list[Task]:
+        """List every non-deleted task for startup reconciliation."""
+        return await self.table.list(
+            filter_fn=lambda t: t.deleted_at is None and (statuses is None or t.status in statuses),
+            sort_key=self._sort_key,
+            desc=True,
+        )
+
     async def get_waiting_confirm_for_conversation(
         self, user_id: uuid.UUID, conversation_id: uuid.UUID
     ) -> Task | None:

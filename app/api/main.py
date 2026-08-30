@@ -63,6 +63,11 @@ async def lifespan(app: FastAPI):
     recovered_operations = await checkpoint_service.recover_incomplete_operations()
     if recovered_operations:
         logger.info("rollback operation recovery: marked %d incomplete journals failed_partial", recovered_operations)
+    from app.services.task_recovery import reconcile_orphaned_tasks
+
+    task_recovery = await reconcile_orphaned_tasks(graph=app.state.graph)
+    if task_recovery["scanned"]:
+        logger.info("task startup reconciliation: %s", task_recovery)
 
     async def checkpoint_cache_loop():
         while True:
