@@ -283,6 +283,8 @@ def serialize_task(t: Task) -> dict[str, Any]:
     return {
         "id": str(t.id),
         "agent_id": str(t.agent_id),
+        "conversation_id": str(t.conversation_id) if t.conversation_id is not None else None,
+        "recovery_graph_checkpoint_id": t.recovery_graph_checkpoint_id,
         "status": t.status,
         "progress": t.progress,
         "input": t.input,
@@ -291,8 +293,30 @@ def serialize_task(t: Task) -> dict[str, Any]:
         "error": error,
         "last_event_seq": getattr(t, "last_event_seq", 0),
         "recovery_attempts": getattr(t, "recovery_attempts", 0),
+        "started_at": _dt(getattr(t, "started_at", None)),
         "created_at": _dt(t.created_at),
         "updated_at": _dt(t.updated_at),
+    }
+
+
+def serialize_active_task(t: Task) -> dict[str, Any]:
+    """Return the owner-scoped task summary used to cold-attach a conversation.
+
+    The full task input may contain the user's message, attachment IDs and file
+    references; none of it is needed to discover an existing run in the UI.
+    """
+    full = serialize_task(t)
+    return {
+        key: full[key]
+        for key in (
+            "id",
+            "status",
+            "last_event_seq",
+            "started_at",
+            "updated_at",
+            "pending_confirm",
+            "error",
+        )
     }
 
 

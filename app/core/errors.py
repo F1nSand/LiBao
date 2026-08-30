@@ -79,6 +79,7 @@ ERR_MULTIMODAL_UNSUPPORTED = 60005  # 当前 endpoint 明确拒绝图片输入
 ERR_SANDBOX_UNAVAILABLE = 60006  # 选择的 shell/docker 后端不可用
 ERR_CHECKPOINT_INVALID = 60007  # 断点损坏或无法安全解码
 ERR_LLM_TRANSPORT = 60008  # 模型流式连接中断，可从失败节点恢复
+ERR_TASK_PROCESS_INTERRUPTED = 60009  # 服务进程重启导致任务中断
 
 
 class LLMFailureKind(StrEnum):

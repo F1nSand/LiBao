@@ -23,10 +23,12 @@ from app.orchestration.checkpointer import JsonFileSaver
 from app.orchestration.graph import build_graph
 from app.orchestration.task_run import run_task_graph
 from app.services.attachment import AttachmentService
+from app.services.serializers import serialize_active_task
 from app.services.task import TaskService
 from app.storage.constants import ADMIN_USER, DEFAULT_ORG_ID
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Attachment, User
+from app.storage.models.task import Task
 from app.storage.repositories.run_log import RunLogRepository
 from app.storage.repositories.task import TaskRepository
 
@@ -471,3 +473,28 @@ async def test_submit_task_rejects_inaccessible_attachment_before_task_creation(
     assert called == []
     async with get_store().session() as session:
         assert await TaskRepository(session).count_for_user(ADMIN_USER.id) == before
+
+
+def test_active_task_summary_excludes_private_task_input():
+    """会话冷连接只返回运行摘要，不泄露用户消息/附件等 task.input。"""
+    task = Task(
+        user_id=ADMIN_USER.id,
+        agent_id=uuid.uuid4(),
+        conversation_id=uuid.uuid4(),
+        status="running",
+        input={
+            "message": "private user content",
+            "attachment_ids": ["secret-attachment"],
+            "file_refs": ["private.txt"],
+        },
+        last_event_seq=7,
+    )
+
+    summary = serialize_active_task(task)
+
+    assert summary["id"] == str(task.id)
+    assert summary["status"] == "running"
+    assert summary["last_event_seq"] == 7
+    assert "input" not in summary
+    assert "private user content" not in repr(summary)
+    assert "secret-attachment" not in repr(summary)

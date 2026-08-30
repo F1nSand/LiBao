@@ -11,6 +11,8 @@ from app.storage.file.rows import Row
 class Task(Row):
     user_id: uuid.UUID
     agent_id: uuid.UUID
+    conversation_id: uuid.UUID | None = None
+    recovery_graph_checkpoint_id: str | None = None
     status: str = "pending"  # pending / running / waiting_confirm / cancelled / done / failed
     input: dict = field(default_factory=dict)
     output: dict | None = None

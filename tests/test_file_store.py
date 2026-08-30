@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 
 from app.storage.file.store import FileContext, get_store
@@ -112,3 +113,23 @@ async def test_from_dict_restores_uuid_and_datetime_fields():
     assert isinstance(restored.org_id, _uuid.UUID)
     assert isinstance(restored.created_by, _uuid.UUID)
     assert isinstance(restored.created_at, type(ws.created_at))
+
+
+async def test_legacy_task_row_without_recovery_fields_loads_with_none_defaults(tmp_path):
+    """旧版 tasks.json 缺少会话/恢复游标字段时仍可正常加载。"""
+    from app.storage.file.tables import FileTable
+
+    task = Task(user_id=uuid.UUID(int=0), agent_id=uuid.UUID(int=1), status="pending")
+    raw = task.to_dict()
+    raw.pop("conversation_id")
+    raw.pop("recovery_graph_checkpoint_id")
+    (tmp_path / "tasks.json").write_text(
+        json.dumps({"version": 1, "items": {str(task.id): raw}}),
+        encoding="utf-8",
+    )
+
+    table = FileTable(tmp_path, "tasks.json", Task)
+    restored = await table.get(task.id)
+    assert restored is not None
+    assert restored.conversation_id is None
+    assert restored.recovery_graph_checkpoint_id is None
