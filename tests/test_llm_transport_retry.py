@@ -99,3 +99,43 @@ async def test_manual_recovery_initial_none_selects_failed_checkpoint_before_gra
     assert frames
     assert graph.calls[0][0] is None
     assert graph.calls[0][1]["configurable"]["checkpoint_id"] == "failed-agent-input"
+
+
+@pytest.mark.asyncio
+async def test_manual_recovery_preserves_explicit_cursor_without_thread_fallback():
+    class Checkpointer:
+        def __init__(self):
+            self.failed_config_calls = 0
+
+        async def aget_failed_config(self, config):
+            self.failed_config_calls += 1
+            return {"configurable": {**config["configurable"], "checkpoint_id": "wrong-thread-error"}}
+
+    class Graph:
+        def __init__(self):
+            self.checkpointer = Checkpointer()
+            self.calls = []
+
+        async def astream(self, initial, config, stream_mode):
+            self.calls.append((initial, config))
+            yield ("values", {"final_message": {"content": "continued"}})
+
+    graph = Graph()
+
+    async def on_final(state):
+        return {"message": state["final_message"]}
+
+    frames = [
+        frame
+        async for frame in stream_graph_events(
+            graph=graph,
+            initial=None,
+            graph_config={"configurable": {"thread_id": "restart-thread", "checkpoint_id": "verified-cursor"}},
+            emit=sse_emitter(),
+            on_final=on_final,
+        )
+    ]
+
+    assert frames
+    assert graph.checkpointer.failed_config_calls == 0
+    assert graph.calls[0][1]["configurable"]["checkpoint_id"] == "verified-cursor"

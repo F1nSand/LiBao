@@ -63,6 +63,7 @@ async def _run_graph_common(
     model_override: Any = None,
     image_context: PreparedImageInput | None = None,
     force_image_context: bool = False,
+    graph_checkpoint_id: str | None = None,
 ) -> None:
     """共享执行体：跑图 + 中断落自身行 + 终态迁移 + live-tail 事件。"""
     async with get_store().session() as db:
@@ -74,7 +75,12 @@ async def _run_graph_common(
         # F1：中断任务（chat/invoke 来源）的 thread 在 pending_confirm 里（conversation.id / uuid4），
         # 不能硬编码 task.id——否则 JSON 轨 resume 打到无 checkpoint 的线程报 EmptyInputError
         thread_id = TaskService.resolve_execution_thread(task)
-        conversation_id = (task.pending_confirm or {}).get("conversation_id")
+        task_input = task.input if isinstance(task.input, dict) else {}
+        conversation_id = (
+            task.conversation_id
+            or (task.pending_confirm or {}).get("conversation_id")
+            or task_input.get("conversation_id")
+        )
         try:
             conversation_uuid = uuid.UUID(str(conversation_id)) if conversation_id else None
         except (AttributeError, ValueError):
@@ -85,9 +91,11 @@ async def _run_graph_common(
             user_id=task.user_id,
             org_id=getattr(agent, "org_id", None),
             conversation_id=conversation_uuid,
-            task_input=task.input,
+            task_input=task_input,
         )
         graph_config: dict[str, Any] = {"configurable": {"thread_id": thread_id, "trace_id": trace_id}}
+        if graph_checkpoint_id is not None:
+            graph_config["configurable"]["checkpoint_id"] = str(graph_checkpoint_id)
         if model_override is not None:
             graph_config["configurable"]["model"] = model_override
         graph_config["configurable"].update(image_config(image_context, force_context=force_image_context))
@@ -329,6 +337,12 @@ async def recover_task_graph(
             task = await TaskRepository(db).get_by_id(task_id)
             if task is None:
                 return
+            recovery_graph_checkpoint_id = None
+            error = task.error if isinstance(task.error, dict) else {}
+            if error.get("kind") == "process_restart":
+                recovery_graph_checkpoint_id = task.recovery_graph_checkpoint_id
+                if not recovery_graph_checkpoint_id:
+                    return
             agent = await AgentRepository(db).get_by_id(task.agent_id)
             if agent is None:
                 return
@@ -350,6 +364,7 @@ async def recover_task_graph(
             model_override=model_override,
             image_context=prepared_images,
             force_image_context=True,
+            graph_checkpoint_id=recovery_graph_checkpoint_id,
         )
     except Exception as exc:  # noqa: BLE001
         await _mark_failed(task_id, exc, "recover task %s failed")

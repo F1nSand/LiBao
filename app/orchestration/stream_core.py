@@ -320,7 +320,8 @@ async def stream_graph_events(
         try:
             # 手动恢复以 initial=None 进入图时必须显式选取失败节点 checkpoint；
             # JsonFileSaver 的默认读取策略会回滚到失败输入之前，不能用于 retry。
-            if current_initial is None:
+            configurable = current_config.get("configurable", current_config) or {}
+            if current_initial is None and configurable.get("checkpoint_id") is None:
                 checkpointer = getattr(graph, "checkpointer", None)
                 resolver = getattr(checkpointer, "aget_failed_config", None)
                 if resolver is not None:

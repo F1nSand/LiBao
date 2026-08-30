@@ -621,7 +621,9 @@ async def resume_stream_events(
         TaskService.resolve_execution_thread(task) if recovery else TaskService.resolve_resume_thread(task)
     )
     conversation_raw = (
-        (task.input or {}).get("conversation_id") if recovery else pending.get("conversation_id")
+        ((task.input or {}).get("conversation_id") or task.conversation_id)
+        if recovery
+        else pending.get("conversation_id")
     )
     conversation_id = uuid.UUID(conversation_raw) if conversation_raw else None
     task_service = TaskService()
@@ -635,6 +637,10 @@ async def resume_stream_events(
             checkpoint_id = uuid.UUID(str(raw_checkpoint))
         except (AttributeError, ValueError):
             checkpoint_id = None
+    recovery_graph_checkpoint_id = None
+    task_error = task.error if isinstance(task.error, dict) else {}
+    if recovery and task_error.get("kind") == "process_restart":
+        recovery_graph_checkpoint_id = task.recovery_graph_checkpoint_id
     conversation_row = None
     if conversation_id:
         conversation_row = await ConversationRepository(db).table.get(conversation_id)
@@ -747,6 +753,7 @@ async def resume_stream_events(
         force_image_context=not recovery,
         document_context=resume_documents,
         checkpoint_id=checkpoint_id,
+        graph_parent_checkpoint_id=recovery_graph_checkpoint_id,
     )
 
     graph_checkpointer = getattr(graph, "checkpointer", None)
