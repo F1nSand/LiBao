@@ -5,7 +5,7 @@ import {
   listMessages,
   deleteConversation as apiDeleteConversation,
 } from '@/api/chat'
-import type { AttachmentRef, Conversation, Message } from '@/types'
+import type { AttachmentRef, CheckpointAnchor, Conversation, Message } from '@/types'
 
 /**
  * chat store（docs/02 §7）：只存客户端状态（会话列表/选中态/消息列表），
@@ -99,6 +99,26 @@ export const useChatStore = defineStore('chat', {
     /** 追加助手消息（onPersistedMessage 用流式状态补齐 content 后调用，防 done 后文本气泡消失） */
     appendAssistantMessage(msg: Message) {
       this.currentMessages.push(msg)
+    },
+
+    /** 用首帧 checkpoint 锚点回填当前会话的乐观用户消息，不追加重复消息。 */
+    reconcileCheckpointAnchor(anchor: CheckpointAnchor): boolean {
+      if (!this.currentId || anchor.conversationId !== this.currentId) return false
+      for (let index = this.currentMessages.length - 1; index >= 0; index -= 1) {
+        const message = this.currentMessages[index]
+        if (
+          message.role === 'user' &&
+          message.conversation_id === anchor.conversationId &&
+          message.id.startsWith('local_') &&
+          !message.checkpoint_id &&
+          !message.checkpoint
+        ) {
+          message.id = anchor.userMessageId
+          message.checkpoint_id = anchor.checkpointId
+          return true
+        }
+      }
+      return false
     },
   },
 })

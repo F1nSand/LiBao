@@ -30,6 +30,19 @@ function page(conversationId: string, content: string): Paged<Message> {
   return { items: [message(conversationId, content)], total: 1, page: 1, page_size: 50 }
 }
 
+function optimisticUserMessage(conversationId: string, content = '请修改文件'): Message {
+  return {
+    id: 'local_user_1',
+    conversation_id: conversationId,
+    role: 'user',
+    content,
+    attachments: [{ attachment_id: 'att_1', name: '需求.txt' }],
+    file_refs: [{ path: 'docs/需求.txt' }],
+    tool_calls: [],
+    created_at: '2026-08-30T00:00:00.000Z',
+  }
+}
+
 describe('chat store conversation loading races', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -130,5 +143,68 @@ describe('chat store conversation loading races', () => {
 
     expect(store.currentMessages[0]?.attachments).toEqual([attachment])
     expect(store.currentMessages[0]?.attachments?.[0]).not.toBe(attachment)
+  })
+
+  it('checkpoint anchor 回填当前会话最后一条本地用户消息', () => {
+    const store = useChatStore()
+    store.currentId = 'c_a'
+    const optimistic = optimisticUserMessage('c_a')
+    store.currentMessages = [optimistic]
+
+    const result = store.reconcileCheckpointAnchor({
+      conversationId: 'c_a',
+      userMessageId: 'user_1',
+      checkpointId: 'checkpoint_1',
+    })
+
+    expect(result).toBe(true)
+    expect(store.currentMessages).toHaveLength(1)
+    expect(store.currentMessages[0]).toMatchObject({
+      id: 'user_1',
+      checkpoint_id: 'checkpoint_1',
+      content: '请修改文件',
+      attachments: optimistic.attachments,
+      file_refs: optimistic.file_refs,
+    })
+  })
+
+  it('重复回放同一 checkpoint anchor 不追加消息且稳定 no-op', () => {
+    const store = useChatStore()
+    store.currentId = 'c_a'
+    store.currentMessages = [optimisticUserMessage('c_a')]
+    const anchor = { conversationId: 'c_a', userMessageId: 'user_1', checkpointId: 'checkpoint_1' }
+
+    expect(store.reconcileCheckpointAnchor(anchor)).toBe(true)
+    expect(store.reconcileCheckpointAnchor(anchor)).toBe(false)
+    expect(store.currentMessages).toHaveLength(1)
+    expect(store.currentMessages[0]?.id).toBe('user_1')
+    expect(store.currentMessages[0]?.checkpoint_id).toBe('checkpoint_1')
+  })
+
+  it('忽略其他会话、没有本地用户消息或已有不同 checkpoint 的 anchor', () => {
+    const store = useChatStore()
+    store.currentId = 'c_a'
+    const optimistic = optimisticUserMessage('c_a')
+    store.currentMessages = [optimistic]
+
+    expect(store.reconcileCheckpointAnchor({
+      conversationId: 'c_b', userMessageId: 'user_b', checkpointId: 'checkpoint_b',
+    })).toBe(false)
+    expect(store.currentMessages[0]).toMatchObject(optimistic)
+
+    store.currentMessages = [message('c_a', 'assistant')]
+    expect(store.reconcileCheckpointAnchor({
+      conversationId: 'c_a', userMessageId: 'user_a', checkpointId: 'checkpoint_a',
+    })).toBe(false)
+    expect(store.currentMessages[0]?.id).toBe('c_a-assistant')
+
+    const anchored = optimisticUserMessage('c_a')
+    anchored.id = 'user_existing'
+    anchored.checkpoint_id = 'checkpoint_existing'
+    store.currentMessages = [anchored]
+    expect(store.reconcileCheckpointAnchor({
+      conversationId: 'c_a', userMessageId: 'user_new', checkpointId: 'checkpoint_new',
+    })).toBe(false)
+    expect(store.currentMessages[0]).toMatchObject(anchored)
   })
 })

@@ -19,6 +19,7 @@ import CheckpointRestoreDialog from '@/components/business/CheckpointRestoreDial
 /** 对话工作台（docs/02 §4 / §5）：消息流 + 流式渲染 + 工具卡 + 中断确认 + 会话|轨迹切换（单通用 Agent，无切换） */
 const chat = useChatStore()
 const stream = useChatStream({
+  onCheckpointAnchor: chat.reconcileCheckpointAnchor,
   onPersistedMessage: (message) => {
     // 多流：后台流（其它会话）封口的消息不得 append 进当前会话列表（回该会话时服务端 loadMessages 补齐）
     const m0 = (message ?? {}) as Partial<Message>
