@@ -8,7 +8,6 @@
 - [completed] Task 2：会话当前 Task 查询与单会话单活提交
 - [completed] Task 3：启动时 orphan Task 对账与精确 graph cursor
 - [completed] Task 4：process_restart 精确游标人工恢复
-- [in_progress] Task 5：前端 active-task API、URL 会话恢复和消息幂等
 - [pending] Task 5：前端 active-task API、URL 会话恢复和消息幂等
 - [pending] Task 6：前端 cold attach、事件重建与本地 detach
 - [pending] Task 7：工作区 URL 恢复与重启恢复风险提示
@@ -25,3 +24,5 @@
 - Task 3 验证：`tests/test_task_recovery.py` 3 个通过；Ruff 通过。
 - Task 4：恢复图执行接受显式 `graph_checkpoint_id`；`stream_graph_events(initial=None)` 仅在未提供显式 cursor 时调用线程级失败解析；chat recovery 传递 `Task.recovery_graph_checkpoint_id`。
 - Task 4 验证：`tests/test_llm_transport_retry.py` 与 `tests/test_task_recovery.py` 共 7 个通过；Ruff 通过。
+- 后端全量回归：760 passed, 4 skipped；39 个既有弃用/依赖警告，无失败。
+- 前端 Task 5–7：等待用户在本线程直接授权后执行（安全审查拒绝了转述授权，当前未修改 FrontEnd）。
