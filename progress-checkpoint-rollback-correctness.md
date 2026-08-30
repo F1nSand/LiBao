@@ -13,7 +13,7 @@
 - [complete] Task 7：旧会话与 v1 Manifest 的安全兼容（commit `45ae379`；兼容/restore/WAL/API → 32 passed；Ruff、compileall 通过）
 - [complete] Task 8：端到端回归与交付 Gate（commits `0ad8b8a`, `eea1112`, `1e864ee`, `9fb1b3b`；全量 pytest 748 passed, 4 skipped；Ruff、compileall、diff check 通过）
 - [complete] 422 兼容性跟进：前端使用不透明字符串 `client_request_id`，旧静态 bundle 缺少 execute 的新字段且省略 preview `target_type`；schema 已支持有界字符串、旧 preview checkpoint 分支推断、preview 默认 request id、execute 兼容缺省值，同时保留 v2 请求的 mode/request-id 严格校验（commits `095cf5e`, `94848c5`；定向 2 passed，相关回归 49 passed，全量 750 passed, 4 skipped；Ruff、compileall、diff check 通过）。
-- [complete] Task 9：修正 JsonFileSaver 丢失 LangGraph parent config 的根因，并为 unbound manifest 增加 verified run-bounds 懒修复；禁止对缺失 parent provenance 的旧记录进行时间顺序猜测（commit 待本次提交回填；相关回归 60 passed；全量 753 passed, 4 skipped；Ruff、compileall、diff check 通过）。
+- [complete] Task 9：修正 JsonFileSaver 丢失 LangGraph parent config 的根因，并为 unbound manifest 增加 verified run-bounds 懒修复；禁止对缺失 parent provenance 的旧记录进行时间顺序猜测（commit `d29bcb4`；相关回归 60 passed；全量 753 passed, 4 skipped；Ruff、compileall、diff check 通过）。
 
 ## 验证记录
 
