@@ -39,7 +39,12 @@ async def test_get_latest_and_parent_config(tmp_path):
     saver = _saver(tmp_path)
     config = {"configurable": {"thread_id": "t2"}}
     saver.put(config, _checkpoint("c1"), {}, {})
-    saver.put(config, _checkpoint("c2", parent="c1"), {}, {})
+    saver.put(
+        {"configurable": {"thread_id": "t2", "checkpoint_id": "c1"}},
+        _checkpoint("c2"),
+        {},
+        {},
+    )
     tup = await saver.aget_tuple(config)
     assert tup.checkpoint["id"] == "c2"
     assert tup.parent_config["configurable"]["checkpoint_id"] == "c1"
@@ -182,40 +187,136 @@ async def test_run_bounds_are_indexed_by_code_checkpoint_id(tmp_path):
     config = {"configurable": {"thread_id": "t-run-bounds"}}
     saver.put(config, _checkpoint("c0"), {"source": "input"}, {})
     saver.put(
-        {"configurable": {"thread_id": "t-run-bounds", "code_checkpoint_id": "code-1"}},
-        _checkpoint("c1", parent="c0"),
+        {
+            "configurable": {
+                "thread_id": "t-run-bounds",
+                "checkpoint_id": "c0",
+                "code_checkpoint_id": "code-1",
+            }
+        },
+        _checkpoint("c1"),
         {"source": "input"},
         {},
     )
     saver.put(
-        {"configurable": {"thread_id": "t-run-bounds", "code_checkpoint_id": "code-1"}},
-        _checkpoint("c2", parent="c1"),
+        {
+            "configurable": {
+                "thread_id": "t-run-bounds",
+                "checkpoint_id": "c1",
+                "code_checkpoint_id": "code-1",
+            }
+        },
+        _checkpoint("c2"),
         {"source": "loop"},
         {},
     )
 
-    parent, output = await saver.aget_run_bounds(config, "code-1")
+    parent, output, parent_bound = await saver.aget_run_bounds(config, "code-1")
 
     assert parent == "c0"
     assert output == "c2"
+    assert parent_bound is True
 
 
 async def test_failed_run_bounds_skip_failed_input_checkpoint(tmp_path):
     saver = _saver(tmp_path)
     config = {"configurable": {"thread_id": "t-failed-run"}}
     saver.put(config, _checkpoint("c0"), {"source": "loop"}, {})
-    run_config = {"configurable": {"thread_id": "t-failed-run", "code_checkpoint_id": "code-2"}}
-    saver.put(run_config, _checkpoint("c1", parent="c0"), {"source": "input"}, {})
+    run_config = {
+        "configurable": {
+            "thread_id": "t-failed-run",
+            "checkpoint_id": "c0",
+            "code_checkpoint_id": "code-2",
+        }
+    }
+    saver.put(run_config, _checkpoint("c1"), {"source": "input"}, {})
     saver.put_writes(
         {"configurable": {"thread_id": "t-failed-run", "checkpoint_id": "c1"}},
         [("__error__", RuntimeError("boom"))],
         "task-1",
     )
 
-    parent, output = await saver.aget_run_bounds(config, "code-2")
+    parent, output, parent_bound = await saver.aget_run_bounds(config, "code-2")
 
     assert parent == "c0"
     assert output == "c0"
+    assert parent_bound is True
+
+
+async def test_run_bounds_persist_parent_from_put_config(tmp_path):
+    saver = _saver(tmp_path)
+    base = {"configurable": {"thread_id": "t-config-parent"}}
+    input_checkpoint = _checkpoint("c1")
+    input_checkpoint.pop("parent_checkpoint_id")
+    saver.put(
+        {
+            "configurable": {
+                "thread_id": "t-config-parent",
+                "checkpoint_id": "graph-parent",
+                "code_checkpoint_id": "code-config-parent",
+            }
+        },
+        input_checkpoint,
+        {"source": "input"},
+        {},
+    )
+    output_checkpoint = _checkpoint("c2")
+    output_checkpoint.pop("parent_checkpoint_id")
+    saver.put(
+        {
+            "configurable": {
+                "thread_id": "t-config-parent",
+                "checkpoint_id": "c1",
+                "code_checkpoint_id": "code-config-parent",
+            }
+        },
+        output_checkpoint,
+        {"source": "loop"},
+        {},
+    )
+
+    raw = saver._load(saver._path(base))
+    assert raw["checkpoints"]["c1"]["parent_checkpoint_id"] == "graph-parent"
+    exact = await saver.aget_tuple(
+        {"configurable": {"thread_id": "t-config-parent", "checkpoint_id": "c1"}}
+    )
+    assert exact is not None
+    assert exact.parent_config == {
+        "configurable": {"thread_id": "t-config-parent", "checkpoint_id": "graph-parent"}
+    }
+    assert await saver.aget_run_bounds(base, "code-config-parent") == (
+        "graph-parent",
+        "c2",
+        True,
+    )
+
+
+async def test_run_bounds_distinguish_verified_root_from_legacy_missing_parent(tmp_path):
+    saver = _saver(tmp_path)
+    config = {
+        "configurable": {
+            "thread_id": "t-parent-proof",
+            "code_checkpoint_id": "code-parent-proof",
+        }
+    }
+    checkpoint = _checkpoint("c1")
+    checkpoint.pop("parent_checkpoint_id")
+    saver.put(config, checkpoint, {"source": "input"}, {})
+
+    assert await saver.aget_run_bounds(config, "code-parent-proof") == (None, "c1", True)
+    assert await saver.aget_parent_binding(
+        {"configurable": {"thread_id": "t-parent-proof", "checkpoint_id": "c1"}}
+    ) == (None, True)
+
+    path = saver._path(config)
+    raw = saver._load(path)
+    raw["checkpoints"]["c1"].pop("parent_checkpoint_id")
+    saver._save(path, raw)
+
+    assert await saver.aget_run_bounds(config, "code-parent-proof") == (None, "c1", False)
+    assert await saver.aget_parent_binding(
+        {"configurable": {"thread_id": "t-parent-proof", "checkpoint_id": "c1"}}
+    ) == (None, False)
 
 
 async def test_explicit_checkpoint_wins_over_start_graph_from_root(tmp_path):

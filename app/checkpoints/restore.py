@@ -170,6 +170,24 @@ class CheckpointRestoreService:
         if target.graph_parent_bound:
             return target.graph_parent_checkpoint_id, True
         resolver = self.graph_checkpoint_resolver
+        run_bounds = getattr(resolver, "aget_run_bounds", None)
+        if run_bounds is not None:
+            parent_id, output_id, parent_bound = await run_bounds(
+                {"configurable": {"thread_id": str(conversation_id)}}, str(target.id)
+            )
+            if parent_bound:
+                target.graph_parent_checkpoint_id = parent_id
+                target.graph_parent_bound = True
+                target.graph_output_checkpoint_id = output_id
+                with contextlib.suppress(Exception):
+                    await self.checkpoints.store.bind_graph_run(
+                        conversation_id,
+                        target.id,
+                        graph_parent_checkpoint_id=parent_id,
+                        graph_parent_bound=True,
+                        graph_output_checkpoint_id=output_id,
+                    )
+                return parent_id, True
         candidate = target.graph_input_checkpoint_id or target.graph_parent_checkpoint_id
         if resolver is None or not candidate:
             return None, False
@@ -181,8 +199,19 @@ class CheckpointRestoreService:
         )
         if graph_tuple is None or (graph_tuple.metadata or {}).get("source") != "input":
             return None, False
-        checkpoint = graph_tuple.checkpoint or {}
-        raw_parent = checkpoint.get("parent_checkpoint_id")
+        candidate_config = {
+            "configurable": {"thread_id": str(conversation_id), "checkpoint_id": str(candidate)}
+        }
+        parent_binding = getattr(resolver, "aget_parent_binding", None)
+        if parent_binding is not None:
+            raw_parent, parent_bound = await parent_binding(candidate_config)
+            if not parent_bound:
+                return None, False
+        else:
+            parent_config = getattr(graph_tuple, "parent_config", None) or {}
+            raw_parent = (parent_config.get("configurable") or {}).get("checkpoint_id")
+            if raw_parent is None:
+                raw_parent = (graph_tuple.checkpoint or {}).get("parent_checkpoint_id")
         parent_id = str(raw_parent) if raw_parent else None
         target.graph_parent_checkpoint_id = parent_id
         target.graph_parent_bound = True

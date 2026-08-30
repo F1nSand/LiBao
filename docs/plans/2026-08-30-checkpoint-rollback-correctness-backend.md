@@ -1,6 +1,6 @@
 # Checkpoint 回滚正确性修复 — 后端实施计划
 
-**状态：** `COMPLETED`。用户已明确批准按本计划执行；实现按 Task 顺序完成并记录于 `progress-checkpoint-rollback-correctness.md`。
+**状态：** `COMPLETED`。Tasks 1–9 与 422 兼容修复均已完成；执行与验证记录见 `progress-checkpoint-rollback-correctness.md`。
 
 **Goal：** 修复消息级 checkpoint 的图上下文、目标消息撤回、模式游标、preview 一致性和恢复 WAL，使三种模式满足冻结契约，并保证回滚目标用户消息后其正文、附件、文件引用返回草稿且不再出现在 active 消息/轨迹/下一轮模型上下文中。
 
@@ -408,6 +408,39 @@ final_after_recorded: bool = False
 - [ ] Step 7: 使用 `review-test-simplify` 执行 Test/Review/Simplify；任何 Critical/High/Medium finding 必须修复或由用户明确接受。
 - [ ] Step 8: 更新 progress ledger，列出每个 commit、测试命令与结果。
 - [ ] Step 9: 提交 `test(checkpoint): verify withdrawn-turn rollback invariants`。
+
+## Task 9：持久化并验证真实 LangGraph 父游标
+
+**Root cause：** `JsonFileSaver.put()` 没有像 LangGraph `InMemorySaver` 一样持久化 `config['configurable']['checkpoint_id']` 作为新 checkpoint 的 parent；`get_tuple()` 与 `get_run_bounds()` 却读取真实 checkpoint payload 中不存在的 `parent_checkpoint_id`。因此从 operation undo 恢复历史 graph cursor 后，新一轮 manifest 会把非 root parent 错记为 `None`，未绑定/中断 manifest 也无法通过 code checkpoint id 懒修复。
+
+**Files：**
+
+- Modify: `app/orchestration/checkpointer.py`
+- Modify: `app/orchestration/chat_stream.py`
+- Modify: `app/checkpoints/restore.py`
+- Test: `tests/test_json_file_saver.py`
+- Test: `tests/test_chat_stream.py`
+- Test: `tests/test_checkpoint_restore.py`
+- Modify: `progress-checkpoint-rollback-correctness.md`
+
+**Interfaces：**
+
+- `JsonFileSaver.put()` 每条 record 新增 `parent_checkpoint_id: str | None`；字段存在且值为 `None` 表示“已证明从 graph root 开始”，字段缺失表示旧记录、父关系不可证明。
+- `JsonFileSaver.get_run_bounds(config, code_checkpoint_id) -> tuple[str | None, str | None, bool]`；第三项 `parent_bound` 仅在找到 input record 且该 record 明确持久化 parent（或旧 payload 本身含 parent）时为 `True`。
+- `JsonFileSaver.get_tuple()` / `list()` 的 `parent_config` 消费 record parent；旧 record 只读兼容，不从时间顺序猜 parent。
+- chat stream 的 `_bind_graph_run()` 将 `parent_bound` 原样写入 `CodeCheckpoint.graph_parent_bound`；即便 parent 不可证明，已验证的 output 仍可作为 conversation 当前 graph cursor。
+- `CheckpointRestoreService._resolve_graph_parent()` 对 unbound manifest 先按 `target.id` 调用 `aget_run_bounds()`；只有 `parent_bound=True` 才懒写回 manifest。仍无法证明的旧 checkpoint 保持 `conversation_only/both -> 40937`、`code_only` 可用。
+
+- [x] Step 1: 在 `tests/test_json_file_saver.py` 写失败测试 `test_run_bounds_persist_parent_from_put_config`：checkpoint payload 不含 parent、put config 指定历史 graph id，断言 raw record、`get_tuple().parent_config` 与三元 run bounds 都返回该 parent。
+- [x] Step 2: 写失败测试 `test_run_bounds_distinguish_verified_root_from_legacy_missing_parent`：显式 root record 返回 `(None, output, True)`；删除 record parent 字段模拟旧数据后返回 `(None, output, False)`。
+- [x] Step 3: 在 `tests/test_checkpoint_restore.py` 写失败测试 `test_unbound_manifest_lazily_recovers_parent_from_run_bounds`：resolver 按 code checkpoint id 返回 verified parent/output，preview conversation mode 成功且 manifest 被持久化为 bound。
+- [x] Step 4: 更新三元 run-bounds 的 chat 调用接口；root/non-root 与 unverified parent 行为由真实 saver/chat 定向回归覆盖。
+- [x] Step 5: 运行 Steps 1–3 的定向测试，确认现有实现分别因缺失 record parent、二元接口和缺失懒迁移而 3 failed。
+- [x] Step 6: 在 saver 中持久化 record parent，统一 `get_tuple/list/get_run_bounds` 读取逻辑；在 chat/restore 消费 `parent_bound`，不添加任何历史顺序猜测。
+- [x] Step 7: 重跑 `tests/test_json_file_saver.py tests/test_chat_stream.py tests/test_checkpoint_restore.py tests/test_interrupt_stream.py` 与 Ruff，60 passed。
+- [x] Step 8: 运行全量 `pytest -q`、`ruff check app tests`、`python -m compileall -q app tests`、`git diff --check`，753 passed, 4 skipped，静态检查全部通过。
+- [x] Step 9: 使用 `review-test-simplify` 完成等价 Test/Review/Simplify gate；发现并修复 1 个 Important：legacy input parent 改从 `parent_config`/显式 provenance 读取。
+- [x] Step 10: 更新本计划状态与 progress ledger，提交 `fix(checkpoint): persist verified langgraph parent cursors`。
 
 ---
 

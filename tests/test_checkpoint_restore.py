@@ -480,7 +480,8 @@ async def test_legacy_graph_input_is_verified_and_migrated_to_parent(tmp_path: P
             assert config["configurable"]["checkpoint_id"] == "legacy-input"
             return SimpleNamespace(
                 metadata={"source": "input"},
-                checkpoint={"id": "legacy-input", "parent_checkpoint_id": "real-parent"},
+                checkpoint={"id": "legacy-input"},
+                parent_config={"configurable": {"checkpoint_id": "real-parent"}},
             )
 
     service = CheckpointRestoreService(checkpoint_service, graph_checkpoint_resolver=Resolver())
@@ -491,6 +492,47 @@ async def test_legacy_graph_input_is_verified_and_migrated_to_parent(tmp_path: P
     migrated = await checkpoint_store.read_checkpoint(conversation.id, checkpoint.id)
     assert migrated is not None
     assert migrated.graph_parent_checkpoint_id == "real-parent"
+    assert migrated.graph_parent_bound is True
+
+
+@pytest.mark.asyncio
+async def test_unbound_manifest_lazily_recovers_parent_from_run_bounds(tmp_path: Path):
+    checkpoint_store = CodeCheckpointStore(tmp_path / ".agent")
+    checkpoint_service = CheckpointService(checkpoint_store)
+    conversation = _conversation(uuid.uuid4())
+    checkpoint, user_message = await _checkpoint_with_message(
+        checkpoint_service,
+        conversation,
+        content="撤销回滚后的新输入",
+        anchor_message_head_id=None,
+        history_parent_id=None,
+    )
+    conversation.active_message_head_id = user_message.id
+    conversation.message_cursor_initialized = True
+    loaded = await checkpoint_store.read_checkpoint(conversation.id, checkpoint.id)
+    assert loaded is not None
+    loaded.graph_parent_bound = False
+    loaded.graph_parent_checkpoint_id = None
+    loaded.graph_input_checkpoint_id = None
+    manifest = checkpoint_store._manifest_path(conversation.id, checkpoint.id)  # noqa: SLF001
+    manifest.write_text(__import__("json").dumps(loaded.to_dict()), encoding="utf-8")
+
+    class Resolver:
+        async def aget_run_bounds(self, config, code_checkpoint_id):
+            assert config == {"configurable": {"thread_id": str(conversation.id)}}
+            assert code_checkpoint_id == str(checkpoint.id)
+            return "verified-parent", "verified-output", True
+
+    service = CheckpointRestoreService(checkpoint_service, graph_checkpoint_resolver=Resolver())
+    preview = await service.preview_checkpoint(
+        _Db(), conversation, target_checkpoint_id=checkpoint.id, mode="conversation_only", workspace_root=None
+    )
+
+    assert preview["conversation"]["action"] == "withdraw_from_target"
+    migrated = await checkpoint_store.read_checkpoint(conversation.id, checkpoint.id)
+    assert migrated is not None
+    assert migrated.graph_parent_checkpoint_id == "verified-parent"
+    assert migrated.graph_output_checkpoint_id == "verified-output"
     assert migrated.graph_parent_bound is True
 
 

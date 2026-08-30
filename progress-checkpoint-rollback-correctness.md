@@ -13,6 +13,7 @@
 - [complete] Task 7：旧会话与 v1 Manifest 的安全兼容（commit `45ae379`；兼容/restore/WAL/API → 32 passed；Ruff、compileall 通过）
 - [complete] Task 8：端到端回归与交付 Gate（commits `0ad8b8a`, `eea1112`, `1e864ee`, `9fb1b3b`；全量 pytest 748 passed, 4 skipped；Ruff、compileall、diff check 通过）
 - [complete] 422 兼容性跟进：前端使用不透明字符串 `client_request_id`，旧静态 bundle 缺少 execute 的新字段且省略 preview `target_type`；schema 已支持有界字符串、旧 preview checkpoint 分支推断、preview 默认 request id、execute 兼容缺省值，同时保留 v2 请求的 mode/request-id 严格校验（commits `095cf5e`, `94848c5`；定向 2 passed，相关回归 49 passed，全量 750 passed, 4 skipped；Ruff、compileall、diff check 通过）。
+- [complete] Task 9：修正 JsonFileSaver 丢失 LangGraph parent config 的根因，并为 unbound manifest 增加 verified run-bounds 懒修复；禁止对缺失 parent provenance 的旧记录进行时间顺序猜测（commit 待本次提交回填；相关回归 60 passed；全量 753 passed, 4 skipped；Ruff、compileall、diff check 通过）。
 
 ## 验证记录
 
@@ -24,3 +25,7 @@
 - 内置 `verify`、`/code-review`、`mattpocock-skills:code-review`、`/simplify` 工具未在当前运行时暴露；以定向/全量行为测试、静态检查及人工安全/规范审查完成等价 gate。
 - WAL recovery hardening：先以失败测试复现“after_cursor 已持久化但 applying 状态被误判 failed_partial”，修复后新增测试通过；恢复过程不触碰工作区字节。
 - 422 根因：`CheckpointRestorePreviewRequest` 原先把前端 opaque token 错误声明为 UUID，首版 bundle 还省略 `target_type`；`RestoreExecuteRequest` 也把旧 bundle 不会发送的 `expected_mode/client_request_id` 声明为必填。已补失败测试并修复为字符串兼容契约，旧 preview 仅按 `target_checkpoint_id` 安全推断 checkpoint 分支。
+- Task 9 根因证据：真实 LangGraph checkpoint payload 只含 `id/ts/channel_values/channel_versions/versions_seen/updated_channels/v`，不含 `parent_checkpoint_id`；LangGraph `InMemorySaver.put()` 明确从 put config 的 `checkpoint_id` 保存 parent，而当前 `JsonFileSaver.put()` 丢弃了该值。
+- Task 9 TDD：新增 record parent 持久化、verified root/legacy missing provenance 区分、unbound manifest 懒修复三组失败测试；修复后 checkpoint/chat/restore/interrupt 相关回归 60 passed。
+- Task 9 完整 Gate：`.\\.venv\\Scripts\\python.exe -m pytest -q` → 753 passed, 4 skipped, 39 warnings；`.\\.venv\\Scripts\\ruff.exe check app tests`、`.\\.venv\\Scripts\\python.exe -m compileall -q app tests`、`git diff --check` → PASS。
+- Task 9 Review：人工等价 Test/Review/Simplify gate 发现 1 个 Important——legacy input parent 仍从 checkpoint payload 读取；已改为优先读取 `CheckpointTuple.parent_config`/显式 parent provenance，并以失败测试验证。未发现其余 correctness/security/performance 阻断项。

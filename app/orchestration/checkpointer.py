@@ -61,6 +61,24 @@ def _latest_failed_checkpoint_id(records: dict[str, Any]) -> str | None:
     return None
 
 
+def _record_parent(record: dict[str, Any], codec: JsonCheckpointCodec) -> tuple[str | None, bool]:
+    """Return a record's parent and whether that relationship is provable.
+
+    Schema-v2 records written by the corrected saver carry the parent directly,
+    including an explicit ``None`` for graph root.  The checkpoint-payload
+    fallback only supports synthetic/early records that embedded the field;
+    real LangGraph checkpoints do not contain it.
+    """
+    if "parent_checkpoint_id" in record:
+        raw_parent = record.get("parent_checkpoint_id")
+        return (str(raw_parent) if raw_parent else None), True
+    checkpoint = codec.loads(record["checkpoint"], channel="checkpoint")
+    if "parent_checkpoint_id" in checkpoint:
+        raw_parent = checkpoint.get("parent_checkpoint_id")
+        return (str(raw_parent) if raw_parent else None), True
+    return None, False
+
+
 def _thread_key(config: dict[str, Any]) -> str:
     """thread_key = thread_id（subagent 场景拼 checkpoint_ns 的 sha1 短前缀，防同目录碰撞）。"""
     cfg = config.get("configurable", config)
@@ -141,6 +159,9 @@ class JsonFileSaver(BaseCheckpointSaver):
                 "checkpoint": self.codec.dumps(checkpoint),
                 "metadata": self.codec.dumps(metadata),
                 "writes": {},
+                "parent_checkpoint_id": (
+                    str(cfg["checkpoint_id"]) if cfg.get("checkpoint_id") is not None else None
+                ),
                 "code_checkpoint_id": str(code_checkpoint_id) if code_checkpoint_id is not None else None,
                 "checkpoint_ns": str(cfg.get("checkpoint_ns")) if cfg.get("checkpoint_ns") else None,
                 "metadata_source": metadata.get("source") if isinstance(metadata, dict) else None,
@@ -199,7 +220,7 @@ class JsonFileSaver(BaseCheckpointSaver):
                 return None
             checkpoint: Checkpoint = self.codec.loads(record["checkpoint"], channel="checkpoint")
             metadata: CheckpointMetadata = self.codec.loads(record["metadata"], channel="metadata")
-            parent_id = checkpoint.get("parent_checkpoint_id")
+            parent_id, _ = _record_parent(record, self.codec)
             parent_config = None
             if parent_id:
                 parent_config = {"configurable": {**cfg, "checkpoint_id": parent_id}}
@@ -215,7 +236,18 @@ class JsonFileSaver(BaseCheckpointSaver):
                 pending_writes=pending_writes,
             )
 
-    def get_run_bounds(self, config: dict[str, Any], code_checkpoint_id: str) -> tuple[str | None, str | None]:
+    def get_parent_binding(self, config: dict[str, Any]) -> tuple[str | None, bool]:
+        """Return the exact record parent's value and provenance."""
+        path = self._path(config)
+        with self._lock(str(path)):
+            data = self._load(path)
+            checkpoint_id = (config.get("configurable", config) or {}).get("checkpoint_id")
+            record = data["checkpoints"].get(str(checkpoint_id)) if checkpoint_id is not None else None
+            return _record_parent(record, self.codec) if record is not None else (None, False)
+
+    def get_run_bounds(
+        self, config: dict[str, Any], code_checkpoint_id: str
+    ) -> tuple[str | None, str | None, bool]:
         """Resolve a code anchor to the LangGraph input parent and latest output checkpoint."""
 
         path = self._path(config)
@@ -227,7 +259,7 @@ class JsonFileSaver(BaseCheckpointSaver):
                 if str(record.get("code_checkpoint_id") or "") == str(code_checkpoint_id)
             ]
             if not matches:
-                return None, None
+                return None, None, False
             input_match = next(
                 (
                     (checkpoint_id, record)
@@ -238,10 +270,9 @@ class JsonFileSaver(BaseCheckpointSaver):
                 None,
             )
             parent_id: str | None = None
+            parent_bound = False
             if input_match is not None:
-                checkpoint = self.codec.loads(input_match[1]["checkpoint"], channel="checkpoint")
-                raw_parent = checkpoint.get("parent_checkpoint_id")
-                parent_id = str(raw_parent) if raw_parent else None
+                parent_id, parent_bound = _record_parent(input_match[1], self.codec)
             latest_id = matches[-1][0]
             latest = matches[-1][1]
             # A failed input checkpoint contains the user message that must not be
@@ -258,7 +289,7 @@ class JsonFileSaver(BaseCheckpointSaver):
                 if has_error
                 else latest_id
             )
-            return parent_id, output_id
+            return parent_id, output_id, parent_bound
 
     def get_failed_config(self, config: dict[str, Any]) -> dict[str, Any] | None:
         """显式读取失败节点 checkpoint，避免普通读取为新用户消息回滚失败输入。"""
@@ -294,12 +325,18 @@ class JsonFileSaver(BaseCheckpointSaver):
             tuples = []
             for i in ids:
                 rec = data["checkpoints"][i]
+                parent_id, _ = _record_parent(rec, self.codec)
+                parent_config = (
+                    {"configurable": {**config.get("configurable", {}), "checkpoint_id": parent_id}}
+                    if parent_id
+                    else None
+                )
                 tuples.append(
                     CheckpointTuple(
                         config={"configurable": {**config.get("configurable", {}), "checkpoint_id": i}},
                         checkpoint=self.codec.loads(rec["checkpoint"], channel="checkpoint"),
                         metadata=self.codec.loads(rec["metadata"], channel="metadata"),
-                        parent_config=None,
+                        parent_config=parent_config,
                         pending_writes=[],
                     )
                 )
@@ -330,7 +367,12 @@ class JsonFileSaver(BaseCheckpointSaver):
     async def aget_tuple(self, config: dict[str, Any]) -> CheckpointTuple | None:
         return await asyncio.to_thread(self.get_tuple, config)
 
-    async def aget_run_bounds(self, config: dict[str, Any], code_checkpoint_id: str) -> tuple[str | None, str | None]:
+    async def aget_parent_binding(self, config: dict[str, Any]) -> tuple[str | None, bool]:
+        return await asyncio.to_thread(self.get_parent_binding, config)
+
+    async def aget_run_bounds(
+        self, config: dict[str, Any], code_checkpoint_id: str
+    ) -> tuple[str | None, str | None, bool]:
         return await asyncio.to_thread(self.get_run_bounds, config, code_checkpoint_id)
 
     async def aget_failed_config(self, config: dict[str, Any]) -> dict[str, Any] | None:

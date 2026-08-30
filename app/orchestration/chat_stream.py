@@ -392,14 +392,16 @@ async def chat_stream_events(
         resolver = getattr(graph_checkpointer, "aget_run_bounds", None)
         if resolver is None:
             return
-        parent_id, output_id = await resolver(
+        parent_id, output_id, parent_bound = await resolver(
             {"configurable": {"thread_id": str(conversation.id)}}, str(checkpoint.id)
         )
+        if output_id is None:
+            return
         await checkpoint_service.store.bind_graph_run(
             conversation.id,
             checkpoint.id,
             graph_parent_checkpoint_id=parent_id,
-            graph_parent_bound=True,
+            graph_parent_bound=parent_bound,
             graph_output_checkpoint_id=output_id,
         )
         conversation.active_graph_checkpoint_id = output_id
@@ -756,15 +758,15 @@ async def resume_stream_events(
         resolver = getattr(graph_checkpointer, "aget_run_bounds", None)
         if resolver is None:
             return
-        parent_graph_id, output_graph_id = await resolver(
+        parent_graph_id, output_graph_id, parent_bound = await resolver(
             {"configurable": {"thread_id": str(thread_id)}}, str(checkpoint_id)
         )
-        if conversation_id:
+        if conversation_id and output_graph_id is not None:
             await checkpoint_service.store.bind_graph_run(
                 conversation_id,
                 checkpoint_id,
                 graph_parent_checkpoint_id=parent_graph_id,
-                graph_parent_bound=True,
+                graph_parent_bound=parent_bound,
                 graph_output_checkpoint_id=output_graph_id,
             )
             if conversation_row is not None:
