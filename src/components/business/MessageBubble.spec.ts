@@ -1,8 +1,23 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+
+const { messageError, messageSuccess } = vi.hoisted(() => ({
+  messageError: vi.fn(),
+  messageSuccess: vi.fn(),
+}))
+
+vi.mock('element-plus', () => ({
+  ElMessage: { error: messageError, success: messageSuccess },
+}))
+
 import MessageBubble from './MessageBubble.vue'
 import type { Message } from '@/types'
 import type { StreamState } from '@/composables/useChatStream'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.clearAllMocks()
+})
 
 const asstMsg: Message = {
   id: 'm1',
@@ -80,8 +95,87 @@ describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
       created_at: '2026-01-01T00:00:00Z',
     }
     const w = mount(MessageBubble, { props: { message: userMsg } })
-    await w.get('.rollback-trigger').trigger('click')
+    await w.get('[aria-label="回滚到此状态"]').trigger('click')
     expect(w.emitted('rollback')?.[0]).toEqual([userMsg])
+  })
+
+  it('带 checkpoint 的用户消息只显示回滚和复制图标，顺序固定且无可见长文案', () => {
+    const userMsg: Message = {
+      id: 'u-actions',
+      conversation_id: 'c1',
+      role: 'user',
+      content: '修改文件',
+      checkpoint_id: 'cp-1',
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const w = mount(MessageBubble, { props: { message: userMsg } })
+    const buttons = w.findAll('.message-action')
+
+    expect(buttons).toHaveLength(2)
+    expect(buttons[0].attributes('aria-label')).toBe('回滚到此状态')
+    expect(buttons[1].attributes('aria-label')).toBe('复制消息')
+    expect(w.text()).not.toContain('回滚到此状态')
+  })
+
+  it('持久化助手正文只显示复制，流式消息不显示复制', () => {
+    const assistant = mount(MessageBubble, { props: { message: asstMsg } })
+    expect(assistant.findAll('.message-action')).toHaveLength(1)
+    expect(assistant.find('[aria-label="回滚到此状态"]').exists()).toBe(false)
+
+    const streaming = mount(MessageBubble, { props: { stream: streamState } })
+    expect(streaming.find('.message-action').exists()).toBe(false)
+  })
+
+  it('纯附件用户消息有 checkpoint 时只显示回滚，不显示复制', () => {
+    const userMsg: Message = {
+      id: 'u-file',
+      conversation_id: 'c1',
+      role: 'user',
+      content: '',
+      attachments: [{ attachment_id: 'atc-1', name: 'report.pdf' }],
+      checkpoint_id: 'cp-1',
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const w = mount(MessageBubble, { props: { message: userMsg } })
+    expect(w.findAll('.message-action')).toHaveLength(1)
+    expect(w.find('[aria-label="回滚到此状态"]').exists()).toBe(true)
+    expect(w.find('[aria-label="复制消息"]').exists()).toBe(false)
+  })
+
+  it('复制成功时传入完整原始正文并显示成功反馈', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const w = mount(MessageBubble, { props: { message: asstMsg } })
+
+    await w.get('[aria-label="复制消息"]').trigger('click')
+
+    expect(writeText).toHaveBeenCalledWith('**答案**')
+    expect(messageSuccess).toHaveBeenCalledWith('消息已复制')
+  })
+
+  it('复制失败时显示错误反馈且不抛出未处理 promise', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('clipboard denied'))
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const w = mount(MessageBubble, { props: { message: asstMsg } })
+
+    await expect(w.get('[aria-label="复制消息"]').trigger('click')).resolves.toBeUndefined()
+
+    expect(messageError).toHaveBeenCalledWith('复制失败，请重试')
+  })
+
+  it('消息操作图标具有对应 title 和 aria-label', () => {
+    const userMsg: Message = {
+      id: 'u-a11y',
+      conversation_id: 'c1',
+      role: 'user',
+      content: '请修改',
+      checkpoint_id: 'cp-1',
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const w = mount(MessageBubble, { props: { message: userMsg } })
+
+    expect(w.get('[aria-label="回滚到此状态"]').attributes('title')).toBe('回滚到此状态')
+    expect(w.get('[aria-label="复制消息"]').attributes('title')).toBe('复制消息')
   })
 
   it('纯附件/纯引用消息不渲染空的用户文字气泡', () => {

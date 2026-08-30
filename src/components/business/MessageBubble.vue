@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { CopyDocument, RefreshLeft } from '@element-plus/icons-vue'
 import type { Message, ToolCallRecord } from '@/types'
 import type { StreamState, ToolCallCardState } from '@/composables/useChatStream'
 import MarkdownRenderer from '@/components/common/MarkdownRenderer.vue'
@@ -119,6 +121,22 @@ function setThinkingHover(i: number, v: boolean): void {
 
 const role = computed(() => (props.stream ? 'assistant' : props.message?.role ?? 'user'))
 const hasUserText = computed(() => !!props.message?.content?.trim())
+const canRollback = computed(() =>
+  !!props.message && props.message.role === 'user' && !!(props.message.checkpoint_id || props.message.checkpoint),
+)
+const canCopy = computed(() => !!props.message && !props.stream && !!props.message.content?.trim())
+
+async function copyMessage(): Promise<void> {
+  const content = props.message?.content ?? ''
+  if (!canCopy.value) return
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+    await navigator.clipboard.writeText(content)
+    ElMessage.success('消息已复制')
+  } catch {
+    ElMessage.error('复制失败，请重试')
+  }
+}
 
 /** 逐轮 token_usage/cost footer（docs/03 §3 多消息扩展）：仅持久化消息路径，防御式（无数据即空） */
 const usageText = computed(() => {
@@ -148,16 +166,28 @@ const usageText = computed(() => {
           </span>
         </div>
         <div v-if="hasUserText" class="user-text">{{ message.content }}</div>
-        <button
-          v-if="message.checkpoint_id || message.checkpoint"
-          type="button"
-          class="rollback-trigger"
-          title="回滚到此状态"
-          @click="emit('rollback', message)"
-        >
-          <el-icon :size="13"><RefreshLeft /></el-icon>
-          <span>回滚到此状态</span>
-        </button>
+        <div v-if="canRollback || canCopy" class="message-actions">
+          <button
+            v-if="canRollback"
+            type="button"
+            class="message-action rollback-action"
+            title="回滚到此状态"
+            aria-label="回滚到此状态"
+            @click="emit('rollback', message)"
+          >
+            <el-icon :size="15"><RefreshLeft /></el-icon>
+          </button>
+          <button
+            v-if="canCopy"
+            type="button"
+            class="message-action copy-action"
+            title="复制消息"
+            aria-label="复制消息"
+            @click="copyMessage"
+          >
+            <el-icon :size="15"><CopyDocument /></el-icon>
+          </button>
+        </div>
       </template>
 
       <!-- 助手消息：活动区（工具/切换/思考）在回复气泡上方，往下递进 -->
@@ -201,6 +231,11 @@ const usageText = computed(() => {
           <MarkdownRenderer :raw="parts.text.content" :streaming="parts.text.streaming" />
         </div>
         <div v-if="usageText" class="msg-usage">{{ usageText }}</div>
+        <div v-if="canCopy" class="message-actions">
+          <button type="button" class="message-action copy-action" title="复制消息" aria-label="复制消息" @click="copyMessage">
+            <el-icon :size="15"><CopyDocument /></el-icon>
+          </button>
+        </div>
         <div v-if="!parts.activity.length && !parts.text && !stream" class="msg-empty">…</div>
       </template>
     </div>
@@ -274,35 +309,44 @@ const usageText = computed(() => {
   line-height: 1.6;
   max-width: 100%;
 }
-.rollback-trigger {
-  display: inline-flex;
+.message-actions {
+  display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: flex-end;
+  gap: 4px;
   align-self: flex-end;
   min-height: 30px;
   margin-top: 4px;
-  padding: 3px 9px;
+}
+.message-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  gap: 5px;
+  padding: 0;
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
   color: var(--app-text-muted);
-  font-size: 12px;
   cursor: pointer;
   opacity: 0;
   transform: translateY(-2px);
   transition: opacity 140ms ease, transform 140ms ease, color 140ms ease, background 140ms ease;
 }
-.msg.user:hover .rollback-trigger,
-.msg.user:focus-within .rollback-trigger {
+.msg:hover .message-action,
+.message-actions:focus-within .message-action {
   opacity: 1;
   transform: translateY(0);
 }
-.rollback-trigger:hover {
+.message-action:hover {
   border-color: color-mix(in srgb, var(--app-primary) 30%, var(--app-border-light));
   background: color-mix(in srgb, var(--app-primary) 9%, transparent);
   color: var(--app-link);
 }
-.rollback-trigger:focus-visible {
+.message-action:focus-visible {
   opacity: 1;
   outline: 2px solid var(--app-focus-ring);
   outline-offset: 2px;
