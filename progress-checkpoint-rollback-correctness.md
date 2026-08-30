@@ -11,7 +11,7 @@
 - [complete] Task 5：将文件恢复和逆恢复改成 Durable WAL（commit `f26d131`；WAL/store/restore → 22 passed；Ruff、compileall 通过）
 - [complete] Task 6：准确表达写入、删除和 finalize 后状态（commit `577dad9`；mutation/store/restore/附件 → 37 passed, 1 skipped；Ruff、compileall 通过）
 - [complete] Task 7：旧会话与 v1 Manifest 的安全兼容（commit `45ae379`；兼容/restore/WAL/API → 32 passed；Ruff、compileall 通过）
-- [complete] Task 8：端到端回归与交付 Gate
+- [complete] Task 8：端到端回归与交付 Gate（commit `0ad8b8a`；全量 pytest 747 passed, 4 skipped；Ruff、compileall、diff check 通过）
 
 ## 验证记录
 
