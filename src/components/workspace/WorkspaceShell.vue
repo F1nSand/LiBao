@@ -9,7 +9,7 @@ import {
   deleteConversation as apiDeleteConversation,
 } from '@/api/chat'
 import { TOKEN_LIMIT } from '@/types'
-import type { CheckpointAnchor, Conversation, FileRef, Message } from '@/types'
+import type { CheckpointAnchor, ComposerAttachment, Conversation, FileRef, Message, RestoreResult } from '@/types'
 import { truncate } from '@/utils/format'
 import { useMediaQuery } from '@/composables/useMediaQuery'
 import { NARROW_LAYOUT_MQ } from '@/constants/layout'
@@ -20,6 +20,10 @@ import AttachmentUploader, { type PendingAttachment } from '@/components/busines
 import InterruptConfirmDialog from '@/components/business/InterruptConfirmDialog.vue'
 import AgentRunStatus from '@/components/common/AgentRunStatus.vue'
 import CheckpointRestoreDialog from '@/components/business/CheckpointRestoreDialog.vue'
+import ModelPicker from '@/components/business/ModelPicker.vue'
+import RollbackUndoBanner from '@/components/business/RollbackUndoBanner.vue'
+import { composerFingerprint, toComposerDraft, truncateMessagesFrom } from '@/utils/checkpointRestore'
+import type { RestoreDialogTarget } from '@/api/checkpoints'
 import WorkspaceConvList from './WorkspaceConvList.vue'
 import WorkspaceFileRefPicker from './WorkspaceFileRefPicker.vue'
 
@@ -77,15 +81,16 @@ function toggleLeft(): void {
 }
 
 const input = ref('')
-const pendingAttachments = ref<PendingAttachment[]>([])
+const pendingAttachments = ref<ComposerAttachment[]>([])
 const attachmentUploader = ref<InstanceType<typeof AttachmentUploader> | null>(null)
 const isDragging = ref(false)
-const lastFailedDraft = ref<{ content: string; attachments: PendingAttachment[]; refs: FileRef[] } | null>(null)
+const lastFailedDraft = ref<{ content: string; attachments: ComposerAttachment[]; refs: FileRef[] } | null>(null)
 const fileRefs = ref<FileRef[]>([])
 const refPickerVisible = ref(false)
 const interruptVisible = ref(false)
 const restoreVisible = ref(false)
-const restoreMessage = ref<Message | null>(null)
+const restoreTarget = ref<RestoreDialogTarget | null>(null)
+const rollbackUndo = ref<{ operationId: string; fingerprint: string } | null>(null)
 /** 会话 | 轨迹 视图切换 */
 const mode = ref<'chat' | 'trajectory'>('chat')
 
@@ -106,7 +111,8 @@ watch(
     messageRequestVersion.value += 1
     stream.stopAll()
     restoreVisible.value = false
-    restoreMessage.value = null
+    restoreTarget.value = null
+    rollbackUndo.value = null
     currentId.value = null
     messages.value = []
     conversations.value = []
@@ -135,7 +141,8 @@ async function selectConversation(id: string) {
   currentId.value = id
   stream.setConversation(id)
   restoreVisible.value = false
-  restoreMessage.value = null
+  restoreTarget.value = null
+  rollbackUndo.value = null
   resetDraftForConversationChange()
   messages.value = []
   messageError.value = null
@@ -194,7 +201,7 @@ function onAttach(attachment: PendingAttachment) {
     ElMessage.warning('每条消息最多 10 个附件')
     return
   }
-  pendingAttachments.value.push(attachment)
+  pendingAttachments.value.push({ ...attachment, available: true, unavailable_reason: null })
 }
 
 function removeAttachment(id: string) {
@@ -248,12 +255,16 @@ function removeFileRef(path: string) {
 }
 
 const composerDisabled = computed(() => currentStream.value.streaming || !!currentStream.value.interrupted)
-const charCount = computed(() => input.value.length)
+const hasUnavailableAttachments = computed(() => pendingAttachments.value.some((attachment) => attachment.available === false))
 
 async function send() {
   const content = input.value.trim()
   const attachments = [...pendingAttachments.value]
   const refs = [...fileRefs.value]
+  if (hasUnavailableAttachments.value) {
+    ElMessage.warning('请先移除不可用附件')
+    return
+  }
   if ((!content && !attachments.length && !refs.length) || composerDisabled.value) return
   input.value = ''
   pendingAttachments.value = []
@@ -261,8 +272,12 @@ async function send() {
   await sendWith(content, attachments, refs)
 }
 
-async function sendWith(content: string, attachmentRefs: PendingAttachment[], refs: FileRef[], appendUser = true) {
+async function sendWith(content: string, attachmentRefs: ComposerAttachment[], refs: FileRef[], appendUser = true) {
   const attachments = attachmentRefs.map((attachment) => attachment.attachment_id)
+  if (attachmentRefs.some((attachment) => attachment.available === false)) {
+    ElMessage.warning('请先移除不可用附件')
+    return
+  }
   if ((!content && !attachments.length && !refs.length) || composerDisabled.value) return
   if (content.length > TOKEN_LIMIT) {
     ElMessage.error(`输入超过 ${TOKEN_LIMIT} 字符上限`)
@@ -283,7 +298,7 @@ async function sendWith(content: string, attachmentRefs: PendingAttachment[], re
         conversation_id: currentId.value ?? '',
         role: 'user',
         content,
-        attachments: attachmentRefs.map((attachment) => ({ ...attachment })),
+        attachments: attachmentRefs.map(({ available: _available, unavailable_reason: _reason, ...attachment }) => ({ ...attachment })),
         file_refs: refs.length ? refs : undefined,
         tool_calls: [],
         created_at: new Date().toISOString(),
@@ -350,14 +365,20 @@ async function stop() {
     if (result === 'unavailable') {
       ElMessage.warning('已停止当前页面流；后端未提供可取消任务')
     }
+    return result
   } catch (e) {
     ElMessage.error(e instanceof Error ? `中断失败：${e.message}` : '中断失败，请重试')
+    return undefined
   }
 }
 
 async function onRollback(message: Message) {
   if (composerDisabled.value) {
-    await stop()
+    const stopResult = await stop()
+    if (stopResult === 'already-finished' && currentId.value && !await stream.reconcileTaskTerminal(currentId.value)) {
+      ElMessage.warning('当前任务尚未进入终态，请稍后再试')
+      return
+    }
     if (composerDisabled.value) {
       ElMessage.warning('当前任务尚未停止，请稍后再试')
       return
@@ -365,15 +386,55 @@ async function onRollback(message: Message) {
   }
   const checkpointId = message.checkpoint_id ?? message.checkpoint?.id
   if (!checkpointId || !currentId.value) return
-  restoreMessage.value = message
+  rollbackUndo.value = null
+  restoreTarget.value = { type: 'checkpoint', checkpointId, messageId: message.id }
   restoreVisible.value = true
 }
 
-async function onRestoreCompleted() {
+function onUndoRollback() {
+  const operationId = rollbackUndo.value?.operationId
+  if (!operationId || !currentId.value) return
+  restoreTarget.value = { type: 'rollback_operation_before', operationId }
+  restoreVisible.value = true
+}
+
+async function onRestoreCompleted(result: RestoreResult) {
   const id = currentId.value
+  if (!id) return
+  const target = restoreTarget.value
   restoreVisible.value = false
-  restoreMessage.value = null
-  if (id) await loadMessages(id)
+  restoreTarget.value = null
+  if (result.conversation.action === 'withdraw_from_target') {
+    stream.resetConversation(id)
+    if (result.conversation.withdrawn_from_message_id) {
+      messages.value = truncateMessagesFrom(messages.value, result.conversation.withdrawn_from_message_id)
+    }
+    const draft = result.conversation.draft
+    if (draft) {
+      const restored = toComposerDraft(draft)
+      input.value = restored.content
+      pendingAttachments.value = restored.attachments
+      fileRefs.value = restored.fileRefs
+      rollbackUndo.value = result.undo_available
+        ? { operationId: result.operation_id, fingerprint: composerFingerprint(input.value, pendingAttachments.value, fileRefs.value) }
+        : null
+    }
+  } else if (result.conversation.action === 'restore_cursor') {
+    stream.resetConversation(id)
+    const baseline = rollbackUndo.value
+    const currentFingerprint = composerFingerprint(input.value, pendingAttachments.value, fileRefs.value)
+    if (target?.type === 'rollback_operation_before' && baseline?.operationId === target.operationId) {
+      if (baseline.fingerprint === currentFingerprint) resetDraftForConversationChange()
+      else ElMessage.warning('未覆盖已编辑草稿')
+    }
+    rollbackUndo.value = result.undo_available
+      ? { operationId: result.operation_id, fingerprint: composerFingerprint(input.value, pendingAttachments.value, fileRefs.value) }
+      : null
+  }
+  if (target?.type === 'checkpoint' && result.undo_available && !rollbackUndo.value) {
+    rollbackUndo.value = { operationId: result.operation_id, fingerprint: composerFingerprint(input.value, pendingAttachments.value, fileRefs.value) }
+  }
+  if (result.conversation.action !== 'unchanged') await loadMessages(id)
   await loadConversations()
 }
 
@@ -441,11 +502,10 @@ async function onInterruptConfirm(approved: boolean) {
       />
 
       <CheckpointRestoreDialog
-        v-if="restoreMessage && currentId"
+        v-if="restoreTarget && currentId"
         v-model="restoreVisible"
         :conversation-id="currentId"
-        :checkpoint-id="restoreMessage.checkpoint_id ?? restoreMessage.checkpoint?.id ?? ''"
-        :message-id="restoreMessage.id"
+        :target="restoreTarget"
         @completed="onRestoreCompleted"
       />
 
@@ -457,6 +517,12 @@ async function onInterruptConfirm(approved: boolean) {
       <div v-if="mode === 'chat' && currentStream.phase === 'reconnecting'" class="stream-error" role="status">
         <span>连接中断，正在重新连接…</span>
       </div>
+      <RollbackUndoBanner
+        v-if="mode === 'chat' && rollbackUndo"
+        :operation-id="rollbackUndo.operationId"
+        @undo="onUndoRollback"
+      />
+
       <div
         v-else-if="mode === 'chat' && (currentStream.phase === 'disconnected' || currentStream.phase === 'background_running')"
         class="stream-error"
@@ -496,9 +562,17 @@ async function onInterruptConfirm(approved: boolean) {
         @paste="onPaste"
       >
         <TransitionGroup v-if="pendingAttachments.length || fileRefs.length" tag="div" name="chip" class="composer-chips">
-          <span v-for="attachment in pendingAttachments" :key="attachment.attachment_id" class="composer-attachment-chip" :title="attachment.name">
+          <span
+            v-for="attachment in pendingAttachments"
+            :key="attachment.attachment_id"
+            class="composer-attachment-chip"
+            :class="{ unavailable: attachment.available === false }"
+            :title="attachment.available === false ? `${attachment.name}：${attachment.unavailable_reason || '不可用'}` : attachment.name"
+            :aria-invalid="attachment.available === false"
+          >
             <el-icon :size="14"><Picture /></el-icon>
             <span>{{ attachment.name }}</span>
+            <span v-if="attachment.available === false" class="attachment-unavailable" :aria-label="attachment.unavailable_reason || '附件不可用'">不可用</span>
             <button type="button" class="chip-remove" :aria-label="`移除附件 ${attachment.name}`" @click="removeAttachment(attachment.attachment_id)">
               <el-icon :size="12"><Close /></el-icon>
             </button>
@@ -512,7 +586,6 @@ async function onInterruptConfirm(approved: boolean) {
           </span>
         </TransitionGroup>
         <div class="composer-input">
-          <AttachmentUploader ref="attachmentUploader" @add="onAttach" />
           <el-input
             class="composer-textarea"
             v-model="input"
@@ -525,33 +598,39 @@ async function onInterruptConfirm(approved: boolean) {
             :disabled="composerDisabled"
             @keydown="onKeydown"
           />
-          <div class="composer-actions">
-            <el-button :icon="'DocumentAdd'" title="引用工作区文件" aria-label="引用工作区文件" :disabled="composerDisabled" @click="refPickerVisible = true">
-              引用
-            </el-button>
-            <el-button
-              v-if="currentStream.streaming"
-              type="danger"
-              :icon="'VideoPause'"
-              :loading="currentStream.cancelling"
-              :disabled="currentStream.cancelling"
-              @click="stop"
-            >
-              {{ currentStream.cancelling ? '中断中…' : '停止' }}
-            </el-button>
-            <el-button
-              v-else
-              type="primary"
-              :icon="'Promotion'"
-              :disabled="composerDisabled || (!input.trim() && !pendingAttachments.length && !fileRefs.length)"
-              @click="send"
-            >
-              发送
-            </el-button>
+          <div class="composer-toolbar">
+            <div class="composer-leading">
+              <AttachmentUploader ref="attachmentUploader" @add="onAttach" />
+              <span class="composer-divider" aria-hidden="true">|</span>
+              <el-button :icon="'DocumentAdd'" title="引用工作区文件" aria-label="引用工作区文件" :disabled="composerDisabled" @click="refPickerVisible = true">
+                引用
+              </el-button>
+            </div>
+            <div class="composer-actions">
+              <ModelPicker />
+              <el-button
+                v-if="currentStream.streaming"
+                class="composer-stop"
+                type="danger"
+                :icon="'VideoPause'"
+                :loading="currentStream.cancelling"
+                :disabled="currentStream.cancelling"
+                @click="stop"
+              >
+                {{ currentStream.cancelling ? '中断中…' : '停止' }}
+              </el-button>
+              <el-button
+                v-else
+                class="composer-submit"
+                type="primary"
+                :icon="'Promotion'"
+                :disabled="composerDisabled || hasUnavailableAttachments || (!input.trim() && !pendingAttachments.length && !fileRefs.length)"
+                @click="send"
+              >
+                发送
+              </el-button>
+            </div>
           </div>
-        </div>
-        <div class="composer-foot">
-          <span class="char-count" :class="{ over: charCount > TOKEN_LIMIT }">{{ charCount }} / {{ TOKEN_LIMIT }}</span>
         </div>
       </div>
 
@@ -665,36 +744,6 @@ async function onInterruptConfirm(approved: boolean) {
   flex: 1;
   min-height: 0;
 }
-.composer {
-  border-top: 1px solid var(--app-border);
-  background: var(--app-content-bg);
-  padding: 10px 16px;
-  transition: border-color 0.15s var(--ease-out), background 0.15s var(--ease-out);
-}
-.composer.dragging {
-  border-top-color: var(--app-primary-fill);
-  background: color-mix(in srgb, var(--app-primary-fill) 4%, var(--app-content-bg));
-}
-.composer-input {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: flex-end;
-  gap: 8px;
-}
-.composer-textarea {
-  min-width: 0;
-}
-.composer :deep(.el-input__wrapper) {
-  border-radius: var(--app-radius);
-}
-.composer :deep(.el-button) {
-  border-radius: var(--app-radius);
-}
-.composer-actions {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
 .composer-chips {
   display: flex;
   flex-wrap: wrap;
@@ -718,6 +767,11 @@ async function onInterruptConfirm(approved: boolean) {
   background: color-mix(in srgb, var(--app-primary-fill) 8%, var(--app-content-bg));
   color: var(--app-text-secondary);
 }
+.composer-attachment-chip.unavailable {
+  border-color: color-mix(in srgb, var(--app-danger) 48%, var(--app-border));
+  background: color-mix(in srgb, var(--app-danger) 8%, var(--app-content-bg));
+}
+.attachment-unavailable { color: var(--app-danger); font-size: 11px; white-space: nowrap; }
 .composer-attachment-chip > span,
 .composer-ref-chip > span {
   overflow: hidden;
@@ -794,18 +848,6 @@ async function onInterruptConfirm(approved: boolean) {
 .chip-move {
   transition: transform 0.15s var(--ease-out);
 }
-.composer-foot {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 6px;
-}
-.char-count {
-  font-size: 12px;
-  color: var(--app-text-tertiary);
-}
-.char-count.over {
-  color: var(--app-danger);
-}
 .mono {
   font-family: var(--app-font-mono);
 }
@@ -814,31 +856,6 @@ async function onInterruptConfirm(approved: boolean) {
   .ws-toolbar {
     flex-wrap: wrap;
     padding: 8px 10px;
-  }
-  .composer {
-    padding: 8px 10px;
-  }
-  .composer-input {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: stretch;
-  }
-  .composer-textarea {
-    order: 0;
-    flex: 1 1 100%;
-    width: 100%;
-  }
-  .composer-input :deep(.uploader),
-  .composer-actions {
-    order: 1;
-  }
-  .composer-actions {
-    flex: 1;
-    justify-content: flex-end;
-  }
-  .composer-input :deep(.el-button) {
-    min-width: var(--app-control-touch);
-    min-height: var(--app-control-touch);
   }
   .stream-error {
     align-items: flex-start;

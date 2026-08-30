@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { AttachmentRef, Message, Paged } from '@/types'
+import type { AttachmentRef, Message, Paged, RestoreConversationPlan } from '@/types'
 
 const { listMessages } = vi.hoisted(() => ({
   listMessages: vi.fn(),
@@ -206,5 +206,32 @@ describe('chat store conversation loading races', () => {
       conversationId: 'c_a', userMessageId: 'user_new', checkpointId: 'checkpoint_new',
     })).toBe(false)
     expect(store.currentMessages[0]).toMatchObject(anchored)
+  })
+
+  it('applyConversationRestore 只裁剪当前会话的目标及后续消息并返回独立草稿', () => {
+    const store = useChatStore()
+    store.currentId = 'c_a'
+    store.currentMessages = [message('c_a', 'before'), { ...optimisticUserMessage('c_a'), id: 'target' }, message('c_a', 'after')]
+    const plan: RestoreConversationPlan = {
+      action: 'withdraw_from_target',
+      active_message_head_after_id: 'before',
+      withdrawn_from_message_id: 'target',
+      hidden_message_count: 2,
+      draft: {
+        source_message_id: 'target',
+        content: '恢复输入',
+        attachments: [{ attachment_id: 'a_1', name: '需求.txt', available: true }],
+        file_refs: [{ path: 'docs/需求.txt' }],
+      },
+    }
+
+    const draft = store.applyConversationRestore('c_a', plan)
+    expect(store.currentMessages.map((item) => item.id)).toEqual(['c_a-before'])
+    expect(draft).toEqual({
+      content: '恢复输入',
+      attachments: [{ attachment_id: 'a_1', name: '需求.txt', available: true }],
+      fileRefs: [{ path: 'docs/需求.txt' }],
+    })
+    expect(store.applyConversationRestore('c_b', plan)).toBeNull()
   })
 })

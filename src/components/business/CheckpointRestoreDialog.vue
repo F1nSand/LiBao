@@ -2,14 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
-import { createRestorePreview, executeRestore } from '@/api/checkpoints'
+import { createRestorePreview, executeRestore, type RestoreDialogTarget } from '@/api/checkpoints'
 import type { RestorePreview, RestoreResult, RollbackMode } from '@/types'
 
 const props = defineProps<{
   modelValue: boolean
   conversationId: string
-  checkpointId: string
-  messageId: string
+  target: RestoreDialogTarget
 }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; completed: [result: RestoreResult] }>()
 
@@ -27,42 +26,134 @@ const modeOptions = [
 const fileChanges = computed(() => preview.value?.files ?? [])
 const hasConflicts = computed(() => fileChanges.value.some((item) => item.conflict))
 
-async function loadPreview() {
-  if (!props.modelValue || !props.conversationId || !props.checkpointId) return
+let requestCounter = 0
+let requestVersion = 0
+let activeRequestId = ''
+
+function newRequestId(): string {
+  requestCounter += 1
+  return `restore_request_${Date.now()}_${requestCounter}`
+}
+
+function targetMatches(value: RestorePreview): boolean {
+  if (props.target.type === 'rollback_operation_before') {
+    return value.target.type === 'rollback_operation_before' && value.target.id === props.target.operationId
+  }
+  return value.target.type === 'checkpoint'
+    && value.target.id === props.target.checkpointId
+    && value.target.message_id === props.target.messageId
+}
+
+function isCurrent(version: number, requestId: string, requestedMode: RollbackMode): boolean {
+  return props.modelValue
+    && version === requestVersion
+    && requestId === activeRequestId
+    && requestedMode === mode.value
+}
+
+async function loadPreview(requestId: string, version: number, requestedMode: RollbackMode) {
+  if (!props.modelValue || !props.conversationId) return
   loading.value = true
   error.value = ''
   try {
-    preview.value = await createRestorePreview(props.conversationId, {
-      target_checkpoint_id: props.checkpointId,
-      mode: mode.value,
-    })
+    const request = props.target.type === 'rollback_operation_before'
+      ? { target_type: 'rollback_operation_before' as const, target_id: props.target.operationId, client_request_id: requestId }
+      : {
+          target_type: 'checkpoint' as const,
+          target_checkpoint_id: props.target.checkpointId,
+          mode: requestedMode,
+          client_request_id: requestId,
+        }
+    const result = await createRestorePreview(props.conversationId, request)
+    if (isCurrent(version, requestId, requestedMode)) {
+      preview.value = result
+      if (props.target.type === 'rollback_operation_before') mode.value = result.mode
+    }
   } catch (e) {
-    preview.value = null
-    error.value = e instanceof Error ? e.message : '无法生成回滚预览'
+    if (isCurrent(version, requestId, requestedMode)) {
+      preview.value = null
+      error.value = e instanceof Error ? e.message : '无法生成回滚预览'
+    }
   } finally {
-    loading.value = false
+    if (version === requestVersion && requestId === activeRequestId) loading.value = false
   }
 }
 
+function beginPreview(modeToLoad: RollbackMode): void {
+  if (mode.value !== modeToLoad) mode.value = modeToLoad
+  requestVersion += 1
+  activeRequestId = newRequestId()
+  const version = requestVersion
+  const requestId = activeRequestId
+  preview.value = null
+  error.value = ''
+  void loadPreview(requestId, version, modeToLoad)
+}
+
+function selectMode(nextMode: RollbackMode): void {
+  if (loading.value || executing.value || nextMode === mode.value) return
+  mode.value = nextMode
+  beginPreview(nextMode)
+}
+
+function invalidatePreview(): void {
+  requestVersion += 1
+  activeRequestId = ''
+  preview.value = null
+  error.value = ''
+}
+
 watch(() => props.modelValue, (visible) => {
-  if (visible) void loadPreview()
+  if (visible) {
+    mode.value = 'both'
+    beginPreview('both')
+  } else {
+    invalidatePreview()
+  }
+}, { immediate: true })
+
+watch(() => [props.conversationId, props.target.type, props.target.type === 'checkpoint' ? props.target.checkpointId : props.target.operationId, props.target.type === 'checkpoint' ? props.target.messageId : ''], () => {
+  if (props.modelValue) beginPreview(mode.value)
 })
-watch(mode, () => {
-  if (props.modelValue) void loadPreview()
+
+const canConfirm = computed(() => {
+  const value = preview.value
+  return !!value
+    && value.mode === mode.value
+    && value.client_request_id === activeRequestId
+    && targetMatches(value)
+    && !loading.value
+    && !executing.value
 })
 
 async function confirmRestore() {
-  if (!preview.value || executing.value) return
+  const currentPreview = preview.value
+  const currentRequestId = activeRequestId
+  const currentVersion = requestVersion
+  const currentMode = mode.value
+  if (!currentPreview || !canConfirm.value) return
   executing.value = true
   try {
-    const result = await executeRestore(props.conversationId, preview.value.preview_id)
+    const result = await executeRestore(props.conversationId, {
+      preview_id: currentPreview.preview_id,
+      expected_mode: currentMode,
+      client_request_id: currentRequestId,
+    })
+    if (currentVersion !== requestVersion || currentRequestId !== activeRequestId || !props.modelValue) return
     ElMessage.success(result.status === 'partial' ? '已回滚可安全恢复的文件，冲突文件已跳过' : '已完成回滚')
     emit('completed', result)
     emit('update:modelValue', false)
   } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : '回滚失败，请重新预览')
+    const code = (e as { code?: number }).code
+    if (currentVersion === requestVersion && currentRequestId === activeRequestId && (code === 40933 || code === 40934)) {
+      preview.value = null
+      error.value = '预览已变化，正在重新生成…'
+      beginPreview(mode.value)
+    } else if (currentVersion === requestVersion && currentRequestId === activeRequestId) {
+      ElMessage.error(e instanceof Error ? e.message : '回滚失败，请重新预览')
+    }
   } finally {
-    executing.value = false
+    if (currentVersion === requestVersion && currentRequestId === activeRequestId) executing.value = false
   }
 }
 </script>
@@ -76,9 +167,16 @@ async function confirmRestore() {
   >
     <div class="restore-dialog">
       <p class="restore-lede">先选择回滚范围，确认后才会修改工作区或对话。</p>
-      <div class="mode-grid" role="radiogroup" aria-label="回滚模式">
+      <div v-if="target.type === 'checkpoint'" class="mode-grid" role="radiogroup" aria-label="回滚模式">
         <label v-for="option in modeOptions" :key="option.value" class="mode-option" :class="{ selected: mode === option.value }">
-          <input v-model="mode" type="radio" name="restore-mode" :value="option.value" />
+          <input
+            :checked="mode === option.value"
+            :disabled="loading || executing"
+            type="radio"
+            name="restore-mode"
+            :value="option.value"
+            @change="selectMode(option.value)"
+          />
           <span class="mode-copy"><b>{{ option.label }}</b><small>{{ option.description }}</small></span>
         </label>
       </div>
@@ -108,8 +206,8 @@ async function confirmRestore() {
       </div>
     </div>
     <template #footer>
-      <el-button @click="emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" :loading="executing" :disabled="!preview || loading" @click="confirmRestore">确认回滚</el-button>
+      <el-button :disabled="loading || executing" @click="emit('update:modelValue', false)">取消</el-button>
+      <el-button type="primary" :loading="executing" :disabled="!canConfirm" @click="confirmRestore">确认回滚</el-button>
     </template>
   </ResponsiveDialog>
 </template>

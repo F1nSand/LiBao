@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { reactive, ref } from 'vue'
-import type { CheckpointAnchor, FileRef, Message, Paged } from '@/types'
+import type { CheckpointAnchor, ComposerAttachment, FileRef, Message, Paged, RestoreResult } from '@/types'
 import type { PendingAttachment } from '@/components/business/AttachmentUploader.vue'
 
-const { listConversations, listMessages, streamState, streamOptions, setConversation, start, stop, stopAll, useChatStream } = vi.hoisted(() => ({
+const { listConversations, listMessages, streamState, streamOptions, setConversation, start, stop, stopAll, resetConversation, reconcileTaskTerminal, useChatStream } = vi.hoisted(() => ({
   listConversations: vi.fn(),
   listMessages: vi.fn(),
   streamState: { value: { streaming: false, interrupted: null, error: null, status: 'idle', phase: 'idle', phaseDetail: null, cancelling: false, taskId: null, messageId: null, partialText: '', segments: [], toolCalls: [], finished: false } },
@@ -13,6 +13,8 @@ const { listConversations, listMessages, streamState, streamOptions, setConversa
   start: vi.fn(),
   stop: vi.fn(),
   stopAll: vi.fn(),
+  resetConversation: vi.fn(),
+  reconcileTaskTerminal: vi.fn(),
   useChatStream: vi.fn(),
 }))
 
@@ -31,6 +33,8 @@ vi.mock('@/composables/useChatStream', () => ({
     start,
     stop,
     stopAll,
+    resetConversation,
+    reconcileTaskTerminal,
     confirmInterrupt: vi.fn(),
     }
   }),
@@ -96,6 +100,7 @@ function mountShell() {
         ResourceManager: true,
         TrajectoryPanel: true,
         AttachmentUploader: true,
+        ModelPicker: { template: '<button class="model-picker-stub" aria-label="选择模型">模型</button>' },
         InterruptConfirmDialog: true,
         StatusTag: true,
         AgentRunStatus: true,
@@ -115,9 +120,9 @@ function mountShell() {
           </div>`,
         },
         CheckpointRestoreDialog: {
-          props: ['modelValue', 'conversationId', 'checkpointId', 'messageId'],
-          template: `<div v-if="modelValue" data-testid="restore-dialog" :data-conversation-id="conversationId" :data-checkpoint-id="checkpointId">
-            <button data-testid="restore-complete" @click="$emit('completed', { status: 'completed' })">complete</button>
+          props: ['modelValue', 'conversationId', 'target'],
+          template: `<div v-if="modelValue" data-testid="restore-dialog" :data-conversation-id="conversationId" :data-checkpoint-id="target?.checkpointId">
+            <button data-testid="restore-complete" @click="$emit('completed', { status: 'completed', conversation: { action: 'restore_cursor' } })">complete</button>
           </div>`,
         },
         'el-radio-group': true,
@@ -139,6 +144,8 @@ describe('WorkspaceShell conversation loading races', () => {
     start.mockReset()
     stop.mockReset()
     stopAll.mockReset()
+    resetConversation.mockReset()
+    reconcileTaskTerminal.mockReset()
     streamState.value = streamValue()
     streamOptions.value = null
     listConversations.mockResolvedValue({
@@ -349,6 +356,53 @@ describe('WorkspaceShell conversation loading races', () => {
     expect(listMessages).toHaveBeenCalledTimes(2)
     expect(listConversations).toHaveBeenCalledTimes(2)
     expect(wrapper.get('[data-testid="messages"]').text()).toContain('恢复后的消息')
+  })
+
+  it('conversation restore 按权威 action 裁剪消息并恢复正文、附件和 file_refs 草稿', async () => {
+    const before = message('c_a', '保留消息')
+    const target = checkpointUserMessage('c_a', 'target')
+    const after = message('c_a', '应移除消息')
+    listMessages
+      .mockResolvedValueOnce({ items: [before, target, after], total: 3, page: 1, page_size: 100 })
+      .mockResolvedValueOnce({ items: [before], total: 1, page: 1, page_size: 100 })
+    const wrapper = mountShell()
+    await flushPromises()
+    await wrapper.find('[data-conversation-id="c_a"]').trigger('click')
+    await flushPromises()
+
+    const result: RestoreResult = {
+      operation_id: 'op_1',
+      preview_id: 'preview_1',
+      client_request_id: 'request_1',
+      mode: 'both',
+      target_message_id: 'target',
+      status: 'partial',
+      restored_files: 0,
+      deleted_files: 0,
+      skipped_conflicts: [],
+      conversation: {
+        action: 'withdraw_from_target',
+        active_message_head_after_id: 'c_a-保留消息',
+        withdrawn_from_message_id: 'target',
+        hidden_message_count: 2,
+        draft: {
+          source_message_id: 'target',
+          content: '恢复到工作区',
+          attachments: [{ attachment_id: 'a_restore', name: '需求.txt', available: false, unavailable_reason: '附件丢失' }],
+          file_refs: [{ path: 'docs/需求.txt' }],
+        },
+      },
+      undo_available: true,
+      history_revision: 3,
+    }
+    await (wrapper.vm as unknown as { onRestoreCompleted: (value: RestoreResult) => Promise<void> }).onRestoreCompleted(result)
+    await flushPromises()
+
+    expect(resetConversation).toHaveBeenCalledWith('c_a')
+    expect((wrapper.vm as unknown as { input: string }).input).toBe('恢复到工作区')
+    expect((wrapper.vm as unknown as { pendingAttachments: ComposerAttachment[] }).pendingAttachments[0]).toMatchObject({ available: false, unavailable_reason: '附件丢失' })
+    expect((wrapper.vm as unknown as { fileRefs: FileRef[] }).fileRefs).toEqual([{ path: 'docs/需求.txt' }])
+    expect(wrapper.get('[data-testid="messages"]').text()).toBe('保留消息')
   })
 
   it('首帧 anchor 只回填当前工作区会话的最后一条本地用户消息，replay 不增消息', async () => {

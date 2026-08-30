@@ -35,6 +35,25 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
     await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
     await expect(page).toHaveURL(/\/workspace\/ws_001/)
 
+    // composer 操作顺序：输入框在上方，底部左侧为 + → 分隔符 → 引用，右侧为模型 → 发送。
+    const composerInput = page.locator('.composer-input')
+    const toolbar = composerInput.locator(':scope > .composer-toolbar')
+    const leading = toolbar.locator(':scope > .composer-leading')
+    const actions = toolbar.locator(':scope > .composer-actions')
+    await expect(leading.locator(':scope > .uploader')).toBeVisible()
+    await expect(leading.locator(':scope > .composer-divider')).toHaveText('|')
+    await expect(leading.getByRole('button', { name: '引用工作区文件' })).toBeVisible()
+    await expect(actions.locator('.model-btn')).toBeVisible()
+    await expect(actions.locator('.model-btn')).not.toHaveText(/未配置|加载中…/)
+    const composerOrder = await composerInput.evaluate((element) =>
+      Array.from(element.children).map((child) => {
+        if (child.classList.contains('composer-textarea')) return 'textarea'
+        if (child.classList.contains('composer-toolbar')) return 'toolbar'
+        return child.className
+      }),
+    )
+    expect(composerOrder).toEqual(['textarea', 'toolbar'])
+
     // 文件树：根层 README.md / docs / src；展开 docs 后点文件预览（行级定位避免祖行误配）
     const tree = page.locator('.rm-tree-wrap')
     await expect(tree.locator('.el-tree-node__content', { hasText: 'README.md' })).toBeVisible()
@@ -275,5 +294,42 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
     await page.getByRole('menuitem', { name: '删除', exact: true }).click()
     await page.locator('.el-message-box').getByRole('button', { name: '确定' }).click()
     await expect(tree.locator('.el-tree-node__content', { hasText: 'assets' })).toHaveCount(0)
+  })
+
+  test('详情页：超长文件名不挤出行尾操作入口', async ({ page }) => {
+    await gotoChat(page)
+    await page.goto('/workspace')
+    await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
+    await expect(page).toHaveURL(/\/workspace\/ws_001/)
+
+    const tree = page.locator('.rm-tree-wrap')
+    const longName = `${'long-file-name-'.repeat(10)}.md`
+    await page.locator('.rm-head-right').getByRole('button', { name: '新建' }).click()
+    await page.getByRole('menuitem', { name: '新建文件', exact: true }).click()
+    await page.locator('.el-dialog').getByPlaceholder(/无后缀默认/).fill(longName)
+    await page.locator('.el-dialog').getByRole('button', { name: '创建', exact: true }).click()
+
+    const row = tree.locator('.el-tree-node__content', { hasText: longName }).first()
+    await expect(row).toBeVisible()
+    await row.hover()
+    const metrics = await row.evaluate((element) => {
+      const name = element.querySelector('.rm-node-name') as HTMLElement | null
+      const more = element.querySelector('.rm-more') as HTMLElement | null
+      const rowBox = element.getBoundingClientRect()
+      const moreBox = more?.getBoundingClientRect()
+      return {
+        nameClientWidth: name?.clientWidth ?? 0,
+        nameScrollWidth: name?.scrollWidth ?? 0,
+        moreWidth: moreBox?.width ?? 0,
+        moreRight: moreBox?.right ?? 0,
+        rowRight: rowBox.right,
+      }
+    })
+    expect(metrics.nameScrollWidth).toBeGreaterThan(metrics.nameClientWidth)
+    expect(metrics.moreWidth).toBeGreaterThanOrEqual(28)
+    expect(metrics.moreRight).toBeLessThanOrEqual(metrics.rowRight + 1)
+
+    await row.locator('.rm-more').click()
+    await expect(page.getByRole('menuitem', { name: '重命名', exact: true })).toBeVisible()
   })
 })

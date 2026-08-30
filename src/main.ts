@@ -11,6 +11,7 @@ import 'highlight.js/styles/github.css'
 import '@/styles/tokens.css'
 import '@/styles/element-overrides.css'
 import '@/styles/global.css'
+import '@/styles/composer.css'
 import '@/styles/markdown.css'
 import { applyTheme, getStoredTheme } from '@/theme/themes'
 

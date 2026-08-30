@@ -1,8 +1,127 @@
+import { EventEmitter } from 'node:events'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ChatRequest } from '@/types'
 import { messages, uploadedAttachments, workspaceFileContents } from './db'
+import { mockServer } from './server'
 import { buildChatScript, toEnvelope, PERSISTED_TYPES } from './stream'
 import { nextTaskSeq, pushTaskEvent, replayTaskEvents, subscribeTaskLog, taskLastSeq } from './task-events'
+
+async function callMock(method: string, url: string, payload?: Record<string, unknown>): Promise<any> {
+  const req = new EventEmitter() as EventEmitter & Partial<IncomingMessage>
+  req.method = method
+  req.url = url
+  req.headers = payload ? { 'content-type': 'application/json' } : {}
+  let responseBody = ''
+  const res = {
+    writeHead: () => undefined,
+    end: (chunk?: string | Buffer) => {
+      responseBody = chunk?.toString() ?? ''
+    },
+  } as unknown as ServerResponse
+  const handled = mockServer.handle(req as IncomingMessage, res, () => undefined)
+  queueMicrotask(() => {
+    if (payload) req.emit('data', Buffer.from(JSON.stringify(payload)))
+    req.emit('end')
+  })
+  await handled
+  return JSON.parse(responseBody)
+}
+
+describe('mock checkpoint restore v2 contract', () => {
+  const restoreAttachmentId = 'atc_restore_contract'
+  const originalC001 = messages.c_001.map((message) => ({
+    ...message,
+    attachments: message.attachments?.map((attachment) => ({ ...attachment })),
+    file_refs: message.file_refs?.map((fileRef) => ({ ...fileRef })),
+    tool_calls: message.tool_calls?.map((toolCall) => ({ ...toolCall })),
+  }))
+
+  afterEach(() => {
+    uploadedAttachments.delete(restoreAttachmentId)
+    const target = messages.c_001?.find((message) => message.id === 'm_001')
+    if (target) {
+      target.attachments = []
+      target.file_refs = undefined
+    }
+    messages.c_001 = originalC001.map((message) => ({
+      ...message,
+      attachments: message.attachments?.map((attachment) => ({ ...attachment })),
+      file_refs: message.file_refs?.map((fileRef) => ({ ...fileRef })),
+      tool_calls: message.tool_calls?.map((toolCall) => ({ ...toolCall })),
+    }))
+  })
+
+  it('returns_authoritative_draft_and_echoes_mode_request_id', async () => {
+    const target = messages.c_001.find((message) => message.id === 'm_001')!
+    target.attachments = [{ attachment_id: restoreAttachmentId, name: 'restore.txt', mime_type: 'text/plain', size: 12, status: 'uploaded' }]
+    target.file_refs = [{ path: 'docs/restore.md' }]
+    uploadedAttachments.set(restoreAttachmentId, { attachment_id: restoreAttachmentId, name: 'restore.txt', mime_type: 'text/plain', size: 12, bytes: Buffer.from('restore') })
+    const requestId = 'req_restore_contract'
+
+    const previewEnvelope = await callMock('POST', '/api/v1/conversations/c_001/restore-previews', {
+      target_type: 'checkpoint',
+      target_checkpoint_id: 'cp_001',
+      mode: 'conversation_only',
+      client_request_id: requestId,
+    })
+    const preview = previewEnvelope.data
+    expect(preview.mode).toBe('conversation_only')
+    expect(preview.client_request_id).toBe(requestId)
+    expect(preview.target.message_id).toBe('m_001')
+    expect(preview.conversation.action).toBe('withdraw_from_target')
+    expect(preview.conversation.hidden_message_count).toBe(1)
+    expect(preview.conversation.draft).toMatchObject({
+      source_message_id: 'm_001',
+      content: '计算 6*7',
+      file_refs: [{ path: 'docs/restore.md' }],
+    })
+    expect(preview.conversation.draft.attachments).toMatchObject([{ attachment_id: restoreAttachmentId, name: 'restore.txt', available: true }])
+
+    const resultEnvelope = await callMock('POST', '/api/v1/conversations/c_001/restores', {
+      preview_id: preview.preview_id,
+      expected_mode: 'conversation_only',
+      client_request_id: requestId,
+    })
+    expect(resultEnvelope.data).toMatchObject({
+      preview_id: preview.preview_id,
+      client_request_id: requestId,
+      mode: 'conversation_only',
+      target_message_id: 'm_001',
+      conversation: preview.conversation,
+    })
+  })
+
+  it('code_only_returns_unchanged_conversation_and_null_draft', async () => {
+    const response = await callMock('POST', '/api/v1/conversations/c_001/restore-previews', {
+      target_type: 'checkpoint',
+      target_checkpoint_id: 'cp_001',
+      mode: 'code_only',
+      client_request_id: 'req_code_only',
+    })
+    expect(response.data.conversation).toMatchObject({ action: 'unchanged', hidden_message_count: 0, draft: null })
+  })
+
+  it('marks_missing_attachment_unavailable_and_operation_before_restores_cursor', async () => {
+    const target = messages.c_001.find((message) => message.id === 'm_001')!
+    target.attachments = [{ attachment_id: restoreAttachmentId, name: 'missing.txt', mime_type: 'text/plain', size: 4, status: 'failed' }]
+    const missing = await callMock('POST', '/api/v1/conversations/c_001/restore-previews', {
+      target_type: 'checkpoint',
+      target_checkpoint_id: 'cp_001',
+      mode: 'both',
+      client_request_id: 'req_missing',
+    })
+    expect(missing.data.conversation.draft.attachments[0]).toMatchObject({ available: false, unavailable_reason: '附件已不可用' })
+
+    const operation = await callMock('POST', '/api/v1/conversations/c_001/restore-previews', {
+      target_type: 'rollback_operation_before',
+      target_id: 'op_previous',
+      client_request_id: 'req_operation_before',
+    })
+    expect(operation.data.mode).toBe('both')
+    expect(operation.data.conversation).toMatchObject({ action: 'restore_cursor', draft: null })
+  })
+})
 
 function finalMessageContent(request: ChatRequest): string {
   const done = buildChatScript(request).find((item) => item.type === 'done')

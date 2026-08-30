@@ -16,6 +16,7 @@ export interface PendingAttachment extends UploadResponse {
 
 const emit = defineEmits<{ add: [attachment: PendingAttachment] }>()
 
+const fileInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const progress = ref(0)
 
@@ -54,6 +55,16 @@ function onFileChange(e: Event) {
   input.value = ''
 }
 
+function openFilePicker() {
+  fileInput.value?.click()
+}
+
+function onUploadKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  e.preventDefault()
+  openFilePicker()
+}
+
 function onDrop(e: DragEvent) {
   const file = e.dataTransfer?.files?.[0]
   if (file) void doUpload(file)
@@ -62,15 +73,19 @@ function onDrop(e: DragEvent) {
 
 <template>
   <div class="uploader">
-    <input id="file-input" type="file" :accept="ACCEPT" hidden @change="onFileChange" />
+    <input id="file-input" ref="fileInput" type="file" :accept="ACCEPT" hidden @change="onFileChange" />
     <label
       class="upload-btn"
       for="file-input"
-      title="上传附件（≤20MB）"
+      role="button"
+      tabindex="0"
+      aria-label="添加文件"
+      title="添加文件（≤20MB）"
       @dragover.prevent
       @drop.stop.prevent="onDrop"
+      @keydown="onUploadKeydown"
     >
-      <el-icon :size="18"><Paperclip /></el-icon>
+      <el-icon :size="18"><Plus /></el-icon>
       <span v-if="uploading" class="upload-progress">{{ progress }}%</span>
     </label>
   </div>

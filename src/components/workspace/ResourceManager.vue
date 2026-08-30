@@ -354,7 +354,9 @@ async function onDelete(data: WorkspaceFile) {
             <el-icon :size="14"><component :is="data.is_dir ? folderIcon(node) : 'Document'" /></el-icon>
             <span class="rm-node-name">{{ data.name }}</span>
             <el-dropdown trigger="click" @command="(cmd: string) => onMenu(cmd, data)">
-              <span class="rm-more" title="更多操作" @click.stop><el-icon :size="14"><MoreFilled /></el-icon></span>
+              <button type="button" class="rm-more" title="更多操作" aria-label="更多操作" @click.stop>
+                <el-icon :size="14"><MoreFilled /></el-icon>
+              </button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="rename">重命名</el-dropdown-item>
@@ -477,6 +479,7 @@ async function onDelete(data: WorkspaceFile) {
 }
 /* 节点行 hover 过渡 + 当前选中高亮（emil：0.15s ease-out） */
 .rm-tree-wrap :deep(.el-tree-node__content) {
+  min-width: 0;
   border-radius: var(--app-radius);
   transition: background 0.15s var(--ease-out);
 }
@@ -485,30 +488,53 @@ async function onDelete(data: WorkspaceFile) {
   color: var(--app-primary);
 }
 .rm-node {
-  display: inline-flex;
+  display: flex;
+  min-width: 0;
   align-items: center;
   gap: 5px;
   font-size: 13px;
   width: 100%;
+  overflow: hidden;
 }
 .rm-node-name {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.rm-node :deep(.el-dropdown) {
+  flex: 0 0 28px;
+  width: 28px;
+}
 .rm-more {
-  opacity: 0;
-  flex-shrink: 0;
   display: inline-flex;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius);
+  background: transparent;
   color: var(--app-text-muted);
   cursor: pointer;
-  transition: opacity 0.15s var(--ease-out), color 0.15s var(--ease-out);
+  opacity: 0.72;
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out), opacity 0.15s var(--ease-out);
 }
-.rm-node:hover .rm-more {
+.rm-node:hover .rm-more,
+.rm-more:focus-visible {
   opacity: 1;
   color: var(--app-primary);
+}
+.rm-more:hover {
+  background: var(--app-border-light);
+}
+.rm-more:focus-visible {
+  outline: 2px solid var(--app-focus-ring);
+  outline-offset: 1px;
 }
 .mono {
   font-family: var(--app-font-mono);

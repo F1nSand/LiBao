@@ -1,5 +1,9 @@
 import { httpGet, httpPost } from './http'
-import type { RestorePreview, RestoreResult } from '@/types'
+import type { RestorePreview, RestoreResult, RollbackMode } from '@/types'
+
+export type RestoreDialogTarget =
+  | { type: 'checkpoint'; checkpointId: string; messageId: string }
+  | { type: 'rollback_operation_before'; operationId: string }
 
 export interface CheckpointHistoryItem {
   kind: 'checkpoint' | 'rollback_operation'
@@ -30,11 +34,30 @@ export function listCheckpoints(id: string) {
 
 export function createRestorePreview(
   id: string,
-  body: { target_checkpoint_id?: string; target_type?: 'checkpoint' | 'rollback_operation_before'; target_id?: string; mode: 'code_only' | 'conversation_only' | 'both' },
+  body: RestorePreviewRequest,
 ) {
   return httpPost<RestorePreview>(`/conversations/${id}/restore-previews`, body)
 }
 
-export function executeRestore(id: string, preview_id: string) {
-  return httpPost<RestoreResult>(`/conversations/${id}/restores`, { preview_id })
+export type RestorePreviewRequest =
+  | {
+      target_type: 'checkpoint'
+      target_checkpoint_id: string
+      mode: RollbackMode
+      client_request_id: string
+    }
+  | {
+      target_type: 'rollback_operation_before'
+      target_id: string
+      client_request_id: string
+    }
+
+export interface RestoreExecuteRequest {
+  preview_id: string
+  expected_mode: RollbackMode
+  client_request_id: string
+}
+
+export function executeRestore(id: string, body: RestoreExecuteRequest) {
+  return httpPost<RestoreResult>(`/conversations/${id}/restores`, body)
 }

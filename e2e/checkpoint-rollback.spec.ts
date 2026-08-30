@@ -131,3 +131,72 @@ test.describe('checkpoint live anchor', () => {
     await expect(page.locator('.msg.user')).toHaveCount(1)
   })
 })
+
+test.describe('checkpoint restore v2', () => {
+  test('普通会话默认 Both 可直接确认，回滚后可撤销并清理未编辑草稿', async ({ page }) => {
+    await gotoChat(page)
+    await page.locator('.conv-item[data-conversation-id="c_001"]').click()
+    await expect(page.locator('.msg.user .user-text')).toContainText('计算 6*7')
+
+    const userMessage = page.locator('.msg.user').filter({ hasText: '计算 6*7' })
+    await userMessage.hover()
+    await userMessage.getByRole('button', { name: '回滚到此状态' }).click()
+
+    const dialog = page.locator('.el-dialog').filter({ hasText: '回滚到此状态' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('input[type="radio"][value="both"]')).toBeChecked()
+    await expect(dialog.getByRole('button', { name: '确认回滚', exact: true })).toBeEnabled()
+    // 默认 Both 就是实际预览模式：不切换单选项也可以直接确认。
+    await dialog.getByRole('button', { name: '确认回滚', exact: true }).click()
+
+    await expect(dialog).toBeHidden()
+    await expect(page.locator('.msg.user .user-text')).toHaveCount(0)
+    await expect(page.locator('.rollback-undo-banner')).toBeVisible()
+    await expect(page.locator('.composer textarea')).toHaveValue('计算 6*7')
+
+    await page.getByRole('button', { name: '撤销本次回滚' }).click()
+    const undoDialog = page.locator('.el-dialog').filter({ hasText: '回滚到此状态' })
+    await expect(undoDialog).toBeVisible()
+    await expect(undoDialog.locator('.mode-grid')).toHaveCount(0)
+    await expect(undoDialog.getByRole('button', { name: '确认回滚', exact: true })).toBeEnabled()
+    await undoDialog.getByRole('button', { name: '确认回滚', exact: true }).click()
+
+    await expect(undoDialog).toBeHidden()
+    await expect(page.locator('.msg-row')).toHaveCount(2)
+    await expect(page.locator('.composer textarea')).toHaveValue('')
+  })
+
+  test('Workspace 回滚按权威草稿恢复正文与 file_refs', async ({ page }) => {
+    await gotoChat(page)
+    await page.goto('/workspace')
+    await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()
+    await expect(page).toHaveURL(/\/workspace\/ws_001/)
+
+    // 让目标消息携带 file_refs，验证恢复的是后端返回的权威 composer draft。
+    await page.getByRole('button', { name: '引用' }).click()
+    const picker = page.locator('.ws-ref-tree')
+    await picker.locator('.el-tree-node__content', { hasText: 'README.md' }).locator('.el-checkbox').click()
+    await page.locator('.el-dialog').getByRole('button', { name: '引用', exact: true }).click()
+    await expect(page.locator('.composer-ref-chip', { hasText: 'README.md' })).toBeVisible()
+
+    const targetText = '回滚后恢复 README 引用'
+    await page.locator('.composer textarea').fill(targetText)
+    await page.locator('.composer textarea').press('Enter')
+    const targetUser = page.locator('.msg.user .user-text', { hasText: targetText })
+    await expect(targetUser).toBeVisible()
+    await expect(page.locator('.msg.assistant').last()).toBeVisible({ timeout: 15_000 })
+
+    const targetMessage = page.locator('.msg.user').filter({ hasText: targetText })
+    await targetMessage.hover()
+    await targetMessage.getByRole('button', { name: '回滚到此状态' }).click()
+    const dialog = page.locator('.el-dialog').filter({ hasText: '回滚到此状态' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('input[type="radio"][value="both"]')).toBeChecked()
+    await dialog.getByRole('button', { name: '确认回滚', exact: true }).click()
+
+    await expect(dialog).toBeHidden()
+    await expect(page.locator('.msg.user .user-text', { hasText: targetText })).toHaveCount(0)
+    await expect(page.locator('.composer textarea')).toHaveValue(targetText)
+    await expect(page.locator('.composer-ref-chip', { hasText: 'README.md' })).toBeVisible()
+  })
+})

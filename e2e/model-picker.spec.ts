@@ -6,8 +6,15 @@ test.describe('换模型（交接板 ←后端 2026-08-27：provider 唯一激�
   test('发送按钮左侧展示当前生效模型名；popover 选择器切换 → 按钮与「当前」徽标刷新', async ({ page }) => {
     await gotoChat(page)
 
+    // active provider 在页面挂载时就应加载完成，不能等首次点击 popover 才从「未配置」补回。
+    const modelBtn = page.locator('.composer .model-btn')
+    await expect(modelBtn).toBeVisible()
+    await expect(modelBtn).not.toHaveText('未配置')
+    await expect(modelBtn).not.toHaveText('加载中…')
+    await expect(modelBtn).toHaveText(/gpt-4o|deepseek-chat/)
+
     // 点开 popover：hint + 列表，恰一项处于激活态
-    await page.locator('.composer .model-btn').click()
+    await modelBtn.click()
     const menu = page.locator('.model-picker .model-menu')
     await expect(menu.locator('.model-menu-hint')).toContainText('当前：')
     const items = menu.locator('.model-item')
@@ -15,7 +22,6 @@ test.describe('换模型（交接板 ←后端 2026-08-27：provider 唯一激�
     await expect(menu.locator('.model-item.active')).toHaveCount(1)
 
     // 记住切换前按钮文案，取任一未激活项作为切换目标
-    const modelBtn = page.locator('.composer .model-btn')
     const beforeLabel = ((await modelBtn.textContent()) ?? '').trim()
     const target = menu.locator('.model-item:not(.active)').first()
     const targetName = ((await target.locator('.model-item-name').textContent()) ?? '').trim()

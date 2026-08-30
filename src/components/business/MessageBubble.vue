@@ -263,6 +263,11 @@ const usageText = computed(() => {
   flex: 1;
   min-width: 0;
   max-width: 80%;
+  position: relative;
+}
+.msg-content:has(.user-text),
+.msg-content:has(.msg-text) {
+  padding-bottom: 34px;
 }
 .msg.user {
   flex-direction: row-reverse;
@@ -315,8 +320,11 @@ const usageText = computed(() => {
   justify-content: flex-end;
   gap: 4px;
   align-self: flex-end;
-  min-height: 30px;
-  margin-top: 4px;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  min-height: 0;
+  margin: 0;
   pointer-events: none;
 }
 .message-action {

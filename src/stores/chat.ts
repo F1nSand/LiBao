@@ -5,7 +5,8 @@ import {
   listMessages,
   deleteConversation as apiDeleteConversation,
 } from '@/api/chat'
-import type { AttachmentRef, CheckpointAnchor, Conversation, Message } from '@/types'
+import type { AttachmentRef, CheckpointAnchor, Conversation, Message, RestoreConversationPlan } from '@/types'
+import { toComposerDraft, truncateMessagesFrom } from '@/utils/checkpointRestore'
 
 /**
  * chat store（docs/02 §7）：只存客户端状态（会话列表/选中态/消息列表），
@@ -119,6 +120,15 @@ export const useChatStore = defineStore('chat', {
         }
       }
       return false
+    },
+
+    /** 只在当前会话应用后端确认过的 conversation action；code_only/unchanged 不触碰消息分支。 */
+    applyConversationRestore(conversationId: string, plan: RestoreConversationPlan) {
+      if (this.currentId !== conversationId || plan.action === 'unchanged') return null
+      if (plan.action === 'withdraw_from_target' && plan.withdrawn_from_message_id) {
+        this.currentMessages = truncateMessagesFrom(this.currentMessages, plan.withdrawn_from_message_id)
+      }
+      return plan.draft ? toComposerDraft(plan.draft) : null
     },
   },
 })

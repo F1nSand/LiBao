@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { ChatRequest, KbCollection, KbDocument, SseEnvelope, TaskError, ToolDefinition, Workspace } from '@/types'
+import type { ChatRequest, KbCollection, KbDocument, Message, RestoreConversationPlan, RestorePreview, RestoreResult, RollbackMode, SseEnvelope, TaskError, ToolDefinition, Workspace } from '@/types'
 import {
   DEFAULT_AGENT_ID,
   tools,
@@ -38,9 +38,77 @@ const ALLOWED_ATTACHMENT_MIMES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ])
 const cancelledMockTaskIds = new Set<string>()
+const mockRestorePreviews = new Map<string, RestorePreview>()
+const mockRestoreOperations = new Map<string, { conversationId: string; before: Message[] }>()
 
 function isSafeFileRef(path: string): boolean {
   return path.length > 0 && path.length <= 1024 && !path.includes('\\') && !path.startsWith('/') && !/^[A-Za-z]:/.test(path) && !path.split('/').includes('..')
+}
+
+const restoreWarnings = [
+  '仅恢复 AI 直接文件工具产生的工作区文件；手动编辑/外部进程冲突文件将跳过。',
+  'shell、脚本、数据库、MCP/远程服务、记忆和知识库副作用不纳入回滚。',
+]
+
+function mockRestoreTargetMessageId(conversationId: string, targetCheckpointId: string): string {
+  return messages[conversationId]?.find((message) => message.checkpoint_id === targetCheckpointId)?.id ?? 'm_001'
+}
+
+function mockRestoreConversation(conversationId: string, mode: RollbackMode, targetType: 'checkpoint' | 'rollback_operation_before', targetMessageId: string | null): RestoreConversationPlan {
+  if (targetType === 'rollback_operation_before') {
+    return {
+      action: 'restore_cursor',
+      active_message_head_after_id: null,
+      withdrawn_from_message_id: null,
+      hidden_message_count: 0,
+      draft: null,
+    }
+  }
+
+  const currentHead = messages[conversationId]?.at(-1)?.id ?? null
+  if (mode === 'code_only' || !targetMessageId) {
+    return {
+      action: 'unchanged',
+      active_message_head_after_id: currentHead,
+      withdrawn_from_message_id: null,
+      hidden_message_count: 0,
+      draft: null,
+    }
+  }
+
+  const target = messages[conversationId]?.find((message) => message.id === targetMessageId)
+  const attachments = (target?.attachments ?? []).map((attachment) => {
+    const uploaded = uploadedAttachments.get(attachment.attachment_id)
+    return {
+      ...attachment,
+      name: attachment.name ?? uploaded?.name ?? '未命名附件',
+      available: Boolean(uploaded),
+      unavailable_reason: uploaded ? null : '附件已不可用',
+    }
+  })
+  return {
+    action: 'withdraw_from_target',
+    active_message_head_after_id: null,
+    withdrawn_from_message_id: targetMessageId,
+    hidden_message_count: 1,
+    draft: target
+      ? {
+          source_message_id: target.id,
+          content: target.content,
+          attachments,
+          file_refs: (target.file_refs ?? []).map((fileRef) => ({ ...fileRef })),
+        }
+      : null,
+  }
+}
+
+function cloneMessages(list: Message[]): Message[] {
+  return list.map((message) => ({
+    ...message,
+    attachments: message.attachments?.map((attachment) => ({ ...attachment })),
+    file_refs: message.file_refs?.map((fileRef) => ({ ...fileRef })),
+    tool_calls: message.tool_calls?.map((toolCall) => ({ ...toolCall })),
+  }))
 }
 
 /* ---------- 工具函数 ---------- */
@@ -400,20 +468,66 @@ export const mockServer = {
     p = match(pathname, '/conversations/:id/restore-previews')
     if (method === 'POST' && p) {
       const b = body.json ?? {}
-      return void json(res, ok({
-        preview_id: uid('preview'),
-        target: { type: b.target_type ?? 'checkpoint', id: b.target_checkpoint_id ?? b.target_id },
-        mode: b.mode ?? 'both',
-        target_message_id: 'm_001',
+      const targetType = b.target_type === 'rollback_operation_before' ? 'rollback_operation_before' : 'checkpoint'
+      const targetMessageId = targetType === 'checkpoint' ? mockRestoreTargetMessageId(p.id, String(b.target_checkpoint_id ?? '')) : null
+      const mode = (targetType === 'rollback_operation_before' ? 'both' : b.mode ?? 'both') as RollbackMode
+      const previewId = uid('preview')
+      const preview: RestorePreview = {
+        preview_id: previewId,
+        client_request_id: String(b.client_request_id ?? ''),
+        target: {
+          type: targetType,
+          id: String(b.target_checkpoint_id ?? b.target_id ?? ''),
+          ...(targetMessageId ? { message_id: targetMessageId } : {}),
+        },
+        mode,
+        conversation_revision: conversations.find((conversation) => conversation.id === p!.id)?.history_revision ?? 0,
         expires_at: new Date(Date.now() + 600000).toISOString(),
-        conversation: { truncate_after_message_id: 'm_001', hidden_message_count: b.mode === 'code_only' ? 0 : 0 },
+        conversation: mockRestoreConversation(p!.id, mode, targetType, targetMessageId),
         files: [],
-        warnings: ['仅恢复 AI 直接文件工具产生的工作区文件；手动编辑/外部进程冲突文件将跳过。', 'shell、脚本、数据库、MCP/远程服务、记忆和知识库副作用不纳入回滚。'],
-      }))
+        warnings: restoreWarnings,
+      }
+      mockRestorePreviews.set(previewId, preview)
+      return void json(res, ok(preview))
     }
     p = match(pathname, '/conversations/:id/restores')
     if (method === 'POST' && p) {
-      return void json(res, ok({ operation_id: uid('op'), status: 'completed', restored_files: 0, deleted_files: 0, skipped_conflicts: [], hidden_message_count: 0, undo_available: true, history_revision: 1 }))
+      const b = body.json ?? {}
+      const preview = mockRestorePreviews.get(String(b.preview_id))
+      if (!preview) return void json(res, fail(40933, '回滚预览已失效'), 409)
+      if (preview.client_request_id !== String(b.client_request_id ?? '') || preview.mode !== b.expected_mode) {
+        return void json(res, fail(40934, '回滚预览与执行请求不匹配'), 409)
+      }
+      const operationId = uid('op')
+      if (preview.target.type === 'checkpoint' && preview.conversation.action === 'withdraw_from_target' && preview.target.message_id) {
+        const current = messages[p.id] ?? []
+        const targetIndex = current.findIndex((message) => message.id === preview.target.message_id)
+        if (targetIndex >= 0) {
+          mockRestoreOperations.set(operationId, { conversationId: p.id, before: cloneMessages(current) })
+          messages[p.id] = current.slice(0, targetIndex)
+        }
+      } else if (preview.target.type === 'rollback_operation_before') {
+        const previous = mockRestoreOperations.get(preview.target.id)
+        if (!previous || previous.conversationId !== p.id) return void json(res, fail(40933, '回滚操作已失效'), 409)
+        const current = messages[p.id] ?? []
+        mockRestoreOperations.set(operationId, { conversationId: p.id, before: cloneMessages(current) })
+        messages[p.id] = cloneMessages(previous.before)
+      }
+      const result: RestoreResult = {
+        operation_id: operationId,
+        preview_id: preview.preview_id,
+        client_request_id: preview.client_request_id,
+        mode: preview.mode,
+        target_message_id: preview.conversation.withdrawn_from_message_id,
+        status: 'completed',
+        restored_files: 0,
+        deleted_files: 0,
+        skipped_conflicts: [],
+        conversation: preview.conversation,
+        undo_available: true,
+        history_revision: preview.conversation_revision + 1,
+      }
+      return void json(res, ok(result))
     }
     p = match(pathname, '/conversations/:id/trajectory')
     if (method === 'GET' && p) {

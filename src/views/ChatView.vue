@@ -4,10 +4,8 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useChatStream } from '@/composables/useChatStream'
 import { TOKEN_LIMIT } from '@/types'
-import type { AttachmentRef, Message, ProviderConfig } from '@/types'
-import { listProviders, getActiveProvider, activateProvider } from '@/api/provider'
-import { FEATURE, isUnavailable } from '@/api/availability'
-import { swallowNotImplemented } from '@/utils/http-envelope'
+import type { AttachmentRef, ComposerAttachment, Message, RestoreResult } from '@/types'
+import type { RestoreDialogTarget } from '@/api/checkpoints'
 import { truncate } from '@/utils/format'
 import MessageList from '@/components/business/MessageList.vue'
 import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
@@ -15,6 +13,9 @@ import AttachmentUploader, { type PendingAttachment } from '@/components/busines
 import InterruptConfirmDialog from '@/components/business/InterruptConfirmDialog.vue'
 import AgentRunStatus from '@/components/common/AgentRunStatus.vue'
 import CheckpointRestoreDialog from '@/components/business/CheckpointRestoreDialog.vue'
+import ModelPicker from '@/components/business/ModelPicker.vue'
+import RollbackUndoBanner from '@/components/business/RollbackUndoBanner.vue'
+import { composerFingerprint } from '@/utils/checkpointRestore'
 
 /** 对话工作台（docs/02 §4 / §5）：消息流 + 流式渲染 + 工具卡 + 中断确认 + 会话|轨迹切换（单通用 Agent，无切换） */
 const chat = useChatStore()
@@ -52,13 +53,14 @@ const stream = useChatStream({
 const currentStream = stream.state
 
 const input = ref('')
-const pendingAttachments = ref<PendingAttachment[]>([])
+const pendingAttachments = ref<ComposerAttachment[]>([])
 const attachmentUploader = ref<InstanceType<typeof AttachmentUploader> | null>(null)
 const isDragging = ref(false)
-const lastFailedDraft = ref<{ content: string; attachments: PendingAttachment[] } | null>(null)
+const lastFailedDraft = ref<{ content: string; attachments: ComposerAttachment[] } | null>(null)
 const interruptVisible = ref(false)
 const restoreVisible = ref(false)
-const restoreMessage = ref<Message | null>(null)
+const restoreTarget = ref<RestoreDialogTarget | null>(null)
+const rollbackUndo = ref<{ operationId: string; fingerprint: string } | null>(null)
 
 /** 会话 | 轨迹 视图切换 */
 const mode = ref<'chat' | 'trajectory'>('chat')
@@ -68,13 +70,15 @@ watch(
   () => chat.currentId,
   (id) => {
     if (id) stream.setConversation(id)
+    restoreVisible.value = false
+    restoreTarget.value = null
+    rollbackUndo.value = null
     resetForNext()
   },
 )
 
 /** 流式中 / 中断等待中禁用输入框（done/error/stop 后自动恢复；按会话隔离——仅当前会话有流才禁） */
 const composerDisabled = computed(() => currentStream.value.streaming || !!currentStream.value.interrupted)
-const charCount = computed(() => input.value.length)
 
 function resetForNext() {
   input.value = ''
@@ -82,9 +86,15 @@ function resetForNext() {
   lastFailedDraft.value = null
 }
 
+const hasUnavailableAttachments = computed(() => pendingAttachments.value.some((attachment) => attachment.available === false))
+
 async function send() {
   const content = input.value.trim()
   const attachments = [...pendingAttachments.value]
+  if (hasUnavailableAttachments.value) {
+    ElMessage.warning('请先移除不可用附件')
+    return
+  }
   if ((!content && !attachments.length) || composerDisabled.value) return
   input.value = ''
   pendingAttachments.value = []
@@ -98,14 +108,20 @@ async function stop() {
       ElMessage.warning('已停止当前页面流；后端未提供可取消任务')
     }
     if (!currentStream.value.streaming) resetForNext()
+    return result
   } catch (e) {
     ElMessage.error(e instanceof Error ? `中断失败：${e.message}` : '中断失败，请重试')
+    return undefined
   }
 }
 
 /** send() 的内容注入版 */
-async function sendWith(content: string, attachmentRefs: PendingAttachment[] = [], appendUser = true) {
+async function sendWith(content: string, attachmentRefs: ComposerAttachment[] = [], appendUser = true) {
   const attachments = attachmentRefs.map((attachment) => attachment.attachment_id)
+  if (attachmentRefs.some((attachment) => attachment.available === false)) {
+    ElMessage.warning('请先移除不可用附件')
+    return
+  }
   if ((!content && !attachments.length) || composerDisabled.value) return
   if (content.length > TOKEN_LIMIT) {
     ElMessage.error(`输入超过 ${TOKEN_LIMIT} 字符上限`)
@@ -123,7 +139,7 @@ async function sendWith(content: string, attachmentRefs: PendingAttachment[] = [
       if (cur && cur.title === '新会话') cur.title = truncate(content || '附件消息', 20)
     }
     if (appendUser) {
-      const refs: AttachmentRef[] = attachmentRefs.map((attachment) => ({ ...attachment }))
+      const refs: AttachmentRef[] = attachmentRefs.map(({ available: _available, unavailable_reason: _reason, ...attachment }) => ({ ...attachment }))
       chat.appendUserMessage(content, refs)
     }
     const req = {
@@ -144,7 +160,7 @@ function onAttach(attachment: PendingAttachment) {
     ElMessage.warning('每条消息最多 10 个附件')
     return
   }
-  pendingAttachments.value.push(attachment)
+  pendingAttachments.value.push({ ...attachment, available: true, unavailable_reason: null })
 }
 
 function removeAttachment(id: string) {
@@ -200,7 +216,11 @@ async function retryFailed() {
 async function onRollback(message: Message) {
   // Claude Code semantics: never rewind while a tool can still mutate files.
   if (composerDisabled.value) {
-    await stop()
+    const stopResult = await stop()
+    if (stopResult === 'already-finished' && chat.currentId && !await stream.reconcileTaskTerminal(chat.currentId)) {
+      ElMessage.warning('当前任务尚未进入终态，请稍后再试')
+      return
+    }
     if (composerDisabled.value) {
       ElMessage.warning('当前任务尚未停止，请稍后再试')
       return
@@ -208,13 +228,50 @@ async function onRollback(message: Message) {
   }
   const checkpointId = message.checkpoint_id ?? message.checkpoint?.id
   if (!checkpointId || !chat.currentId) return
-  restoreMessage.value = message
+  rollbackUndo.value = null
+  restoreTarget.value = { type: 'checkpoint', checkpointId, messageId: message.id }
   restoreVisible.value = true
 }
 
-async function onRestoreCompleted() {
+function onUndoRollback() {
+  const operationId = rollbackUndo.value?.operationId
+  if (!operationId || !chat.currentId) return
+  restoreTarget.value = { type: 'rollback_operation_before', operationId }
+  restoreVisible.value = true
+}
+
+async function onRestoreCompleted(result: RestoreResult) {
+  const id = chat.currentId
+  if (!id) return
+  const target = restoreTarget.value
   restoreVisible.value = false
-  if (chat.currentId) await chat.loadMessages(chat.currentId)
+  restoreTarget.value = null
+  if (result.conversation.action === 'withdraw_from_target') {
+    stream.resetConversation(id)
+    const draft = chat.applyConversationRestore(id, result.conversation)
+    if (draft) {
+      input.value = draft.content
+      pendingAttachments.value = draft.attachments
+      rollbackUndo.value = result.undo_available
+        ? { operationId: result.operation_id, fingerprint: composerFingerprint(input.value, pendingAttachments.value, []) }
+        : null
+    }
+  } else if (result.conversation.action === 'restore_cursor') {
+    stream.resetConversation(id)
+    const baseline = rollbackUndo.value
+    const currentFingerprint = composerFingerprint(input.value, pendingAttachments.value, [])
+    if (target?.type === 'rollback_operation_before' && baseline?.operationId === target.operationId) {
+      if (baseline.fingerprint === currentFingerprint) resetForNext()
+      else ElMessage.warning('未覆盖已编辑草稿')
+    }
+    rollbackUndo.value = result.undo_available
+      ? { operationId: result.operation_id, fingerprint: composerFingerprint(input.value, pendingAttachments.value, []) }
+      : null
+  }
+  if (target?.type === 'checkpoint' && result.undo_available && !rollbackUndo.value) {
+    rollbackUndo.value = { operationId: result.operation_id, fingerprint: composerFingerprint(input.value, pendingAttachments.value, []) }
+  }
+  if (result.conversation.action !== 'unchanged') await chat.loadMessages(id)
   await chat.loadConversations()
 }
 
@@ -235,49 +292,6 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-/* ---------- 换模型（交接板 ←后端 2026-08-27：provider 多配置唯一激活；切换只影响新对话） ---------- */
-const providers = ref<ProviderConfig[]>([])
-const activeProvider = ref<ProviderConfig | null>(null)
-const modelMenuVisible = ref(false)
-const switchingModel = ref(false)
-const providerUnavailable = computed(() => isUnavailable(FEATURE.providers))
-
-/** 按钮文案：当前生效模型名（取 model 或别名），空态「未配置」 */
-const activeModelLabel = computed(() => {
-  if (!activeProvider.value) return '未配置'
-  return activeProvider.value.model || activeProvider.value.name
-})
-
-async function loadActiveModel() {
-  const active = await swallowNotImplemented(getActiveProvider())
-  if (active !== undefined) activeProvider.value = active
-}
-
-/** 首次展开选择器时拉列表（避免每次进聊天页多两个请求） */
-async function onModelMenuShow() {
-  if (providers.value.length) return
-  await reloadProviders()
-}
-
-async function reloadProviders() {
-  const list = await swallowNotImplemented(listProviders())
-  if (list !== undefined) providers.value = list
-  await loadActiveModel()
-}
-
-async function onPickModel(p: ProviderConfig) {
-  if (p.enabled || switchingModel.value) return
-  switchingModel.value = true
-  try {
-    const activated = await swallowNotImplemented(activateProvider(p.id))
-    if (activated === undefined) return
-    ElMessage.success(`已切换模型：${activated.model || activated.name}`)
-    modelMenuVisible.value = false
-    await reloadProviders()
-  } finally {
-    switchingModel.value = false
-  }
-}
 </script>
 
 <template>
@@ -300,11 +314,10 @@ async function onPickModel(p: ProviderConfig) {
       />
 
       <CheckpointRestoreDialog
-        v-if="restoreMessage && chat.currentId"
+        v-if="restoreTarget && chat.currentId"
         v-model="restoreVisible"
         :conversation-id="chat.currentId"
-        :checkpoint-id="restoreMessage.checkpoint_id ?? restoreMessage.checkpoint?.id ?? ''"
-        :message-id="restoreMessage.id"
+        :target="restoreTarget"
         @completed="onRestoreCompleted"
       />
 
@@ -316,6 +329,12 @@ async function onPickModel(p: ProviderConfig) {
       <div v-if="mode === 'chat' && currentStream.phase === 'reconnecting'" class="stream-error" role="status">
         <span>连接中断，正在重新连接…</span>
       </div>
+      <RollbackUndoBanner
+        v-if="mode === 'chat' && rollbackUndo"
+        :operation-id="rollbackUndo.operationId"
+        @undo="onUndoRollback"
+      />
+
       <div
         v-else-if="mode === 'chat' && (currentStream.phase === 'disconnected' || currentStream.phase === 'background_running')"
         class="stream-error"
@@ -355,16 +374,23 @@ async function onPickModel(p: ProviderConfig) {
         @paste="onPaste"
       >
         <TransitionGroup v-if="pendingAttachments.length" tag="div" name="chip" class="composer-attachments">
-          <span v-for="attachment in pendingAttachments" :key="attachment.attachment_id" class="composer-attachment-chip" :title="attachment.name">
+          <span
+            v-for="attachment in pendingAttachments"
+            :key="attachment.attachment_id"
+            class="composer-attachment-chip"
+            :class="{ unavailable: attachment.available === false }"
+            :title="attachment.available === false ? `${attachment.name}：${attachment.unavailable_reason || '不可用'}` : attachment.name"
+            :aria-invalid="attachment.available === false"
+          >
             <el-icon :size="14"><Picture /></el-icon>
             <span>{{ attachment.name }}</span>
+            <span v-if="attachment.available === false" class="attachment-unavailable" :aria-label="attachment.unavailable_reason || '附件不可用'">不可用</span>
             <button type="button" class="chip-remove" :aria-label="`移除附件 ${attachment.name}`" @click="removeAttachment(attachment.attachment_id)">
               <el-icon :size="12"><Close /></el-icon>
             </button>
           </span>
         </TransitionGroup>
         <div class="composer-input">
-          <AttachmentUploader ref="attachmentUploader" @add="onAttach" />
           <el-input
             class="composer-textarea"
             v-model="input"
@@ -377,66 +403,35 @@ async function onPickModel(p: ProviderConfig) {
             :disabled="composerDisabled"
             @keydown="onKeydown"
           />
-          <div class="composer-actions">
-            <el-popover
-              v-if="!providerUnavailable"
-              v-model:visible="modelMenuVisible"
-              placement="top-start"
-              :width="300"
-              trigger="click"
-              popper-class="model-picker"
-              @show="onModelMenuShow"
-            >
-              <template #reference>
-                <el-button class="model-btn" :icon="'Cpu'" aria-label="选择模型">
-                  <span class="model-btn-label">{{ activeModelLabel }}</span>
-                </el-button>
-              </template>
-              <div v-loading="switchingModel" class="model-menu">
-                <div v-if="activeProvider" class="model-menu-hint">
-                  当前：{{ activeProvider.name }} · {{ activeProvider.model || '（未填模型名）' }}
-                </div>
-                <div v-else class="model-menu-hint">尚未配置 Provider（到 设置 → Provider 配置 添加）</div>
-                <button
-                  v-for="p in providers"
-                  :key="p.id"
-                  class="model-item"
-                  :class="{ active: p.enabled }"
-                  :disabled="switchingModel"
-                  @click="onPickModel(p)"
-                >
-                  <span class="model-item-name">{{ p.name }}</span>
-                  <span class="model-item-model">{{ p.model }}</span>
-                  <el-tag v-if="p.enabled" size="small" type="success">当前</el-tag>
-                </button>
-                <div v-if="!providers.length && !switchingModel" class="model-menu-empty">
-                  {{ providerUnavailable ? '' : '暂无 Provider 配置' }}
-                </div>
-              </div>
-            </el-popover>
-            <el-button
-              v-if="currentStream.streaming"
-              type="danger"
-              :icon="'VideoPause'"
-              :loading="currentStream.cancelling"
-              :disabled="currentStream.cancelling"
-              @click="stop"
-            >
-              {{ currentStream.cancelling ? '中断中…' : '停止' }}
-            </el-button>
-            <el-button
-              v-else
-              type="primary"
-              :icon="'Promotion'"
-              :disabled="composerDisabled || (!input.trim() && !pendingAttachments.length)"
-              @click="send"
-            >
-              发送
-            </el-button>
+          <div class="composer-toolbar">
+            <div class="composer-leading">
+              <AttachmentUploader ref="attachmentUploader" @add="onAttach" />
+            </div>
+            <div class="composer-actions">
+              <ModelPicker />
+              <el-button
+                v-if="currentStream.streaming"
+                class="composer-stop"
+                type="danger"
+                :icon="'VideoPause'"
+                :loading="currentStream.cancelling"
+                :disabled="currentStream.cancelling"
+                @click="stop"
+              >
+                {{ currentStream.cancelling ? '中断中…' : '停止' }}
+              </el-button>
+              <el-button
+                v-else
+                class="composer-submit"
+                type="primary"
+                :icon="'Promotion'"
+                :disabled="composerDisabled || hasUnavailableAttachments || (!input.trim() && !pendingAttachments.length)"
+                @click="send"
+              >
+                发送
+              </el-button>
+            </div>
           </div>
-        </div>
-        <div class="composer-foot">
-          <span class="char-count" :class="{ over: charCount > TOKEN_LIMIT }">{{ charCount }} / {{ TOKEN_LIMIT }}</span>
         </div>
       </div>
 
@@ -491,36 +486,6 @@ async function onPickModel(p: ProviderConfig) {
   background: var(--app-border-light);
   color: var(--app-text-main);
 }
-.composer {
-  border-top: 1px solid var(--app-border);
-  background: var(--app-content-bg);
-  padding: 10px 16px;
-  transition: border-color 0.15s var(--ease-out), background 0.15s var(--ease-out);
-}
-.composer.dragging {
-  border-top-color: var(--app-primary-fill);
-  background: color-mix(in srgb, var(--app-primary-fill) 4%, var(--app-content-bg));
-}
-.composer-input {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: flex-end;
-  gap: 8px;
-}
-.composer-textarea {
-  min-width: 0;
-}
-.composer :deep(.el-input__wrapper) {
-  border-radius: var(--app-radius);
-}
-.composer :deep(.el-button) {
-  border-radius: var(--app-radius);
-}
-.composer-actions {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
 .composer-attachments,
 .stream-error-actions {
   display: flex;
@@ -544,6 +509,11 @@ async function onPickModel(p: ProviderConfig) {
   color: var(--app-text-secondary);
   font-size: 12px;
 }
+.composer-attachment-chip.unavailable {
+  border-color: color-mix(in srgb, var(--app-danger) 48%, var(--app-border));
+  background: color-mix(in srgb, var(--app-danger) 8%, var(--app-content-bg));
+}
+.attachment-unavailable { color: var(--app-danger); font-size: 11px; white-space: nowrap; }
 .composer-attachment-chip > span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -591,124 +561,15 @@ async function onPickModel(p: ProviderConfig) {
   background: var(--app-primary-fill);
   color: var(--app-on-primary);
 }
-.composer-foot {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 6px;
-}
-.char-count {
-  font-size: 12px;
-  color: var(--app-text-tertiary);
-}
-.char-count.over {
-  color: var(--app-danger);
-}
-/* 换模型按钮：弱化为次要操作（发送是主按钮），当前模型名随按钮展示 */
-.model-btn {
-  color: var(--app-text-secondary);
-}
-.model-btn-label {
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (max-width: 768px) {
   .chat-toolbar {
     flex-wrap: wrap;
     padding: 8px 10px;
-  }
-  .composer {
-    padding: 8px 10px;
-  }
-  .composer-input {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: stretch;
-  }
-  .composer-textarea {
-    order: 0;
-    flex: 1 1 100%;
-    width: 100%;
-  }
-  .composer-input :deep(.uploader),
-  .composer-actions {
-    order: 1;
-  }
-  .composer-actions {
-    flex: 1;
-    justify-content: flex-end;
-  }
-  .composer-input :deep(.el-button) {
-    min-width: var(--app-control-touch);
-    min-height: var(--app-control-touch);
   }
   .stream-error {
     align-items: flex-start;
     flex-direction: column;
     padding: 8px 10px;
   }
-}
-
-@media (max-width: 480px) {
-  .model-btn-label {
-    display: none;
-  }
-  .model-picker {
-    max-width: calc(100vw - 24px) !important;
-  }
-}
-</style>
-
-<style>
-/* popover teleport 到 body → 非 scoped（对齐 el-tooltip popper-class 先例） */
-.model-picker .model-menu {
-  min-height: 48px;
-}
-.model-picker .model-menu-hint {
-  margin-bottom: 6px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--app-border-light);
-  color: var(--app-text-muted);
-  font-size: 12px;
-}
-.model-picker .model-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: var(--app-radius, 6px);
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-  font-size: 13px;
-  transition: background 0.15s;
-}
-.model-picker .model-item:hover:not(.active) {
-  background: var(--app-border-light);
-}
-.model-picker .model-item.active {
-  cursor: default;
-  background: color-mix(in srgb, var(--app-primary) 8%, transparent);
-}
-.model-picker .model-item-name {
-  font-weight: 600;
-  color: var(--app-text-main);
-}
-.model-picker .model-item-model {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--app-text-secondary);
-}
-.model-picker .model-menu-empty {
-  padding: 12px 4px;
-  text-align: center;
-  color: var(--app-text-muted);
-  font-size: 12px;
 }
 </style>

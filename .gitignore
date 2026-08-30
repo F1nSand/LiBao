@@ -11,3 +11,4 @@ test-results
 .idea/
 .vscode/
 .playwright-mcp
+.claude/settings.local.json

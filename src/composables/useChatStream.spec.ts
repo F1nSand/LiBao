@@ -150,6 +150,39 @@ describe('useChatStream 状态机', () => {
     expect(signals.every((signal) => signal.aborted)).toBe(true)
   })
 
+  it('resetConversation 会清理状态并丢弃迟到的 token/tool/done 事件', async () => {
+    const persisted = vi.fn()
+    const cs = useChatStream({ onPersistedMessage: persisted })
+    await cs.start({ ...chatReq, conversation_id: 'c_reset' } as never)
+    chatHandlers!.onEvent(ev('message_start', 1, { message_id: 'm1', agent_id: 'a', conversation_id: 'c_reset', task_id: 't1' }))
+    chatHandlers!.onEvent(ev('tool_call', 2, { tool_call_id: 'tc1', tool_name: 'calculator', input: {}, require_confirm: false }))
+    cs.resetConversation('c_reset')
+
+    chatHandlers!.onEvent(ev('token', 3, { text: '迟到文本' }))
+    chatHandlers!.onEvent(ev('tool_result', 4, { tool_call_id: 'tc1', tool_name: 'calculator', ok: true, summary: '迟到结果' }))
+    chatHandlers!.onEvent(ev('done', 5, { message_id: 'm2', message: { id: 'm2' } }))
+    flushNow()
+
+    expect(cs.state.value.streaming).toBe(false)
+    expect(cs.state.value.phase).toBe('idle')
+    expect(cs.state.value.partialText).toBe('')
+    expect(cs.state.value.segments).toEqual([])
+    expect(cs.state.value.toolCalls).toEqual({})
+    expect(persisted).not.toHaveBeenCalled()
+  })
+
+  it('reconcileTaskTerminal 只把 done/failed/cancelled 视为可继续回滚的终态', async () => {
+    const cs = useChatStream()
+    await cs.start({ ...chatReq, conversation_id: 'c_terminal' } as never)
+    chatHandlers!.onEvent(ev('message_start', 1, { message_id: 'm1', conversation_id: 'c_terminal', task_id: 't_terminal' }))
+
+    getTaskStatus.mockResolvedValueOnce({ status: 'running' })
+    expect(await cs.reconcileTaskTerminal('c_terminal')).toBe(false)
+    getTaskStatus.mockResolvedValueOnce({ status: 'done' })
+    expect(await cs.reconcileTaskTerminal('c_terminal')).toBe(true)
+    expect(cs.state.value.phase).toBe('done')
+  })
+
   it('token 流拼接 → partialText/segments 正确', async () => {
     const cs = useChatStream()
     await cs.start(chatReq as never)

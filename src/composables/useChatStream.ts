@@ -135,6 +135,10 @@ export interface UseChatStreamReturn {
   confirmInterrupt(approved: boolean, extra?: Record<string, unknown>): Promise<void>
   /** 切换当前查看的会话（不 reset，后台流继续写入各自 ctx） */
   setConversation(convId: string): void
+  /** 清理指定会话的全部流式状态，并使已排队的旧事件失效。 */
+  resetConversation(convId: string): void
+  /** 取消与完成事件竞争时，对账指定会话是否已经进入明确终态。 */
+  reconcileTaskTerminal(convId: string): Promise<boolean>
   /** 从断点继续（仅 failed+recoverable 可用）：POST /tasks/{id}/recover 后订阅 task events */
   recover(): Promise<void>
   /** 手动重新连接（disconnected/background_running 时立即订阅 task events） */
@@ -150,6 +154,8 @@ function segId(): string {
 /** 每个会话的流式上下文：独立 state + controller + pendingText + timers */
 interface ConvCtx {
   convId: string
+  /** 每次 reset/start/stopAll 递增；异步事件必须携带创建时 generation 才能写状态。 */
+  generation: number
   state: StreamState
   controller: AbortController | null
   pendingText: string
@@ -217,6 +223,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     if (!ctx) {
       ctx = {
         convId,
+        generation: 0,
         state: createEmptyState(convId),
         controller: null,
         pendingText: '',
@@ -312,9 +319,11 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
   function startPlaceholderTimer(cardId: string, ctx: ConvCtx): void {
     const existing = ctx.timers.get(cardId)
     if (existing) clearTimeout(existing)
+    const generation = ctx.generation
     ctx.timers.set(
       cardId,
       setTimeout(() => {
+        if (ctx.generation !== generation) return
         const card = ctx.state.toolCalls[cardId]
         if (card && card.status === 'running') card.status = 'timeout'
       }, placeholderTtlMs),
@@ -612,7 +621,8 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     }
   }
 
-  function onError(e: Error, ctx: ConvCtx): void {
+  function onError(e: Error, ctx: ConvCtx, generation = ctx.generation): void {
+    if (ctx.generation !== generation) return
     // 用户主动停止或组件卸载触发的 Abort 不应伪装成可重试的业务失败。
     if (e.name === 'AbortError' || ctx.controller?.signal.aborted) {
       ctx.state.streaming = false
@@ -640,7 +650,8 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
   }
 
   /** chat 流干净 EOF（无 done/error）：半截 body。已有 task_id 时同样进入重连链，等待任务终态。 */
-  function onChatClose(ctx: ConvCtx): void {
+  function onChatClose(ctx: ConvCtx, generation = ctx.generation): void {
+    if (ctx.generation !== generation) return
     const s = ctx.state
     if (s.finished || s.phase === 'cancelled' || s.phase === 'waiting_confirm'
       || s.phase === 'recoverable' || s.phase === 'reconnecting') return
@@ -662,30 +673,32 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     s.error = null
     if (opts.immediate) {
       ctx.reconnectAttempts = 0
-      void subscribeTaskEvents(ctx)
+      void subscribeTaskEvents(ctx, ctx.generation)
     } else {
-      scheduleReconnect(ctx)
+      scheduleReconnect(ctx, ctx.generation)
     }
   }
 
-  function scheduleReconnect(ctx: ConvCtx): void {
+  function scheduleReconnect(ctx: ConvCtx, generation = ctx.generation): void {
+    if (ctx.generation !== generation) return
     if (ctx.reconnectTimer) return
     const attempt = ctx.reconnectAttempts + 1
     ctx.reconnectAttempts = attempt
     if (attempt > RECONNECT_BACKOFFS.length) {
       // 3 次退避耗尽 → 终局对账（按任务状态收敛；对账失败才 disconnected）
-      void reconcileTask(ctx)
+      void reconcileTask(ctx, generation)
       return
     }
     const jitter = Math.floor(Math.random() * RECONNECT_JITTER_MS)
     ctx.reconnectTimer = setTimeout(() => {
       ctx.reconnectTimer = null
-      void subscribeTaskEvents(ctx)
+      if (ctx.generation === generation) void subscribeTaskEvents(ctx, generation)
     }, RECONNECT_BACKOFFS[attempt - 1] + jitter)
   }
 
   /** 订阅任务事件：先补发 task_seq > cursor 的持久化边界事件，再 live-tail */
-  async function subscribeTaskEvents(ctx: ConvCtx): Promise<void> {
+  async function subscribeTaskEvents(ctx: ConvCtx, generation = ctx.generation): Promise<void> {
+    if (ctx.generation !== generation) return
     const taskId = ctx.state.taskId
     if (!taskId) return
     ctx.eventsMode = true
@@ -696,13 +709,13 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
       { afterSeq: ctx.taskCursor > 0 ? ctx.taskCursor : undefined, signal: controller.signal },
       {
         onEvent: (ev) => {
-          if (acceptTaskEvent(ev, ctx)) applyEvent(ev, ctx)
+          if (ctx.generation === generation && acceptTaskEvent(ev, ctx)) applyEvent(ev, ctx)
         },
-        onError: (e) => onEventsError(e, ctx),
-        onClose: () => onEventsClose(ctx),
+        onError: (e) => onEventsError(e, ctx, generation),
+        onClose: () => onEventsClose(ctx, generation),
       },
     )
-    if (ctx.controller === controller) ctx.controller = null
+    if (ctx.generation === generation && ctx.controller === controller) ctx.controller = null
   }
 
   /** task_seq 跨连接去重：<= cursor 丢弃；> cursor 应用并推进；无 task_seq（token 等）只当前连接消费 */
@@ -717,35 +730,40 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     return true
   }
 
-  function onEventsError(e: Error, ctx: ConvCtx): void {
+  function onEventsError(e: Error, ctx: ConvCtx, generation = ctx.generation): void {
+    if (ctx.generation !== generation) return
     if (e.name === 'AbortError' || ctx.controller?.signal.aborted) return
     // 旧后端无 events 端点（404/REST 拒绝）→ 一次对账收敛，不重试风暴
     if (e.name === 'SseRequestError') {
-      void reconcileTask(ctx)
+      void reconcileTask(ctx, generation)
       return
     }
-    if (ctx.reconnectAttempts >= RECONNECT_BACKOFFS.length) void reconcileTask(ctx)
-    else scheduleReconnect(ctx)
+    if (ctx.reconnectAttempts >= RECONNECT_BACKOFFS.length) void reconcileTask(ctx, generation)
+    else scheduleReconnect(ctx, generation)
   }
 
-  function onEventsClose(ctx: ConvCtx): void {
+  function onEventsClose(ctx: ConvCtx, generation = ctx.generation): void {
+    if (ctx.generation !== generation) return
     const s = ctx.state
     if (s.finished || s.phase === 'cancelled' || s.phase === 'reconnecting' || s.phase === 'recoverable') return
-    if (ctx.reconnectAttempts >= RECONNECT_BACKOFFS.length) void reconcileTask(ctx)
-    else scheduleReconnect(ctx)
+    if (ctx.reconnectAttempts >= RECONNECT_BACKOFFS.length) void reconcileTask(ctx, generation)
+    else scheduleReconnect(ctx, generation)
   }
 
   /** 终局对账：GET /tasks/{id} 按状态收敛；对账本身失败 → disconnected */
-  async function reconcileTask(ctx: ConvCtx): Promise<void> {
+  async function reconcileTask(ctx: ConvCtx, generation = ctx.generation): Promise<void> {
+    if (ctx.generation !== generation) return
     const taskId = ctx.state.taskId
     if (!taskId) return
     let task: Task
     try {
       task = await getTaskStatus(taskId)
     } catch {
+      if (ctx.generation !== generation) return
       enterDisconnected(ctx)
       return
     }
+    if (ctx.generation !== generation) return
     // 用服务端水位补齐游标（供后续订阅/recover）
     if (typeof task.last_event_seq === 'number' && task.last_event_seq > ctx.taskCursor) {
       ctx.taskCursor = task.last_event_seq
@@ -811,6 +829,54 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     }
   }
 
+  async function reconcileTaskTerminal(convId: string): Promise<boolean> {
+    const ctx = getCtx(convId)
+    const generation = ctx.generation
+    const taskId = ctx.state.taskId
+    if (!taskId) return false
+    let task: Task
+    try {
+      task = await getTaskStatus(taskId)
+    } catch {
+      return false
+    }
+    if (ctx.generation !== generation) return false
+    if (task.status === 'done') {
+      ctx.state.status = 'done'
+      ctx.state.phase = 'done'
+      ctx.state.phaseDetail = null
+      ctx.state.finished = true
+      ctx.state.streaming = false
+      ctx.state.cancelling = false
+      finishActivities(ctx, 'done')
+      opts.onTaskSettled?.({ taskId, conversationId: ctx.state.conversationId, status: 'done' })
+      return true
+    }
+    if (task.status === 'failed') {
+      ctx.state.status = 'failed'
+      ctx.state.error = taskErrorToStreamError(task.error)
+      ctx.state.phase = 'failed'
+      ctx.state.phaseDetail = null
+      ctx.state.finished = true
+      ctx.state.streaming = false
+      ctx.state.cancelling = false
+      finishActivities(ctx, 'error')
+      return true
+    }
+    if (task.status === 'cancelled') {
+      ctx.state.status = 'cancelled'
+      ctx.state.phase = 'cancelled'
+      ctx.state.phaseDetail = null
+      ctx.state.finished = true
+      ctx.state.streaming = false
+      ctx.state.cancelling = false
+      finishActivities(ctx, 'cancelled')
+      return true
+    }
+    ctx.state.cancelling = false
+    return false
+  }
+
   function enterDisconnected(ctx: ConvCtx): void {
     const s = ctx.state
     s.phase = 'disconnected'
@@ -869,6 +935,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
 
   /** 清空某个会话的流式状态（start 新流前调用；保留原响应式对象，引用稳定） */
   function resetCtx(ctx: ConvCtx): void {
+    ctx.generation += 1
     const s = ctx.state
     s.taskId = null
     s.messageId = null
@@ -908,10 +975,17 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     currentState.value = getCtx(convId).state
   }
 
+  function resetConversation(convId: string): void {
+    resetCtx(getCtx(convId))
+    if (currentConvKey === convId) currentState.value = getCtx(convId).state
+    flushNow()
+  }
+
   async function start(req: ChatRequest): Promise<void> {
     const convId = req.conversation_id ?? '__new__'
     const ctx = getCtx(convId)
     resetCtx(ctx)
+    const generation = ctx.generation
     currentConvKey = convId
     currentState.value = ctx.state
     ctx.state.streaming = true
@@ -924,14 +998,18 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
       await streamChatAt(
         '/api/v1/chat/stream',
         req,
-        { onEvent: (ev) => applyEvent(ev, ctx), onError: (e) => onError(e, ctx), onClose: () => onChatClose(ctx) },
+        {
+          onEvent: (ev) => { if (ctx.generation === generation) applyEvent(ev, ctx) },
+          onError: (e) => onError(e, ctx, generation),
+          onClose: () => onChatClose(ctx, generation),
+        },
         controller.signal,
       )
     } finally {
       // 静默关流（无 done/error）兜底：避免 streaming 卡 true 导致输入框永久禁用。
       // 断线重连/retry/后台执行期不得复位 streaming，且不得清掉 events 订阅的 controller。
-      if (ctx.controller === controller) ctx.controller = null
-      if (!ctx.state.finished && !['reconnecting', 'retrying', 'background_running'].includes(ctx.state.phase)) {
+      if (ctx.generation === generation && ctx.controller === controller) ctx.controller = null
+      if (ctx.generation === generation && !ctx.state.finished && !['reconnecting', 'retrying', 'background_running'].includes(ctx.state.phase)) {
         ctx.state.streaming = false
       }
     }
@@ -942,6 +1020,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     extra?: Record<string, unknown>,
   ): Promise<void> {
     const ctx = currentCtx()
+    const generation = ctx.generation
     // fail-fast：interrupt 事件必须带 task_id，缺失即报错，不用 conversation_id 冒充（会误路由）
     const taskId = ctx.state.taskId ?? ''
     if (!taskId) {
@@ -988,23 +1067,24 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
         taskId,
         { approved, ...extra },
         {
-          onEvent: (ev) => applyEvent(ev, ctx),
+          onEvent: (ev) => { if (ctx.generation === generation) applyEvent(ev, ctx) },
           onError: (e) => { resumeError = e },
         },
         resumeController.signal,
       )
+      if (ctx.generation !== generation) return
       const err = resumeError as Error | null
       if (err && !ctx.resumeAccepted) {
         if (typeof (err as { status?: unknown }).status === 'number') {
           rollbackResume(ctx, err)
         } else {
-          await reconcileResume(ctx, err)
+          await reconcileResume(ctx, err, generation)
         }
       }
     } finally {
       // 同上：静默关流兜底。断线重连/retry/后台执行期不得复位 streaming；只清自己的 controller（重连订阅另有 controller）
-      if (ctx.controller === resumeController) ctx.controller = null
-      if (!ctx.state.finished && !ctx.state.confirming
+      if (ctx.generation === generation && ctx.controller === resumeController) ctx.controller = null
+      if (ctx.generation === generation && !ctx.state.finished && !ctx.state.confirming
         && !['reconnecting', 'retrying', 'background_running'].includes(ctx.state.phase)) {
         ctx.state.streaming = false
       }
@@ -1032,11 +1112,13 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     ctx.resumeAccepted = false
   }
 
-  async function reconcileResume(ctx: ConvCtx, error: Error): Promise<void> {
+  async function reconcileResume(ctx: ConvCtx, error: Error, generation = ctx.generation): Promise<void> {
+    if (ctx.generation !== generation) return
     const taskId = ctx.state.taskId
     if (!taskId) return rollbackResume(ctx, error)
     try {
       const task = await getTaskStatus(taskId)
+      if (ctx.generation !== generation) return
       if (task.status === 'waiting_confirm') return rollbackResume(ctx, error)
       ctx.state.confirming = false
       ctx.resumeSnapshot = null
@@ -1052,7 +1134,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
       ctx.state.phase = task.status === 'done' ? 'done' : task.status === 'cancelled' ? 'cancelled' : 'failed'
       finishActivities(ctx, task.status === 'done' ? 'done' : task.status === 'cancelled' ? 'cancelled' : 'error')
     } catch {
-      rollbackResume(ctx, error)
+      if (ctx.generation === generation) rollbackResume(ctx, error)
     }
   }
 
@@ -1081,6 +1163,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
 
   async function stop(): Promise<CancelTaskResult | 'unavailable'> {
     const ctx = currentCtx()
+    const generation = ctx.generation
     if (!ctx.state.streaming || ctx.state.cancelling) return 'unavailable'
     const taskId = ctx.state.taskId
     if (!taskId) {
@@ -1096,10 +1179,12 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
     try {
       result = await cancelTask(taskId)
     } catch (e) {
+      if (ctx.generation !== generation) return 'unavailable'
       ctx.state.cancelling = false
       ctx.state.phase = previousPhase
       throw e
     }
+    if (ctx.generation !== generation) return 'unavailable'
     if (result === 'already-finished') {
       ctx.state.cancelling = false
       return result
@@ -1110,6 +1195,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
 
   function stopAll(): void {
     for (const ctx of convCtxs.values()) {
+      ctx.generation += 1
       flushText(ctx)
       ctx.controller?.abort()
       clearTimers(ctx)
@@ -1136,5 +1222,5 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
 
   const state = computed<StreamState>(() => currentState.value)
 
-  return { state, start, stop, stopAll, confirmInterrupt, setConversation, recover, reconnect }
+  return { state, start, stop, stopAll, confirmInterrupt, setConversation, resetConversation, reconcileTaskTerminal, recover, reconnect }
 }

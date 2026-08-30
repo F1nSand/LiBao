@@ -83,24 +83,60 @@ export interface RestoreFilePreview {
   diff_truncated?: boolean
 }
 
+export interface RestoreDraft {
+  source_message_id: string
+  content: string
+  attachments: RestoreDraftAttachment[]
+  file_refs: FileRef[]
+}
+
+export interface RestoreDraftAttachment extends AttachmentRef {
+  name: string
+  available: boolean
+  unavailable_reason?: string | null
+}
+
+export interface ComposerAttachment {
+  attachment_id: string
+  name: string
+  mime_type?: string
+  size?: number
+  status?: AttachmentStatus
+  available: boolean
+  unavailable_reason?: string | null
+}
+
+export interface RestoreConversationPlan {
+  action: 'unchanged' | 'withdraw_from_target' | 'restore_cursor'
+  active_message_head_after_id: string | null
+  withdrawn_from_message_id: string | null
+  hidden_message_count: number
+  draft: RestoreDraft | null
+}
+
 export interface RestorePreview {
   preview_id: string
-  target: { type: 'checkpoint' | 'rollback_operation_before'; id: string }
+  client_request_id: string
+  target: { type: 'checkpoint' | 'rollback_operation_before'; id: string; message_id?: string | null }
   mode: RollbackMode
-  target_message_id?: string | null
+  conversation_revision: number
   expires_at: string
-  conversation: { truncate_after_message_id?: string | null; hidden_message_count: number }
+  conversation: RestoreConversationPlan
   files: RestoreFilePreview[]
   warnings: string[]
 }
 
 export interface RestoreResult {
   operation_id: string
+  preview_id: string
+  client_request_id: string
+  mode: RollbackMode
+  target_message_id: string | null
   status: 'completed' | 'partial' | 'failed_partial'
   restored_files: number
   deleted_files: number
   skipped_conflicts: string[]
-  hidden_message_count: number
+  conversation: RestoreConversationPlan
   undo_available: boolean
   history_revision: number
 }
