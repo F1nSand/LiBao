@@ -8,9 +8,9 @@ mcp SDK 2.0：stdio 走 stdio_client(StdioServerParameters)，HTTP 走 streamabl
 from __future__ import annotations
 
 import json
-import os
+import ntpath
+import re
 import shlex
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -48,8 +48,16 @@ class McpCallError(Exception):
 
 def _split_command(cmd: str) -> list[str]:
     """命令分词：Windows 路径（盘符/反斜杠）按空白切分，避免 shlex 吞反斜杠；否则 shlex。"""
-    if sys.platform == "win32" and (":" in cmd or "\\" in cmd):
-        return cmd.split()
+    # Config files can be authored on a different OS from the process reading
+    # them. Detect Windows paths from their syntax instead of sys.platform.
+    if re.search(r"(?:[A-Za-z]:[\\/]|\\\\)", cmd):
+        tokens = shlex.split(cmd, posix=False)
+        return [
+            token[1:-1]
+            if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'"
+            else token
+            for token in tokens
+        ]
     return shlex.split(cmd)
 
 
@@ -74,7 +82,7 @@ def derive_server_name(url_or_command: str) -> str:
     tokens = [t for t in _split_command(url_or_command) if t not in _PREFIX_TOKENS]
     if not tokens:
         return "mcp-server"
-    name = os.path.basename(tokens[-1].rstrip("/"))
+    name = ntpath.basename(tokens[-1].rstrip("/\\"))
     for suffix in _SUFFIXES:
         if name.endswith(suffix):
             name = name[: -len(suffix)]

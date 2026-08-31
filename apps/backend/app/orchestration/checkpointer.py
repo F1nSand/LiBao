@@ -43,7 +43,7 @@ def _checkpoint_before_failed_input(records: dict[str, Any], latest_id: str, cod
     )
     if not has_error:
         return latest_id
-    ids = sorted(records)
+    ids = list(records)
     for index in range(ids.index(latest_id), -1, -1):
         metadata = codec.loads(records[ids[index]]["metadata"], channel="metadata")
         if metadata.get("source") == "input":
@@ -54,7 +54,9 @@ def _checkpoint_before_failed_input(records: dict[str, Any], latest_id: str, cod
 def _latest_failed_checkpoint_id(records: dict[str, Any]) -> str | None:
     """返回挂有 LangGraph ``__error__`` pending write 的最新节点输入 checkpoint。"""
 
-    for checkpoint_id in sorted(records, reverse=True):
+    # Checkpoint IDs are UUIDs, so lexical order is unrelated to write order.
+    # Python dictionaries preserve the on-disk insertion order of checkpoints.
+    for checkpoint_id in reversed(records):
         writes = records[checkpoint_id].get("writes") or {}
         if any(channel == "__error__" for task_writes in writes.values() for channel, _ in task_writes):
             return checkpoint_id
@@ -211,7 +213,7 @@ class JsonFileSaver(BaseCheckpointSaver):
             elif cfg.get("start_graph_from_root"):
                 return None
             elif recs:
-                latest_id = max(recs.keys())  # checkpoint_id 可比较 → 最新
+                latest_id = next(reversed(recs))
                 checkpoint_id = _checkpoint_before_failed_input(recs, latest_id, self.codec)
                 if checkpoint_id is None:
                     return None

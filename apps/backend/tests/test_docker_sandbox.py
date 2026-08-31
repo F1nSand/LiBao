@@ -154,7 +154,7 @@ class _FakeProcess:
 
 @pytest.mark.asyncio
 async def test_docker_argv_has_security_defaults(monkeypatch, tmp_path):
-    from app.tools.sandbox import run_docker_command
+    from app.tools.sandbox import _runtime_user, run_docker_command
 
     calls = []
 
@@ -183,7 +183,7 @@ async def test_docker_argv_has_security_defaults(monkeypatch, tmp_path):
         ("--tmpfs", "/tmp:rw,noexec,nosuid,size=64m"),
         ("--cap-drop", "ALL"),
         ("--security-opt", "no-new-privileges"),
-        ("--user", "65532:65532"),
+        ("--user", _runtime_user()),
         ("--label", "libao.sandbox=true"),
     ):
         if len(expected) == 1:
