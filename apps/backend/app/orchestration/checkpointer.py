@@ -216,7 +216,10 @@ class JsonFileSaver(BaseCheckpointSaver):
                 return None
             elif recs:
                 latest_id = next(reversed(recs))
-                checkpoint_id = _checkpoint_before_failed_input(recs, latest_id, self.codec)
+                failed_id = _latest_failed_checkpoint_id(recs)
+                checkpoint_id = _checkpoint_before_failed_input(
+                    recs, failed_id if failed_id is not None else latest_id, self.codec
+                )
                 if checkpoint_id is None:
                     return None
                 record = recs[checkpoint_id]
@@ -257,29 +260,49 @@ class JsonFileSaver(BaseCheckpointSaver):
         path = self._path(config)
         with self._lock(str(path)):
             data = self._load(path)
-            matches = [
-                (checkpoint_id, record)
-                for checkpoint_id, record in data["checkpoints"].items()
+            records = list(data["checkpoints"].items())
+            matching_indices = [
+                index
+                for index, (_, record) in enumerate(records)
                 if str(record.get("code_checkpoint_id") or "") == str(code_checkpoint_id)
             ]
-            if not matches:
+            if not matching_indices:
                 return None, None, False
-            input_match = next(
+            input_index = next(
                 (
-                    (checkpoint_id, record)
-                    for checkpoint_id, record in matches
-                    if record.get("metadata_source") == "input"
-                    or self.codec.loads(record["metadata"], channel="metadata").get("source") == "input"
+                    index
+                    for index in matching_indices
+                    if records[index][1].get("metadata_source") == "input"
+                    or self.codec.loads(records[index][1]["metadata"], channel="metadata").get("source")
+                    == "input"
                 ),
                 None,
             )
             parent_id: str | None = None
             parent_bound = False
-            if input_match is not None:
-                parent_id, parent_bound = _record_parent(input_match[1], self.codec)
-            latest_id = matches[-1][0]
+            if input_index is not None:
+                parent_id, parent_bound = _record_parent(records[input_index][1], self.codec)
+            else:
+                input_index = matching_indices[0]
+
+            # ``code_checkpoint_id`` is guaranteed on the input record, but
+            # LangGraph may omit custom config keys on later writes.  Bound the
+            # run by the next metadata ``source=input`` record instead of
+            # assuming every graph checkpoint carries the code anchor.
+            run_end = next(
+                (
+                    index
+                    for index in range(input_index + 1, len(records))
+                    if records[index][1].get("metadata_source") == "input"
+                    or self.codec.loads(records[index][1]["metadata"], channel="metadata").get("source")
+                    == "input"
+                ),
+                len(records),
+            )
+            run_records = records[input_index:run_end]
+            latest_id = run_records[-1][0]
             failed_id = next(
-                (checkpoint_id for checkpoint_id, record in reversed(matches) if _has_error_writes(record)),
+                (checkpoint_id for checkpoint_id, record in reversed(run_records) if _has_error_writes(record)),
                 None,
             )
             # A failed input checkpoint contains the user message that must not be
@@ -409,3 +432,4 @@ def _suppress_oserror():
         yield
     except OSError:
         pass
+

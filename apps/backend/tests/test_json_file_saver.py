@@ -310,6 +310,48 @@ async def test_failed_run_bounds_ignore_trailing_checkpoint_after_error(tmp_path
     assert parent_bound is True
 
 
+async def test_failed_run_bounds_find_error_after_anchor_config_is_dropped(tmp_path):
+    """后续 LangGraph 写入可能丢弃自定义 anchor 配置，仍须识别同一轮错误。"""
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-anchor-config-drop"}}
+    saver.put(config, _checkpoint("c0"), {"source": "loop"}, {})
+    saver.put(
+        {
+            "configurable": {
+                "thread_id": "t-anchor-config-drop",
+                "checkpoint_id": "c0",
+                "code_checkpoint_id": "code-4",
+            }
+        },
+        _checkpoint("c1"),
+        {"source": "input"},
+        {},
+    )
+    saver.put(
+        {"configurable": {"thread_id": "t-anchor-config-drop", "checkpoint_id": "c1"}},
+        _checkpoint("c2"),
+        {"source": "loop"},
+        {},
+    )
+    saver.put_writes(
+        {"configurable": {"thread_id": "t-anchor-config-drop", "checkpoint_id": "c2"}},
+        [("__error__", RuntimeError("boom"))],
+        "task-4",
+    )
+    saver.put(
+        {"configurable": {"thread_id": "t-anchor-config-drop", "checkpoint_id": "c2"}},
+        _checkpoint("c3"),
+        {"source": "loop"},
+        {},
+    )
+
+    parent, output, parent_bound = await saver.aget_run_bounds(config, "code-4")
+
+    assert parent == "c0"
+    assert output == "c0"
+    assert parent_bound is True
+
+
 async def test_run_bounds_persist_parent_from_put_config(tmp_path):
     saver = _saver(tmp_path)
     base = {"configurable": {"thread_id": "t-config-parent"}}
@@ -463,3 +505,4 @@ async def test_legacy_and_typed_values_can_coexist_without_rewrite(tmp_path):
     saver._save(path, data)
     assert (await saver.aget_tuple(config)).checkpoint["id"] == "legacy"
     assert before != path.read_text(encoding="utf-8")
+

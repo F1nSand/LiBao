@@ -71,6 +71,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
 
@@ -114,3 +116,4 @@ jobs:
           if missing:
               raise SystemExit(f'missing release entries: {missing}')
           PY
+
