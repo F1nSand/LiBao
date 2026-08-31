@@ -1,0 +1,49 @@
+[project]
+name = "agent-backend"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.141.1",
+    "gtrending>=0.5.1",
+    "httpx>=0.28.1",
+    "jsonschema>=4.23",
+    "lancedb>=0.37.1",
+    "langchain-core>=1.5.4",
+    "langchain-litellm>=0.7.0",
+    "langchain-openai>=0.3.0",
+    "langgraph>=1.2.11",
+    "litellm>=1.96.2",
+    "mcp>=2.0.0",
+    "pydantic-settings>=2.15.0",
+    "python-multipart>=0.0.32",
+    "pypdf>=5.0.0",
+    "python-docx>=1.1.0",
+    "rank-bm25>=0.2.2",
+    "tzdata>=2025.1",
+    "uvicorn[standard]>=0.52.2",
+]
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.2",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B008：FastAPI 惯用法（Depends() in 参数默认值）必报，跳过
+ignore = ["B008"]
