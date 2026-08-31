@@ -10,7 +10,7 @@ import { gotoChat, sendMessage } from '../e2e/helpers'
  */
 
 const WS_NAME = `real-e2e-${Date.now()}`
-const BASE = 'http://127.0.0.1:8000/api/v1'
+const BASE = `${process.env.E2E_BACKEND_URL ?? 'http://127.0.0.1:8000'}/api/v1`
 
 test.describe('真实后端契约冒烟', () => {
   test('后端健康 + workspace API 契约（project_instructions roundtrip）', async ({ request }) => {

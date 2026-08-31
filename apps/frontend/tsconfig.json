@@ -26,9 +26,11 @@
     "src/**/*.d.ts",
     "src/**/*.vue",
     "e2e/**/*.ts",
+    "e2e-real/**/*.ts",
     "vitest.setup.ts",
     "vite.config.ts",
     "vitest.config.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "playwright.real.config.ts"
   ]
 }

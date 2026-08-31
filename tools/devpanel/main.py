@@ -8,7 +8,7 @@
 
 单机化后不再依赖 docker/redis，仅拉起本地后端与前端两个进程。
 
-用法：`cd DevPanel && uv run python main.py [--port 9100] [--no-browser]`
+用法：`cd tools/devpanel && uv run python main.py [--port 9100] [--no-browser]`
 """
 from __future__ import annotations
 
@@ -31,9 +31,9 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 
-PROJECTS_ROOT = Path(__file__).resolve().parent.parent   # Desktop/Agent/
-BACKEND = PROJECTS_ROOT / "Agent"
-FRONTEND = PROJECTS_ROOT / "FrontEnd"
+PROJECTS_ROOT = Path(__file__).resolve().parents[2]
+BACKEND = PROJECTS_ROOT / "apps" / "backend"
+FRONTEND = PROJECTS_ROOT / "apps" / "frontend"
 STATIC = Path(__file__).resolve().parent / "static"
 
 WIN = sys.platform == "win32"

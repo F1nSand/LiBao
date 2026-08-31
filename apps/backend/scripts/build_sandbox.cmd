@@ -1,5 +1,6 @@
 @echo off
 setlocal
 
-docker build -t libao-sandbox:py312-v1 -f docker/sandbox/Dockerfile docker/sandbox
+@set ROOT=%~dp0\..\..\..
+docker build -t libao-sandbox:py312-v1 -f "%ROOT%\deploy\sandbox\Dockerfile" "%ROOT%\deploy\sandbox"
 if errorlevel 1 exit /b %errorlevel%
