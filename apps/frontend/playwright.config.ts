@@ -10,6 +10,8 @@ const PORT = process.env.E2E_PORT ?? '5173'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
+  // mock server 使用单一进程内状态；并行文件会互相污染会话/工作区数据。
+  workers: 1,
   retries: 0,
   reporter: 'list',
   use: {

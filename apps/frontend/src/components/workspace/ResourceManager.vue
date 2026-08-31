@@ -95,7 +95,7 @@ async function refreshLayer(path: string) {
   layerSignatures.set(path, signatureOf(files))
 }
 
-const FAST = import.meta.env.VITE_MOCK_FAST === '1'
+const FAST = import.meta.env.VITE_MOCK_FAST === '1' || import.meta.env.MODE === 'e2e'
 useTaskPoll(refreshAll, {
   intervalMs: FAST ? 500 : 3000,
   enabled: computed(() => !props.collapsed),

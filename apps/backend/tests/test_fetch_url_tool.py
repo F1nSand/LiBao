@@ -15,6 +15,7 @@ def _clean_fetch(monkeypatch):
     register_builtin_tools()
     s = get_settings()
     monkeypatch.setattr(s, "fetch_url_denylist", [])  # 默认空 = 全放行
+    monkeypatch.setattr(fetch_url, "_resolve_host", lambda host: ["93.184.216.34"])
     yield
     fetch_url._transport = None
     unregister("tl_fetch_url")
@@ -88,6 +89,32 @@ async def test_fetch_denylist_blocks(monkeypatch):
 async def test_fetch_invalid_url():
     assert "error" in await fetch_url.handler("ftp://x")
     assert "error" in await fetch_url.handler("not-a-url")
+
+
+async def test_fetch_rejects_loopback_and_private_targets():
+    for url in (
+        "http://127.0.0.1/internal",
+        "http://10.0.0.8/internal",
+        "http://[::1]/internal",
+        "http://localhost/internal",
+    ):
+        result = await fetch_url.handler(url)
+        assert "error" in result
+        assert "本地或私有网络" in result["error"]
+
+
+async def test_fetch_validates_each_redirect_before_following():
+    requests = []
+
+    def handler(request):
+        requests.append(request.url)
+        return httpx.Response(302, headers={"location": "http://127.0.0.1/private"})
+
+    _mock(handler)
+    result = await fetch_url.handler("https://example.com/redirect")
+    assert "error" in result
+    assert "本地或私有网络" in result["error"]
+    assert len(requests) == 1
 
 
 async def test_fetch_non_200():

@@ -13,7 +13,7 @@ export function mockApiPlugin(): Plugin {
     apply: 'serve',
     configResolved(config) {
       // e2e 模式（--mode e2e + VITE_MOCK_FAST=1）→ SSE 延迟归零，保证断言确定性
-      setMockFast(config.env.VITE_MOCK_FAST === '1')
+      setMockFast(config.mode === 'e2e' || config.env.VITE_MOCK_FAST === '1')
     },
     configureServer(server) {
       server.middlewares.use('/api/v1', (req, res, next) => {

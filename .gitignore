@@ -34,6 +34,8 @@ uploads/
 
 # Local migration/agent bookkeeping
 .migration-backup/
+.artifacts/
+.uv-cache/
 progress.md
 
 # Editors and OS files

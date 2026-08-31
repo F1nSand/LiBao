@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import html.parser
+import ipaddress
 import re
+import socket
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -17,6 +19,13 @@ from app.core.config import get_settings
 
 _MAX_FETCH_CHARS = 20000  # 抓取内容硬上限（防超大页）
 _FETCH_TIMEOUT_S = 10
+_MAX_REDIRECTS = 5
+_BLOCKED_HOSTNAMES = {
+    "localhost",
+    "localhost.localdomain",
+    "metadata",
+    "metadata.google.internal",
+}
 
 _transport: httpx.AsyncBaseTransport | None = None  # 测试注入点（镜像 embeddings.py）
 
@@ -62,24 +71,91 @@ def _denied(host: str, denylist: list[str]) -> bool:
     return any(h == host or (h.startswith("*.") and host.endswith(h[1:])) for h in denylist)
 
 
-async def handler(url: str, max_chars: int = 8000) -> dict[str, Any]:
-    """只读抓取：黑名单校验（默认全放行）→ GET → 清洗。异常兜底 error。"""
-    settings = get_settings()
+def _resolve_host(host: str) -> list[str]:
+    """Resolve a host so every resulting address can be checked before connecting."""
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError("目标域名无法解析") from exc
+
+    addresses = {info[4][0] for info in infos if info[4]}
+    return sorted(addresses)
+
+
+def _is_public_address(value: str) -> bool:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return address.is_global
+
+
+def _validate_target(url: str, denylist: list[str]) -> str | None:
+    """Validate a URL before every request, including each redirect target."""
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            return {"error": "仅支持 http/https URL"}
-        if _denied(parsed.hostname, settings.fetch_url_denylist):
-            return {"error": f"域名 {parsed.hostname} 在出站黑名单内"}
+        host = parsed.hostname
+    except ValueError:
+        return "仅支持 http/https URL"
+
+    if parsed.scheme not in {"http", "https"} or not host:
+        return "仅支持 http/https URL"
+
+    normalized_host = host.rstrip(".").lower()
+    if _denied(normalized_host, denylist):
+        return f"域名 {host} 在出站黑名单内"
+    if normalized_host in _BLOCKED_HOSTNAMES:
+        return "目标地址属于本地或私有网络"
+
+    try:
+        literal = ipaddress.ip_address(normalized_host)
+        addresses = [str(literal)]
+    except ValueError:
+        try:
+            addresses = _resolve_host(normalized_host)
+        except ValueError as exc:
+            return str(exc)
+
+    if not addresses or any(not _is_public_address(address) for address in addresses):
+        return "目标地址属于本地或私有网络"
+    return None
+
+
+async def handler(url: str, max_chars: int = 8000) -> dict[str, Any]:
+    """只读抓取：逐请求 SSRF 校验 → GET → 清洗。异常兜底 error。"""
+    settings = get_settings()
+    try:
+        validation_error = _validate_target(url, settings.fetch_url_denylist)
+        if validation_error:
+            return {"error": validation_error}
+
         limit = min(max_chars, _MAX_FETCH_CHARS)
         async with httpx.AsyncClient(
-            transport=_transport, timeout=_FETCH_TIMEOUT_S, follow_redirects=True
+            transport=_transport, timeout=_FETCH_TIMEOUT_S, follow_redirects=False
         ) as client:
-            resp = await client.get(url, headers={"User-Agent": "agent-backend/0.1"})
+            current_url = url
+            for _ in range(_MAX_REDIRECTS + 1):
+                resp = await client.get(
+                    current_url, headers={"User-Agent": "agent-backend/0.1"}
+                )
+                if resp.status_code not in {301, 302, 303, 307, 308}:
+                    break
+                location = resp.headers.get("location")
+                if not location:
+                    return {"error": "重定向响应缺少 Location"}
+                current_url = urljoin(current_url, location)
+                validation_error = _validate_target(
+                    current_url, settings.fetch_url_denylist
+                )
+                if validation_error:
+                    return {"error": validation_error}
+            else:
+                return {"error": "重定向次数超过限制"}
+
         if resp.status_code != 200:
             return {"error": f"HTTP {resp.status_code}"}
         return {
-            "url": url,
+            "url": current_url,
             "title": _extract_title(resp.text),
             "text": _clean_html(resp.text, limit),
             "truncated": len(resp.text) > limit,

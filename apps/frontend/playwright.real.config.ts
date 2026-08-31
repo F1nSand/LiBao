@@ -7,7 +7,6 @@ import { defineConfig, devices } from '@playwright/test'
  * - URL 通过 E2E_BACKEND_URL / E2E_FRONTEND_URL 配置，不依赖仓库目录结构
  * - 需在 `~/.LiBao/settings.json` 配好 LLM key；chat 用例走真实 LLM，耗时较长
  */
-const BACKEND_URL = process.env.E2E_BACKEND_URL ?? 'http://127.0.0.1:8000'
 const FRONTEND_URL = process.env.E2E_FRONTEND_URL ?? 'http://127.0.0.1:5173'
 
 export default defineConfig({
