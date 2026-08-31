@@ -43,6 +43,8 @@ def test_denylist_semantics(monkeypatch):
     assert fetch_url._denied("evil.com", s.fetch_url_denylist) is True
     assert fetch_url._denied("sub.evil.com", s.fetch_url_denylist) is False  # 无通配，精确匹配
     assert fetch_url._denied("a.bad.com", ["*.bad.com"]) is True  # *. 通配
+    assert fetch_url._denied("evil.com", ["EVIL.COM"]) is True  # 配置大小写不应改变语义
+    assert fetch_url._denied("evil.com", ["evil.com."]) is True  # DNS 完全限定名尾点
 
 
 async def test_fetch_cleans_html():
@@ -101,6 +103,23 @@ async def test_fetch_rejects_loopback_and_private_targets():
         result = await fetch_url.handler(url)
         assert "error" in result
         assert "本地或私有网络" in result["error"]
+
+
+async def test_fetch_rejects_private_dns_resolution(monkeypatch):
+    monkeypatch.setattr(fetch_url, "_resolve_host", lambda host: ["93.184.216.34", "192.168.1.10"])
+    result = await fetch_url.handler("https://example.com/internal")
+    assert "error" in result
+    assert "本地或私有网络" in result["error"]
+
+
+async def test_fetch_caps_response_body():
+    def handler(request):
+        return httpx.Response(200, text="x" * 100_000)
+
+    _mock(handler)
+    result = await fetch_url.handler("https://example.com/large", max_chars=100)
+    assert len(result["text"]) <= 100
+    assert result["truncated"] is True
 
 
 async def test_fetch_validates_each_redirect_before_following():

@@ -1,6 +1,6 @@
 # 发布包边界
 
-`scripts/build-release.*` 只生成临时发布目录，不把产物写回源码目录。发布包包含：后端运行源码、前端 `dist`、启动脚本、README、LICENSE 和必要的参考配置。
+`scripts/build-release.*` 只生成临时发布目录，不把产物写回源码目录。发布包包含：后端运行源码、`backend/frontend_dist` 前端构建物、启动脚本、README、LICENSE 和必要的参考配置；Nginx 参考配置的静态根目录与该布局一致。
 
 发布包排除：DevPanel、Mock、测试、开发文档、`.git`、虚拟环境、node_modules、日志、截图、用户数据、上传文件、知识库和任何密钥。
 

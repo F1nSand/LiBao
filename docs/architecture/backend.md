@@ -1,6 +1,11 @@
 # 后端结构
 
-入口是 `apps/backend/app/api/main.py`：创建 FastAPI 应用、初始化运行时、注册路由、设置 trace id 和统一错误信封。
+兼容入口是 `apps/backend/app/api/main.py`，继续提供 `app.api.main:app` 和 `create_app()`。实际装配按职责拆分为：
+
+- `app/api/factory.py`：创建 FastAPI 实例并挂载可选 SPA；
+- `app/api/lifespan.py`：运行时初始化、恢复和后台任务生命周期；
+- `app/api/middleware.py`：trace id、统一错误信封和异常处理；
+- `app/api/router_registry.py`：集中注册 REST/SSE 路由。
 
 | 目录 | 职责 |
 |---|---|

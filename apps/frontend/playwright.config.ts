@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * e2e 依赖内置 mock 的确定性：webServer 以 `--mode e2e` 启动（VITE_USE_MOCK=true + VITE_MOCK_FAST=1）
+ * e2e 依赖内置 mock 的确定性：webServer 以 `--mode e2e` 启动，自动启用快速 mock。
  * E2E_PORT：5173 被占用时可在独立端口起干净 mock server（如 E2E_PORT=5199）。
  * 不复用已有 server，避免普通 dev server 的 mock 延迟/内存状态污染测试。
  */

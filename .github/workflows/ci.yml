@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   backend:
@@ -21,6 +22,15 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run pytest tests/
+
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --project apps/backend
+      - run: uv run --project apps/backend python scripts/export_openapi.py
+      - run: git diff --exit-code -- contracts/openapi.json
 
   frontend:
     runs-on: ubuntu-latest
@@ -63,3 +73,44 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
       - uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
+
+  release:
+    needs: [backend, frontend, frontend-e2e, contract, security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+      - run: uv sync --frozen --project apps/backend
+      - run: npm ci --prefix apps/frontend
+      - run: python scripts/build-release.py --version ci
+      - name: Check release contents and forbidden paths
+        shell: bash
+        run: |
+          legacy_windows_path="$(printf 'C:%bUsers%bAdmin1' '\\' '\\')"
+          legacy_backend_path="$(printf '..%bAgent' '\\')"
+          legacy_frontend_path="$(printf '..%bFrontEnd' '\\')"
+          if git grep -n -F -e "$legacy_windows_path" -e "$legacy_backend_path" -e "$legacy_frontend_path"; then
+            echo 'release-blocking personal or legacy path found'
+            exit 1
+          fi
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          archive = Path('.artifacts/release/libao-ci.zip')
+          forbidden = ('tests/', 'docs/', 'mock/', 'tools/devpanel/', '.git/', 'node_modules/', '.venv/')
+          with ZipFile(archive) as handle:
+              names = handle.namelist()
+          bad = [name for name in names if name.startswith(forbidden) or name.endswith(('.env', '.log'))]
+          if bad:
+              raise SystemExit(f'forbidden release entries: {bad}')
+          required = {'backend/frontend_dist/index.html', 'backend/scripts/check_backend_runtime.py', 'deploy/nginx/nginx.conf'}
+          missing = sorted(required.difference(names))
+          if missing:
+              raise SystemExit(f'missing release entries: {missing}')
+          PY

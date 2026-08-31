@@ -41,8 +41,7 @@ elif [ "$runtime_state" != "absent" ]; then
   exit 1
 else
   log "启动后端 :$BE_PORT（127.0.0.1，本地单机）"
-  ( cd "$ROOT" && exec uv run uvicorn app.api.main:app --host 127.0.0.1 --port "$BE_PORT" )
+  cd "$ROOT"
+  ok "API 即将启动：http://127.0.0.1:${BE_PORT}/docs   （Ctrl+C 停止）"
+  exec uv run uvicorn app.api.main:app --host 127.0.0.1 --port "$BE_PORT"
 fi
-
-echo
-ok "API 已启动：http://127.0.0.1:${BE_PORT}/docs   （Ctrl+C 停止）"

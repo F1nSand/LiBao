@@ -12,6 +12,27 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / ".artifacts" / "release"
+RELEASE_README = """# LiBao 本地单用户发布包
+
+这是 LiBao 的本地单用户发布包，默认绑定 `127.0.0.1`，固定本地用户为 `admin`。
+不支持公网部署、多用户认证或把此包直接暴露到互联网。
+
+## 启动
+
+1. 安装 Python 3.12+、[uv](https://docs.astral.sh/uv/)。
+2. 将 `settings.example.json` 复制为 `~/.LiBao/settings.json`，按需填写 LLM 配置。
+3. 在本目录执行：
+
+   ```text
+   cd backend
+   uv sync --frozen
+   ```
+
+4. Windows 执行 `backend\\start.cmd`；Linux/macOS 执行 `backend/start.sh`。
+   API 和 SPA 都由 `http://127.0.0.1:8000` 提供。
+
+运行数据只写入 `~/.LiBao`；请不要提交或分享该目录。
+"""
 
 
 def copy_tree(source: Path, destination: Path) -> None:
@@ -57,11 +78,26 @@ def main() -> int:
     (stage / "backend").mkdir(exist_ok=True)
     for name in ("pyproject.toml", "uv.lock", ".python-version", "start.cmd", "start.sh"):
         shutil.copy2(backend / name, stage / "backend" / name)
-    copy_tree(frontend / "dist", stage / "frontend_dist")
+    (stage / "backend" / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(
+        backend / "scripts" / "check_backend_runtime.py",
+        stage / "backend" / "scripts" / "check_backend_runtime.py",
+    )
+    copy_tree(frontend / "dist", stage / "backend" / "frontend_dist")
     copy_tree(ROOT / "deploy" / "sandbox", stage / "deploy" / "sandbox")
-    shutil.copy2(ROOT / "README.md", stage / "README.md")
+    copy_tree(ROOT / "deploy" / "nginx", stage / "deploy" / "nginx")
+    (stage / "README.md").write_text(RELEASE_README, encoding="utf-8")
     shutil.copy2(ROOT / "LICENSE", stage / "LICENSE")
     shutil.copy2(ROOT / "examples" / "settings.example.json", stage / "settings.example.json")
+
+    required = (
+        stage / "backend" / "frontend_dist" / "index.html",
+        stage / "backend" / "scripts" / "check_backend_runtime.py",
+        stage / "deploy" / "nginx" / "nginx.conf",
+    )
+    missing = [str(path.relative_to(stage)) for path in required if not path.is_file()]
+    if missing:
+        raise SystemExit(f"release layout incomplete: {', '.join(missing)}")
 
     files = {
         str(path.relative_to(stage)).replace("\\", "/"): sha256(path)

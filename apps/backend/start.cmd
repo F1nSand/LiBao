@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 rem ============================================================
 rem  Agent Platform one-click start (local single-machine)
 rem  backend API (:8000) only; frontend development is started by DevPanel
@@ -46,9 +46,12 @@ set /a W=0
 curl -sf "%BE_URL%" >nul 2>&1
 if not errorlevel 1 goto :be_ok
 set /a W+=1
-if !W! GEQ 30 goto :be_ok
+if !W! GEQ 30 goto :be_timeout
 timeout /t 2 /nobreak >nul
 goto :wait_be
+:be_timeout
+echo [ERROR] backend health check timed out
+goto :fail
 :be_ok
 echo   backend ready
 

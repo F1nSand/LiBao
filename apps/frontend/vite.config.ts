@@ -7,7 +7,7 @@ import { mockApiPlugin } from './src/mock/plugin'
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const useMock = env.VITE_USE_MOCK !== 'false'
-  const apiProxy = env.VITE_API_PROXY ?? 'http://localhost:8000'
+  const apiProxy = env.VITE_API_PROXY ?? 'http://127.0.0.1:8000'
   const proxy = useMock ? undefined : { '/api': { target: apiProxy, changeOrigin: true } }
 
   return {

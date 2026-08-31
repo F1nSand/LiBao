@@ -156,7 +156,8 @@ class ServiceManager:
         self.services["frontend"] = Service(
             id="frontend", label="前端", port=FE_PORT,
             cmd=[_NODE or "node", str(_FE_ENTRY), "--host", "127.0.0.1", "--port", str(FE_PORT), "--strictPort"],
-            cwd=FRONTEND, extra_env={"VITE_USE_MOCK": "false"},
+            cwd=FRONTEND,
+            extra_env={"VITE_USE_MOCK": "false", "VITE_API_PROXY": "http://127.0.0.1:8000"},
             health_url=f"http://127.0.0.1:{FE_PORT}/")
 
     # ---------- 内部 ----------
