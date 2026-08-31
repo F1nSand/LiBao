@@ -50,6 +50,29 @@ async def test_get_latest_and_parent_config(tmp_path):
     assert tup.parent_config["configurable"]["checkpoint_id"] == "c1"
 
 
+async def test_get_latest_uses_persisted_order_not_uuid_lexical_order(tmp_path):
+    """UUID 字典序不能代表 checkpoint 写入时间。"""
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-order"}}
+    saver.put(config, _checkpoint("ffffffff-ffff-ffff-ffff-ffffffffffff"), {}, {})
+    saver.put(
+        {
+            "configurable": {
+                "thread_id": "t-order",
+                "checkpoint_id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            }
+        },
+        _checkpoint("00000000-0000-0000-0000-000000000000"),
+        {},
+        {},
+    )
+
+    tup = await saver.aget_tuple(config)
+
+    assert tup is not None
+    assert tup.checkpoint["id"] == "00000000-0000-0000-0000-000000000000"
+
+
 async def test_put_writes_and_pending(tmp_path):
     saver = _saver(tmp_path)
     config = {"configurable": {"thread_id": "t3"}}

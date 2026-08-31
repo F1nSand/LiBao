@@ -203,7 +203,7 @@ async def test_image_attachment_vision_hydrates_block_and_no_b64_in_checkpoint(c
     text_blocks = [b for b in first_human.content if b.get("type") == "text"]
     assert text_blocks and text_blocks[-1]["text"] == "描述这张图"  # 图前文后
     # checkpoint 不含 b64（读 thread 目录 JSON 尺寸上界）
-    ckpt_dir = Path(settings.agent_data_dir) / "checkpoints"
+    ckpt_dir = Path(settings.agent_data_dir) / "code-checkpoints" / str(conv.id)
     ckpt_files = list(ckpt_dir.rglob("*.json")) if ckpt_dir.is_dir() else []
     assert ckpt_files, "checkpoint 应已写盘"
     for f in ckpt_files:

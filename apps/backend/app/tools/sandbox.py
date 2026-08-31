@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import ntpath
 import os
 import shutil
 import signal
@@ -123,6 +124,7 @@ class WorkspaceCommand:
         # both drive/UNC and slash-rooted paths before resolving under root.
         if (
             Path(self.workdir).is_absolute()
+            or ntpath.isabs(self.workdir)
             or self.workdir.startswith("/")
             or "\\" in self.workdir
             or ".." in self.workdir.split("/")

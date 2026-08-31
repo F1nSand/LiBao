@@ -463,9 +463,11 @@ async def _curl_review(command: str) -> str:
     复用 _bash_executable（排除 System32 WSL 中继）。返回原始响应体；失败抛异常（走熔断降级）。
     """
     settings = get_settings()
-    bash = _bash_executable() if sys.platform == "win32" else "bash"
+    bash = _bash_executable()
     if bash is None:
-        raise RuntimeError("未找到 Git Bash，审查通道不可用")
+        if sys.platform == "win32":
+            raise RuntimeError("未找到 Git Bash，审查通道不可用")
+        bash = "bash"
     payload = {
         "model": settings.bash_review_model,
         "messages": [
@@ -626,6 +628,8 @@ def _bash_executable() -> str | None:
     C:\\Windows\\System32\\bash.exe（WSL 中继）→ 每次执行 execvpe(/bin/bash) failed，
     工作区 bash 工具全挂。修复：显式 Git Bash 路径优先 + 排除 System32。
     """
+    if sys.platform != "win32":
+        return None
     for p in _BASH_CANDIDATES:
         if Path(p).exists():
             return p
