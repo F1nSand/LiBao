@@ -2,7 +2,7 @@ import type { TokenUsage, TrajectoryNode, TrajectoryToolCall } from '@/types'
 import { formatDuration, toolCallSummary, truncate } from './format'
 
 /**
- * 对话轨迹折叠（docs/02 §6.3）：`TrajectoryNode[]` → Turn → Group → Cell。
+ * 对话轨迹折叠（《02》前端设计 §6.3）：`TrajectoryNode[]` → Turn → Group → Cell。
  * 纯函数，便于单测；组件只消费折叠后的视图模型。
  * 规则：user/steering 节点开新 Turn（userCell）；context 节点进当前 Turn 的 contextCells；
  * compaction 节点建 `Compaction <seq>` 组（单个 compacted cell）；assistant 节点建组
@@ -144,7 +144,7 @@ function makeMessageCell(n: TrajectoryNode, index: number): TrajectoryCell {
 
 function makeToolCell(n: TrajectoryNode, tc: TrajectoryToolCall, index: number): TrajectoryCell {
   const argsRaw = safeStringify(tc.input)
-  // subagent 派发（agent 控制）标记：⇄ 派发 subagent，弱化显示（docs/02 §6.3）
+  // subagent 派发（agent 控制）标记：⇄ 派发 subagent，弱化显示（《02》前端设计 §6.3）
   const isDispatch = tc.tool_name === 'dispatch_subagent'
   return {
     index,

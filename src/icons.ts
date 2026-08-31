@@ -43,7 +43,7 @@ import {
 } from 'lucide-vue-next'
 
 /**
- * 全局图标映射（docs/02 主题系统）：App 图标统一走 Lucide（现代简约描边），
+ * 全局图标映射（《02》前端设计 主题系统）：App 图标统一走 Lucide（现代简约描边），
  * key = 模板/路由里沿用至今的 Element 图标字符串名（`<component :is>` / `:icon` / `:prefix-icon`），
  * value = 对应 Lucide 组件。main.ts 按同名注册，模板与路由零改动。
  *

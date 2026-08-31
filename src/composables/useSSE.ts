@@ -3,7 +3,7 @@ import { openSseStream, type SseHandlers } from '@/api/sse'
 import { isUrlUnavailable } from '@/api/availability'
 
 /**
- * 任务/通知等 SSE 订阅（docs/02 §5.1 FD-6）：
+ * 任务/通知等 SSE 订阅（《02》前端设计 §5.1 FD-6）：
  * 封装生命周期（组件卸载断流）+ 失败指数退避重连。
  */
 export function useSSE(

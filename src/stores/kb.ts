@@ -26,7 +26,7 @@ function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-/** 知识库 store（docs/02 §7）：集合/文档列表 + 索引状态 */
+/** 知识库 store（《02》前端设计 §7）：集合/文档列表 + 索引状态 */
 export const useKbStore = defineStore('kb', {
   state: () => ({
     collections: [] as KbCollection[],

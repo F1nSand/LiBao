@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { Workspace } from '@/types'
 
-/** 工作区气泡卡片（M7-B，docs/02 §4）：name/description 就地编辑 + 进入 + 删除（强确认输入名称） */
+/** 工作区气泡卡片（M7-B，《02》前端设计 §4）：name/description 就地编辑 + 进入 + 删除（强确认输入名称） */
 const props = defineProps<{ workspace: Workspace }>()
 const store = useWorkspaceStore()
 const router = useRouter()

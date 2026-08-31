@@ -6,7 +6,7 @@ import WorkspaceCard from '@/components/workspace/WorkspaceCard.vue'
 import AsyncState from '@/components/common/AsyncState.vue'
 import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 
-/** 工作区气泡网格（M7-B，docs/02 §4）：一泡一个工作区 + 新建/编辑气泡内容/进入 */
+/** 工作区气泡网格（M7-B，《02》前端设计 §4）：一泡一个工作区 + 新建/编辑气泡内容/进入 */
 const store = useWorkspaceStore()
 const createVisible = ref(false)
 const createSubmitting = ref(false)

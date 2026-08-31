@@ -3,7 +3,7 @@ import { getTrajectory } from '@/api/trajectory'
 import { FEATURE, isUnavailable } from '@/api/availability'
 import type { TrajectoryDetail } from '@/types'
 
-/** trajectory store（docs/02 §6.3）：按会话隔离的只读轨迹；支持「加载更早」分页累积 */
+/** trajectory store（《02》前端设计 §6.3）：按会话隔离的只读轨迹；支持「加载更早」分页累积 */
 export const useTrajectoryStore = defineStore('trajectory', {
   state: () => ({
     detail: null as TrajectoryDetail | null,

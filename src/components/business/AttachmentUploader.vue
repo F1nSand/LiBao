@@ -7,7 +7,7 @@ import type { UploadResponse } from '@/types'
 import { UPLOAD_MAX_BYTES } from '@/types'
 
 /**
- * 消息输入区附件上传（docs/02 §6.2 H1 / docs/03 §5.9）：
+ * 消息输入区附件上传（《02》前端设计 §6.2 H1 / 《02》接口契约 §5.9）：
  * 选择/拖拽 → POST /uploads → emit 上传结果；40011/40012 即时提示；失败重试（幂等）。
  */
 export interface PendingAttachment extends UploadResponse {

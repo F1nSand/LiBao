@@ -10,7 +10,7 @@ import AsyncState from '@/components/common/AsyncState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 
-/** 知识库管理（docs/02 §4 / docs/03 §5.6）：集合管理 + 上传 + 分块/索引状态 + 检索测试 */
+/** 知识库管理（《02》前端设计 §4 / 《02》接口契约 §5.6）：集合管理 + 上传 + 分块/索引状态 + 检索测试 */
 const kb = useKbStore()
 
 const createVisible = ref(false)

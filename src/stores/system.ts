@@ -11,7 +11,7 @@ function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-/** 系统 store（docs/02 §7）：运行日志查询 + trace 全链路；评估/成本契约层已随 UI 精简删除（08-20） */
+/** 系统 store（《02》前端设计 §7）：运行日志查询 + trace 全链路；评估/成本契约层已随 UI 精简删除（08-20） */
 export const useSystemStore = defineStore('system', {
   state: () => ({
     logs: [] as SystemLog[],

@@ -71,7 +71,7 @@ function doneEvent(message: Message, tokenUsage?: Record<string, unknown>): SseS
   }
 }
 
-/** 逐轮消息封口（docs/03 §3 多消息）：一轮思考完成 → message 事件 + 落库（与 doneEvent 同）。
+/** 逐轮消息封口（《02》接口契约 §3 多消息）：一轮思考完成 → message 事件 + 落库（与 doneEvent 同）。
  * token_usage/cost 附到 message 上落库（镜像真实后端按轮持久化），并随封口载荷下发。 */
 function sealEvent(message: Message, tokenUsage?: TokenUsage, cost?: number): SseScriptItem {
   const m = { ...message }
@@ -254,7 +254,7 @@ export function buildChatScript(req: ChatRequest): SseScriptItem[] {
     ]
   }
 
-  // 代码块演示：消息含「代码/code/示例」→ 逐行流式输出含 Python 代码块的回复（验证流式代码块渐进渲染，docs/02 §5.4）
+  // 代码块演示：消息含「代码/code/示例」→ 逐行流式输出含 Python 代码块的回复（验证流式代码块渐进渲染，《02》前端设计 §5.4）
   const wantsCode = /代码|code|示例/i.test(content)
   if (wantsCode) {
     const codeLines = [

@@ -6,7 +6,7 @@ import type { AgentSwitchPayload, DonePayload, Message, MessageSealPayload, Mode
 import { flushNow, throttleByRaf } from '@/utils/rAF'
 
 /**
- * 流式消息渲染状态机（docs/02 §5.3）：按会话隔离（多流）：
+ * 流式消息渲染状态机（《02》前端设计 §5.3）：按会话隔离（多流）：
  * message_start → token* → tool_call → tool_result(占位/回填) → … → done
  * interrupt → 确认弹窗 → confirmInterrupt 续流（复用 segments/toolCalls 不回滚）
  *
@@ -512,7 +512,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
       }
       case 'agent_switch': {
         if (ctx.resumeSnapshot) markAccepted(ctx)
-        // 多 Agent 切换（docs/03 §3.3）：以独立段混排进事件序（文本/工具/切换按序）
+        // 多 Agent 切换（《02》接口契约 §3.3）：以独立段混排进事件序（文本/工具/切换按序）
         const { from_agent: from, to_agent: to, reason } = p as AgentSwitchPayload
         s.segments.push({ kind: 'agent', id: segId(), from, to, reason })
         s.phase = 'delegating'
@@ -522,7 +522,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
       }
       case 'thinking': {
         if (ctx.resumeSnapshot) markAccepted(ctx)
-        // 思考（docs/03 §3.3）：一轮思考累积到末段，不因分块堆叠多行
+        // 思考（《02》接口契约 §3.3）：一轮思考累积到末段，不因分块堆叠多行
         const t = (p.text ?? '') as string
         const last = s.segments[s.segments.length - 1]
         if (last && last.kind === 'thinking') last.text += t
@@ -533,7 +533,7 @@ export function useChatStream(opts: UseChatStreamOptions = {}): UseChatStreamRet
         break
       }
       case 'message': {
-        // 逐轮消息封口（docs/03 §3 多消息扩展）：一轮思考（文本+工具）完成，追加为独立消息 + 复位段
+        // 逐轮消息封口（《02》接口契约 §3 多消息扩展）：一轮思考（文本+工具）完成，追加为独立消息 + 复位段
         flushText(ctx)
         flushNow()
         const seal = p as MessageSealPayload

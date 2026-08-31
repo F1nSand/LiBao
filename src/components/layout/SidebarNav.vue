@@ -7,7 +7,7 @@ import { MOBILE_LAYOUT_MQ, NARROW_LAYOUT_MQ } from '@/constants/layout'
 import ConversationList from '@/components/business/ConversationList.vue'
 
 /**
- * 工作台侧边栏（docs/02 §4.1）：顶部 logo+折叠 → 工作区/对话 → 会话列表区 → 知识库/设置。
+ * 工作台侧边栏（《02》前端设计 §4.1）：顶部 logo+折叠 → 工作区/对话 → 会话列表区 → 知识库/设置。
  * 设置按钮弹气泡卡片（设置/任务/工具/记忆/系统），点击跳转。
  */
 const route = useRoute()

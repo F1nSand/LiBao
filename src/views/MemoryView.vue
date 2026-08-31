@@ -9,7 +9,7 @@ import { readWorkspaceFile } from '@/api/workspace'
 import type { ProjectMemoryFile, Workspace } from '@/types'
 import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 
-/** 记忆管理（docs/02 §4 / docs/03 §5.7）：长期记忆卡片（RAG）+ 项目记忆文件（P5） */
+/** 记忆管理（《02》前端设计 §4 / 《02》接口契约 §5.7）：长期记忆卡片（RAG）+ 项目记忆文件（P5） */
 const store = useMemoryStore()
 const tab = ref('longterm')
 const maintenanceLoading = ref(false)

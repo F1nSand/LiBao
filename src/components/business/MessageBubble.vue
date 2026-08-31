@@ -10,7 +10,7 @@ import AttachmentBubble from './AttachmentBubble.vue'
 import { formatCost, formatTokens, thinkPreview, toolCallSummary } from '@/utils/format'
 
 /**
- * 消息气泡（docs/02 §5.3/§5.4.3）：
+ * 消息气泡（《02》前端设计 §5.3/§5.4.3）：
  * 助手消息 = 「活动区 + 回复气泡」双区——工具调用 / agent 切换 / 思考以紧凑行出现在
  * 回复气泡上方（多工具/思考往下递进，非气泡）；文本为气泡正文。
  * - message：持久化消息（content → 气泡；tool_calls[] 按 position → 活动区）
@@ -138,7 +138,7 @@ async function copyMessage(): Promise<void> {
   }
 }
 
-/** 逐轮 token_usage/cost footer（docs/03 §3 多消息扩展）：仅持久化消息路径，防御式（无数据即空） */
+/** 逐轮 token_usage/cost footer（《02》接口契约 §3 多消息扩展）：仅持久化消息路径，防御式（无数据即空） */
 const usageText = computed(() => {
   if (props.stream) return ''
   const tok = formatTokens(props.message?.token_usage)

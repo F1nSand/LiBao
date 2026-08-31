@@ -5,7 +5,7 @@ import { gotoChat, sendMessage } from '../e2e/helpers'
  * 真实后端契约冒烟（playwright.real.config.ts）：对接本机后端 :8000。
  * - API 层：验证信封/字段契约（含改名后的 project_instructions roundtrip）
  * - UI 层：工作区创建 → .agent 骨架 → 文件操作（前后端集成）
- * - 聊天：真实 LLM 流式 → 落库（SSE 契约；需后端 .env 配 DeepSeek key）
+ * - 聊天：真实 LLM 流式 → 落库（SSE 契约；需在 ~/.LiBao/settings.json 配 DeepSeek key）
  * 用例自行清理创建的临时工作区。
  */
 

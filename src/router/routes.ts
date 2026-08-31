@@ -12,9 +12,9 @@ export interface MenuItem {
   children?: MenuItem[]
 }
 
-/** 菜单项配置（docs/02 §4）：侧栏菜单；设置项带 children（工具/记忆/系统/设置 子栏） */
+/** 菜单项配置（《02》前端设计 §4）：侧栏菜单；设置项带 children（工具/记忆/系统/设置 子栏） */
 export const menuItems: MenuItem[] = [
-  // 工作区（M7-B，docs/02 §4）：入口在对话上方；内部 = 文件资源管理器 + 工作区对话
+  // 工作区（M7-B，《02》前端设计 §4）：入口在对话上方；内部 = 文件资源管理器 + 工作区对话
   { path: '/workspace', title: '工作区', icon: 'Grid' },
   { path: '/chat', title: '对话', icon: 'ChatDotRound' },
   { path: '/kb', title: '知识库', icon: 'FolderOpened' },
@@ -60,7 +60,7 @@ export const routes: RouteRecordRaw[] = [
     meta: { title: '对话', icon: 'ChatDotRound' } satisfies AppRouteMeta,
   },
   {
-    // 对话轨迹（docs/02 §6.3）：按会话隔离的只读查看页，不进侧栏菜单
+    // 对话轨迹（《02》前端设计 §6.3）：按会话隔离的只读查看页，不进侧栏菜单
     path: '/trajectory/:conversationId',
     name: 'trajectory',
     component: () => import('@/views/TrajectoryView.vue'),

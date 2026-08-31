@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import type { AttachmentRef } from '@/types'
 
 /**
- * 附件消息渲染（docs/02 §5.3.2）：图片缩略图/文件卡。
+ * 附件消息渲染（《02》前端设计 §5.3.2）：图片缩略图/文件卡。
  * 上传/解析是后端内部流程，不在附件气泡上展示状态或启动轮询。
  */
 const props = defineProps<{ refs: AttachmentRef[] }>()

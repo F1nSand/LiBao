@@ -1,4 +1,4 @@
-/** 格式化工具（docs/02 §3 utils/） */
+/** 格式化工具（《02》前端设计 §3 utils/） */
 import type { TokenUsage } from '@/types'
 
 export function formatBytes(bytes: number | undefined | null): string {

@@ -18,7 +18,7 @@ import type { SandboxMode, SandboxSettings } from '@/api/sandbox'
 
 type ProviderListStatus = 'idle' | 'loading' | 'success-empty' | 'success' | 'error' | 'unavailable'
 
-/** 设置（docs/02 §4 / docs/03 §5.1）：单用户本地模式 → Provider 配置 / 通知 / 主题 三个 pane（tag 切换，非悬浮窗） */
+/** 设置（《02》前端设计 §4 / 《02》接口契约 §5.1）：单用户本地模式 → Provider 配置 / 通知 / 主题 三个 pane（tag 切换，非悬浮窗） */
 
 /* ---------- 设置组切换 ---------- */
 const activeTab = ref<'provider' | 'sandbox' | 'notifications' | 'theme'>('provider')

@@ -1,4 +1,4 @@
-/** 行级 LCS 结构化 diff（docs/02 §6.3 Diff 标签）：added / deleted / context 三类段 */
+/** 行级 LCS 结构化 diff（《02》前端设计 §6.3 Diff 标签）：added / deleted / context 三类段 */
 export type DiffSegment = { type: 'add' | 'del' | 'ctx'; lines: string[] }
 
 /**

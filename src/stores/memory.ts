@@ -19,7 +19,7 @@ function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-/** 记忆 store（docs/02 §7）：长期记忆（只增版本化）+ maintenance 整理 */
+/** 记忆 store（《02》前端设计 §7）：长期记忆（只增版本化）+ maintenance 整理 */
 export const useMemoryStore = defineStore('memory', {
   state: () => ({
     longterm: [] as LongTermMemory[],

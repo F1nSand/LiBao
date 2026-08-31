@@ -4,7 +4,7 @@ import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
 
 /**
- * Markdown 渲染管线（docs/02 §5.4，固定顺序不可跳步）：
+ * Markdown 渲染管线（《02》前端设计 §5.4，固定顺序不可跳步）：
  *   markdown-it 解析(GFM, html:false) → highlight.js 代码高亮 → DOMPurify 白名单净化 → DOM
  * LLM 输出一律视为不可信内容。
  */
@@ -41,7 +41,7 @@ const md = new MarkdownIt({
         /* 高亮失败降级纯文本 */
       }
     }
-    // 语言不支持 → 保留语言标识的纯文本代码块（docs/02 §5.4.1 异常路径）
+    // 语言不支持 → 保留语言标识的纯文本代码块（《02》前端设计 §5.4.1 异常路径）
     return `<pre class="hljs"><code class="language-${lang ?? ''}">${escapeHtml(code)}</code></pre>`
   },
 })
@@ -56,14 +56,14 @@ export function renderMarkdown(src: string): string {
     ALLOWED_ATTR: MARKDOWN_WHITELIST.attrs,
     ALLOWED_URI_REGEXP: MARKDOWN_WHITELIST.uri,
   })
-  if (!clean.trim()) return escapeHtml(src) // 净化后为空 → 原始文本兜底（docs/02 §5.4.1）
+  if (!clean.trim()) return escapeHtml(src) // 净化后为空 → 原始文本兜底（《02》前端设计 §5.4.1）
   // 净化后安全后处理：链接新窗口 + noopener（防 tabnabbing）；任务列表 checkbox 补 type
   return clean
     .replace(/<a\s(?![^>]*target=)/g, '<a target="_blank" rel="noopener noreferrer" ')
     .replace(/<input\s(?![^>]*type=)/g, '<input type="checkbox" ')
 }
 
-/** 流式拆分（docs/02 §5.4.1）：stable = 最后一个换行前的已完成文本；tail = 末行局部（正在输入的 token）。
+/** 流式拆分（《02》前端设计 §5.4.1）：stable = 最后一个换行前的已完成文本；tail = 末行局部（正在输入的 token）。
  * 流式期对 stable 做 markdown 渲染（随行渐进），tail 保持纯文本——避免半个词/未闭合块被打断。 */
 export function splitStreamingText(raw: string): { stable: string; tail: string } {
   const idx = raw.lastIndexOf('\n')

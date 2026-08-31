@@ -28,7 +28,7 @@ import WorkspaceConvList from './WorkspaceConvList.vue'
 import WorkspaceFileRefPicker from './WorkspaceFileRefPicker.vue'
 
 /**
- * 工作区内部页 shell（M7-B，docs/02 §4）：左列 = 文件资源管理器（上）+ 工作区会话（下）；
+ * 工作区内部页 shell（M7-B，《02》前端设计 §4）：左列 = 文件资源管理器（上）+ 工作区会话（下）；
  * 右侧 = 对话区（工具栏 + 消息 + composer + 轨迹）。会话状态/stream 全在此持有（不提升到详情页）。
  * 单折叠模型：左列整体收起成 28px 竖条；窗口变窄自动收、变宽自动开、手动折叠不自动开。
  */

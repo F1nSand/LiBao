@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { useToolStore } from '@/stores/tool'
 import type { ToolSearchHit } from '@/types'
 
-/** 工具发现（docs/02 §6.2 H3 / docs/03 §5.5）：GET /tools/search?q= */
+/** 工具发现（《02》前端设计 §6.2 H3 / 《02》接口契约 §5.5）：GET /tools/search?q= */
 const store = useToolStore()
 const keyword = ref('')
 const results = ref<ToolSearchHit[]>([])

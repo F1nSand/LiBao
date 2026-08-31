@@ -228,7 +228,7 @@ export const workspaceFiles: Record<string, WorkspaceFile[]> = {
     { name: 'docs/API 参考.md', path: 'docs/API 参考.md', is_dir: false, size: 2400 },
     { name: 'src', path: 'src', is_dir: true, size: 0 },
     { name: 'src/main.py', path: 'src/main.py', is_dir: false, size: 640 },
-    // .agent/ 项目级能力目录（M7-B 收敛，docs/02 §4.2）：skills/记忆/知识库文件化，agent 自动发现叠加
+    // .agent/ 项目级能力目录（M7-B 收敛，《02》前端设计 §4.2）：skills/记忆/知识库文件化，agent 自动发现叠加
     { name: '.agent', path: '.agent', is_dir: true, size: 0 },
     { name: '.agent/README.md', path: '.agent/README.md', is_dir: false, size: 220 },
     { name: '.agent/agent.md', path: '.agent/agent.md', is_dir: false, size: 320 },

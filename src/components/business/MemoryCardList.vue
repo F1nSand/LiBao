@@ -8,7 +8,7 @@ import JsonViewer from '@/components/common/JsonViewer.vue'
 import AsyncState from '@/components/common/AsyncState.vue'
 import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 
-/** 长期记忆卡片（docs/02 §6.2 / docs/03 §5.7）：只读展示 + 版本历史 + 新增/改写（只增） */
+/** 长期记忆卡片（《02》前端设计 §6.2 / 《02》接口契约 §5.7）：只读展示 + 版本历史 + 新增/改写（只增） */
 const store = useMemoryStore()
 
 const addVisible = ref(false)

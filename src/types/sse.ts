@@ -1,4 +1,4 @@
-/** SSE 事件协议（docs/03 §3） */
+/** SSE 事件协议（《02》接口契约 §3） */
 import type { TokenUsage } from './domain'
 import type { Message } from './api'
 
@@ -13,11 +13,11 @@ export type SseEventType =
   | 'message'
   | 'done'
   | 'error'
-  // 监视器预留（docs/03 §3.3，MVP 后实施）
+  // 监视器预留（《02》接口契约 §3.3，MVP 后实施）
   | 'thinking'
   | 'run_progress'
   | 'tool_exec'
-  // 通知流（docs/03 §5.11 notifications/stream；事件类型契约未定，mock 用此）
+  // 通知流（《02》接口契约 §5.11 notifications/stream；事件类型契约未定，mock 用此）
   | 'notification'
   // 模型传输断线自动重试（后端仅重试一次；长任务断线恢复契约）
   | 'model_retry'
@@ -67,7 +67,7 @@ export interface ToolResultPayload {
   ok: boolean
   summary?: string
   structured?: unknown
-  /** 占位/回填语义（docs/03 §3.5） */
+  /** 占位/回填语义（《02》接口契约 §3.5） */
   placeholder?: boolean
   job_ref?: string
   error?: string
@@ -105,7 +105,7 @@ export interface DonePayload {
   message?: unknown
 }
 
-/** 逐轮消息封口（docs/03 §3 多消息扩展）：一轮思考（文本+工具）完成时由后端发射，前端追加为独立消息 */
+/** 逐轮消息封口（《02》接口契约 §3 多消息扩展）：一轮思考（文本+工具）完成时由后端发射，前端追加为独立消息 */
 export interface MessageSealPayload {
   message_id?: string
   token_usage?: TokenUsage

@@ -5,7 +5,7 @@ import type { ToolDefinition } from '@/types'
 import JsonViewer from '@/components/common/JsonViewer.vue'
 import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 
-/** 沙盒测试弹窗（docs/02 §6.2）：按 params_schema 动态生成表单 → POST /tools/{id}/test */
+/** 沙盒测试弹窗（《02》前端设计 §6.2）：按 params_schema 动态生成表单 → POST /tools/{id}/test */
 const props = defineProps<{ visible: boolean; tool: ToolDefinition | null }>()
 const emit = defineEmits<{ close: [] }>()
 

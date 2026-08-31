@@ -5,7 +5,7 @@ import { cellMatches, flatCells, kindColor, kindLabel, kindLane } from '@/utils/
 import { formatDuration, formatTime } from '@/utils/format'
 
 /**
- * 顶部时间轴（docs/02 §6.3）：三条泳道 Input/Model/Tools。
+ * 顶部时间轴（《02》前端设计 §6.3）：三条泳道 Input/Model/Tools。
  * 投影：durationOn=false=等宽(sequence)，true=按耗时定宽(duration)。
  * 交互：滚轮缩放（以鼠标为锚，panX 钳制两端不逃逸）、左键拖拽框选（聚焦区域，外部变灰）、
  *       点击选中单个单元格、双击/Esc 复位、搜索时暗化非命中；hasMore 时左侧「加载更早」。

@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useKbStore } from '@/stores/kb'
 import type { KbDocument } from '@/types'
 
-/** 文档上传（docs/02 §6.2）：拖拽/选择 → POST 上传（分块→向量化由后端异步，ChunkStatus 轮询） */
+/** 文档上传（《02》前端设计 §6.2）：拖拽/选择 → POST 上传（分块→向量化由后端异步，ChunkStatus 轮询） */
 const props = defineProps<{ collectionId: string }>()
 const emit = defineEmits<{ uploaded: [doc: KbDocument] }>()
 

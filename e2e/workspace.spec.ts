@@ -211,7 +211,7 @@ test.describe('工作区（M7-B，交接板 2026-08-20）', () => {
     await expect(page.locator('.el-message__content').filter({ hasText: '已请求在本地打开文件夹' })).toBeVisible()
   })
 
-  test('详情页：.agent/ 项目级能力目录（skills/记忆/知识库，docs/02 §4.2）', async ({ page }) => {
+  test('详情页：.agent/ 项目级能力目录（skills/记忆/知识库，《02》前端设计 §4.2）', async ({ page }) => {
     await gotoChat(page)
     await page.goto('/workspace')
     await page.locator('.ws-card', { hasText: '产品文档' }).getByRole('button', { name: '进入工作区' }).click()

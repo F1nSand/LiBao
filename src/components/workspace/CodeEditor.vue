@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import hljs from 'highlight.js'
 
 /**
- * 工作区文件预览/编辑代码编辑器（docs/02 §4）：
+ * 工作区文件预览/编辑代码编辑器（《02》前端设计 §4）：
  * 透明 textarea 覆盖 hljs 高亮 pre + 行号 gutter + 共享滚动容器（gutter sticky + pre 流内撑高 +
  * textarea absolute 覆盖）→ 零 JS 滚动同步。
  * 关键：gutter/pre/textarea 的对齐矩阵（padding/font/line-height/tab-size/white-space）必须逐字符一致。

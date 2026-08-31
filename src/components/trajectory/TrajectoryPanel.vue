@@ -9,8 +9,8 @@ import TrajectoryDetailPanel from './TrajectoryDetailPanel.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import StreamSkeleton from '@/components/common/StreamSkeleton.vue'
 
-/** 轨迹工作区（docs/02 §6.3）：独立页 TrajectoryView 与 Chat「轨迹」模式共用；无页面级 back/title。
- * `live` = 会话流式活跃 → 轮询实时同步（docs 03 §5.2.1 / §5.8 逐轮落库后即现）。 */
+/** 轨迹工作区（《02》前端设计 §6.3）：独立页 TrajectoryView 与 Chat「轨迹」模式共用；无页面级 back/title。
+ * `live` = 会话流式活跃 → 轮询实时同步（《02》接口契约 §5.2.1 / §5.8 逐轮落库后即现）。 */
 const props = defineProps<{ conversationId: string | null; focusToolCallId?: string; live?: boolean }>()
 
 const store = useTrajectoryStore()

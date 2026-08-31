@@ -4,7 +4,7 @@ import { useKbStore } from '@/stores/kb'
 import { useTaskPoll } from '@/composables/useTaskPoll'
 import type { KbDocument, KbDocumentStatusDetail } from '@/types'
 
-/** 分块/索引进度（docs/02 §6.2 / docs/03 §5.6）：状态轮询，终态即停 */
+/** 分块/索引进度（《02》前端设计 §6.2 / 《02》接口契约 §5.6）：状态轮询，终态即停 */
 const props = defineProps<{ document: KbDocument }>()
 
 const emit = defineEmits<{

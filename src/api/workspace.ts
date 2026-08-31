@@ -2,7 +2,7 @@ import { httpGet, httpPost, httpPatch, httpDelete } from './http'
 import type { Paged, Workspace, WorkspaceFile, CreateWorkspaceRequest, UpdateWorkspaceRequest } from '@/types'
 import type { PageParams } from './chat'
 
-/** 工作区（M7-B 契约，交接板 2026-08-20；docs/03 §5.14） */
+/** 工作区（M7-B 契约，交接板 2026-08-20；《02》接口契约 §5.14） */
 export function listWorkspaces(params: PageParams = {}) {
   return httpGet<Paged<Workspace>>('/workspaces', { params })
 }

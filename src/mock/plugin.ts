@@ -3,7 +3,7 @@ import { mockServer } from './server'
 import { setMockFast } from './util'
 
 /**
- * Mock 适配层 Vite 插件（docs/03 契约）：
+ * Mock 适配层 Vite 插件（《02》接口契约 契约）：
  * dev 模式拦截 /api/v1/*，模拟 REST 信封与 SSE 事件流。
  * apply:'serve' → 生产构建不打包 mock。
  */

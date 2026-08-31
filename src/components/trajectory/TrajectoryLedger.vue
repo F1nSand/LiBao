@@ -4,7 +4,7 @@ import type { TrajectoryCell, TrajectoryTurn } from '@/utils/trajectory'
 import { cellMatches, kindBgColor, kindColor, kindLabel, turnStepsSummary } from '@/utils/trajectory'
 import { formatDuration, formatTokens } from '@/utils/format'
 
-/** 事件台账（docs/02 §6.3）：Turn → Group → Cell。
+/** 事件台账（《02》前端设计 §6.3）：Turn → Group → Cell。
  * grid 对齐：左留白列(轮次徽标) + 标签列(右对齐到最长) + 文本列 + dur/tok；
  * 轮次徽标在 USER 行、左侧窄高光条（z 高于行底，hover/选中不遮挡）；
  * turnsOn 收起中间（省略行可单独展开）、callsOn 隐藏 TOOL；focusSet 聚焦区域（框内不变、外部变灰透明）、selectedIndex 单独选中（行高亮 + 轮次高光条）。

@@ -9,7 +9,7 @@ import type { AttachmentRef, CheckpointAnchor, Conversation, Message, RestoreCon
 import { toComposerDraft, truncateMessagesFrom } from '@/utils/checkpointRestore'
 
 /**
- * chat store（docs/02 §7）：只存客户端状态（会话列表/选中态/消息列表），
+ * chat store（《02》前端设计 §7）：只存客户端状态（会话列表/选中态/消息列表），
  * 不复制服务端全量；流式状态由组件持有的 useChatStream 管理。
  * 单通用 Agent：会话不携带 agent，chat/conversation 固定用后端默认通用 Agent。
  */

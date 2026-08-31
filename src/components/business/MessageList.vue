@@ -11,7 +11,7 @@ import StreamSkeleton from '@/components/common/StreamSkeleton.vue'
 import MessageBubble from './MessageBubble.vue'
 
 /**
- * 消息流（docs/02 §6.2）：直接渲染全部消息（每页 ≤50，无需虚拟滚动；
+ * 消息流（《02》前端设计 §6.2）：直接渲染全部消息（每页 ≤50，无需虚拟滚动；
  * 曾因虚拟滚动"实测高度→平均高度→startIndex"反馈循环导致长列表上滚抽搐）。
  * 吸底策略：**贴底跟随**——滚动在最下方时新内容自动追随；滚走则不强制拉回（内容照常生成在下方）。
  * 用滚动事件记录 pinned（真正最下方才贴底），内容变化时 pinned 才跟随——避免内容增长后误判"不在底部"。

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { gotoChat } from './helpers'
 
-test.describe('对话滚动位置（记忆/恢复 + 新会话贴底，docs/02 §6.2）', () => {
+test.describe('对话滚动位置（记忆/恢复 + 新会话贴底，《02》前端设计 §6.2）', () => {
   test('c_scroll：新开默认到底；上滚后切走再回恢复原位', async ({ page }) => {
     await gotoChat(page)
 

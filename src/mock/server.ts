@@ -543,7 +543,7 @@ export const mockServer = {
       return void json(res, ok({ conversation_id: id, nodes, has_more: hasMore }))
     }
 
-    /* ===== 工作区（M7-B，docs/03 §5.14 / 交接板 2026-08-20） ===== */
+    /* ===== 工作区（M7-B，《02》接口契约 §5.14 / 交接板 2026-08-20） ===== */
     if (method === 'GET' && pathname === '/workspaces') {
       const page = Number(query.get('page') ?? 1)
       const size = Number(query.get('page_size') ?? 20)
@@ -980,7 +980,7 @@ export const mockServer = {
         }),
       )
     }
-    /* ===== Provider 配置（前端契约 docs/03 §5.6，后端已实现；mock 演示） ===== */
+    /* ===== Provider 配置（前端契约 《02》接口契约 §5.6，后端已实现；mock 演示） ===== */
     if (method === 'GET' && pathname === '/settings/providers') return void json(res, ok(mockProviders))
     if (method === 'GET' && pathname === '/settings/providers/active') {
       return void json(res, ok(mockProviders.find((x) => x.enabled) ?? null))

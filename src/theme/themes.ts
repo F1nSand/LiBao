@@ -1,5 +1,5 @@
 /**
- * 主题系统（docs/02 §7）：CSS 变量覆盖，全局生效（主色 + 侧边栏 + Element 主色），内容区保持浅色。
+ * 主题系统（《02》前端设计 §7）：CSS 变量覆盖，全局生效（主色 + 侧边栏 + Element 主色），内容区保持浅色。
  * 9 套：6 纯色（一深一浅）+ 3 撞色；localStorage 持久化（key: agent.theme）。
  */
 export interface ThemeDef {

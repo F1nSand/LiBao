@@ -7,7 +7,7 @@ import TraceTimeline from '@/components/business/TraceTimeline.vue'
 import AsyncState from '@/components/common/AsyncState.vue'
 import PaginationPanel from '@/components/common/PaginationPanel.vue'
 
-/** 系统监控/运行日志（docs/02 §4 / docs/03 §5.8）：运行日志 + 点行看 trace 全链路 */
+/** 系统监控/运行日志（《02》前端设计 §4 / 《02》接口契约 §5.8）：运行日志 + 点行看 trace 全链路 */
 const store = useSystemStore()
 
 const logsFilter = reactive({ trace_id: '', level: '' })

@@ -1,7 +1,7 @@
 import type { SseEnvelope, SseEventType } from '@/types'
 
 /**
- * SSE 逐帧解析器（docs/03 §3）。
+ * SSE 逐帧解析器（《02》接口契约 §3）。
  * 纯函数 + 增量状态，便于单测；多字节 UTF-8 由调用方用 TextDecoder({stream:true}) 保证不截断。
  */
 

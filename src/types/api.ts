@@ -1,4 +1,4 @@
-/** REST 契约类型（对齐 docs/03 §2/§5、docs/04 §3，字段 snake_case） */
+/** REST 契约类型（对齐 《02》接口契约 §2/§5、《02》数据模型 §3，字段 snake_case） */
 import type {
   AttachmentStatus,
   KbDocumentStatus,
@@ -32,7 +32,7 @@ export interface ToolCallRecord {
   input: unknown
   output?: unknown
   status?: string
-  /** 事件序（供文本×工具卡混排，docs/04 message.tool_calls） */
+  /** 事件序（供文本×工具卡混排，《02》数据模型 message.tool_calls） */
   position: number
   duration_ms?: number
 }
@@ -43,7 +43,7 @@ export interface Message {
   role: MessageRole
   content: string
   attachments?: AttachmentRef[]
-  /** 工作区文件引用（docs/03 §5.2：相对 root_path，后端读内容注入上下文，带来源标记 + 大小上限） */
+  /** 工作区文件引用（《02》接口契约 §5.2：相对 root_path，后端读内容注入上下文，带来源标记 + 大小上限） */
   file_refs?: FileRef[]
   tool_calls?: ToolCallRecord[]
   token_usage?: TokenUsage
@@ -52,7 +52,7 @@ export interface Message {
   trace_id?: string
   /** 轮次序号（逐轮消息：一轮思考 = 一条消息；同一 turn 内排序用） */
   round?: number
-  /** 推理链（docs/03 §3.3；后端持久化后返回，前端活动区折叠显示） */
+  /** 推理链（《02》接口契约 §3.3；后端持久化后返回，前端活动区折叠显示） */
   thinking?: string
   checkpoint_id?: string
   checkpoint?: CheckpointSummary
@@ -141,7 +141,7 @@ export interface RestoreResult {
   history_revision: number
 }
 
-/** ---------- 对话轨迹（Trajectory，docs/03 §5.2.x）：按会话隔离、只读派生 ---------- */
+/** ---------- 对话轨迹（Trajectory，《02》接口契约 §5.2.x）：按会话隔离、只读派生 ---------- */
 export interface TrajectoryToolCall {
   tool_call_id: string
   tool_name: string
@@ -176,7 +176,7 @@ export interface TrajectoryNode {
 export interface TrajectoryDetail {
   conversation_id: string
   nodes: TrajectoryNode[]
-  /** 还有更早历史（分页加载，docs/03 §5.2.1） */
+  /** 还有更早历史（分页加载，《02》接口契约 §5.2.1） */
   has_more?: boolean
 }
 
@@ -195,7 +195,7 @@ export interface Conversation {
   title: string
   status: string
   max_messages?: number
-  /** 工作区会话（M7-B，docs/03 §5.2）；null/缺省 = 普通对话 */
+  /** 工作区会话（M7-B，《02》接口契约 §5.2）；null/缺省 = 普通对话 */
   workspace_id?: string
   last_message_at?: string
   created_at: string
@@ -209,7 +209,7 @@ export interface ChatMessageInput {
   content: string
   role: 'user'
   attachments?: string[]
-  /** 工作区文件引用（docs/03 §5.2：相对 root_path，后端读内容注入上下文） */
+  /** 工作区文件引用（《02》接口契约 §5.2：相对 root_path，后端读内容注入上下文） */
   file_refs?: FileRef[]
 }
 
@@ -226,7 +226,7 @@ export interface CreateConversationRequest {
   workspace_id?: string
 }
 
-/** ---------- 工作区（M7-B，docs/03 §5.14 / docs/04 §3.11 / 交接板 2026-08-20） ---------- */
+/** ---------- 工作区（M7-B，《02》接口契约 §5.14 / 《02》数据模型 §3.11 / 交接板 2026-08-20） ---------- */
 export interface FileRef {
   /** 相对 root_path 的文件路径（服务端强制 realpath 校验，防越权） */
   path: string
@@ -509,7 +509,7 @@ export interface Notification {
   created_at: string
 }
 
-/** ---------- Provider 配置（前端定义契约 docs/03 §5.6，后端已实现 08-17） ---------- */
+/** ---------- Provider 配置（前端定义契约 《02》接口契约 §5.6，后端已实现 08-17） ---------- */
 export interface ProviderConfig {
   id: string
   /** 配置别名（自由文本，非厂商名） */

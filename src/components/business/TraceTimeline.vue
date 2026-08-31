@@ -6,7 +6,7 @@ import type { TraceDetail, TraceEvent } from '@/types'
 import JsonViewer from '@/components/common/JsonViewer.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
-/** trace 全链路时间线（docs/02 §6.2 / docs/03 §5.8）：LLM/工具/检索/节点分色 */
+/** trace 全链路时间线（《02》前端设计 §6.2 / 《02》接口契约 §5.8）：LLM/工具/检索/节点分色 */
 const props = defineProps<{ traceId: string | null }>()
 
 const store = useSystemStore()

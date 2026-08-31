@@ -7,7 +7,7 @@ import { formatDate, formatDuration, formatTime } from '@/utils/format'
 import JsonViewer from '@/components/common/JsonViewer.vue'
 import MarkdownRenderer from '@/components/common/MarkdownRenderer.vue'
 
-/** 详情面板（docs/02 §6.3）：按 kind 切标签页；JsonViewer / MarkdownRenderer 复用 */
+/** 详情面板（《02》前端设计 §6.3）：按 kind 切标签页；JsonViewer / MarkdownRenderer 复用 */
 const props = defineProps<{ cell: TrajectoryCell | null }>()
 const emit = defineEmits<{ close: [] }>()
 

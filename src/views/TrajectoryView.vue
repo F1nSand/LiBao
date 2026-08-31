@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getConversation } from '@/api/chat'
 import TrajectoryPanel from '@/components/trajectory/TrajectoryPanel.vue'
 
-/** 对话轨迹页（docs/02 §6.3）：独立页 = 返回/标题 + TrajectoryPanel（内嵌/独立共用） */
+/** 对话轨迹页（《02》前端设计 §6.3）：独立页 = 返回/标题 + TrajectoryPanel（内嵌/独立共用） */
 const route = useRoute()
 const router = useRouter()
 

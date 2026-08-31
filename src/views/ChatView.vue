@@ -17,7 +17,7 @@ import ModelPicker from '@/components/business/ModelPicker.vue'
 import RollbackUndoBanner from '@/components/business/RollbackUndoBanner.vue'
 import { composerFingerprint } from '@/utils/checkpointRestore'
 
-/** 对话工作台（docs/02 §4 / §5）：消息流 + 流式渲染 + 工具卡 + 中断确认 + 会话|轨迹切换（单通用 Agent，无切换） */
+/** 对话工作台（《02》前端设计 §4 / §5）：消息流 + 流式渲染 + 工具卡 + 中断确认 + 会话|轨迹切换（单通用 Agent，无切换） */
 const chat = useChatStore()
 const stream = useChatStream({
   onCheckpointAnchor: chat.reconcileCheckpointAnchor,

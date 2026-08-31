@@ -1,6 +1,6 @@
 import type { ApiEnvelope } from '@/types'
 
-/** 业务错误：携带 code / trace_id / retryable（docs/03 §2.3 错误码） */
+/** 业务错误：携带 code / trace_id / retryable（《02》接口契约 §2.3 错误码） */
 export class ApiError extends Error {
   code: number
   traceId?: string

@@ -52,7 +52,7 @@ const streamState: StreamState = {
   streaming: false,
 }
 
-describe('MessageBubble 活动区 + 回复气泡（docs/02 §5.4.3）', () => {
+describe('MessageBubble 活动区 + 回复气泡（《02》前端设计 §5.4.3）', () => {
   it('持久化助手消息：工具调用进活动区、文本进回复气泡、活动区在气泡上方', () => {
     const w = mount(MessageBubble, { props: { message: asstMsg } })
     const activity = w.find('.msg-activity')

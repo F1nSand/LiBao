@@ -3,7 +3,7 @@ import { computed, nextTick, onUpdated, ref, watch } from 'vue'
 import { renderMarkdown, splitStreamingCode } from '@/utils/markdown'
 
 /**
- * MarkdownRenderer（docs/02 §5.4）：
+ * MarkdownRenderer（《02》前端设计 §5.4）：
  * - streaming=true：已完成部分渐进渲染 markdown（随行出现），末行（正在输入的 token）
  *   以纯文本 `.stream-tail` 显示（模板插值转义）——打字机效果 + 实时格式
  *   代码围栏内：stable 含未闭合围栏整段渲染成代码块；末行 tail 经 DOM 注入 `<code>` 元素内，

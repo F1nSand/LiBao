@@ -3,7 +3,7 @@ import { SseParser, SeqGuard } from '@/utils/sse-parser'
 import { markUnavailableForUrl } from './availability'
 
 /**
- * SSE 客户端：fetch + ReadableStream（docs/02 §5.2 / docs/03 §3）。
+ * SSE 客户端：fetch + ReadableStream（《02》前端设计 §5.2 / 《02》接口契约 §3）。
  * POST 流式（支持鉴权头 + body），不用 EventSource（仅 GET）。
  */
 
@@ -183,7 +183,7 @@ export async function streamChatAt(
   }, h)
 }
 
-/** 中断恢复续流：POST /api/v1/tasks/{id}/resume（docs/03 §5.3） */
+/** 中断恢复续流：POST /api/v1/tasks/{id}/resume（《02》接口契约 §5.3） */
 export async function streamTaskResume(
   taskId: string,
   confirm: Record<string, unknown>,

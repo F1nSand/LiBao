@@ -13,7 +13,7 @@ import type { CreateToolRequest, ToolDefinition, ToolSearchHit } from '@/types'
 
 type ToolListStatus = 'idle' | 'loading' | 'success-empty' | 'success' | 'error'
 
-/** 工具 store（docs/02 §7）：列表 + 启用开关 + 测试结果 */
+/** 工具 store（《02》前端设计 §7）：列表 + 启用开关 + 测试结果 */
 export const useToolStore = defineStore('tool', {
   state: () => ({
     tools: [] as ToolDefinition[],

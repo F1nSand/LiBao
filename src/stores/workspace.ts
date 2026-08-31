@@ -4,7 +4,7 @@ import { FEATURE, isUnavailable } from '@/api/availability'
 import { swallowNotImplemented } from '@/utils/http-envelope'
 import type { CreateWorkspaceRequest, UpdateWorkspaceRequest, Workspace } from '@/types'
 
-/** 工作区 store（M7-B，docs/02 §7）：气泡列表 + 创建/编辑/删除；文件树与工作区会话走 api 直调，不进 store */
+/** 工作区 store（M7-B，《02》前端设计 §7）：气泡列表 + 创建/编辑/删除；文件树与工作区会话走 api 直调，不进 store */
 export const useWorkspaceStore = defineStore('workspace', {
   state: () => ({
     workspaces: [] as Workspace[],

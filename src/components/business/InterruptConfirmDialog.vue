@@ -2,7 +2,7 @@
 import type { InterruptInfo } from '@/composables/useChatStream'
 import JsonViewer from '@/components/common/JsonViewer.vue'
 
-/** 中断确认弹窗（docs/02 §5.3）：确认 → resume approved；拒绝 → resume denied */
+/** 中断确认弹窗（《02》前端设计 §5.3）：确认 → resume approved；拒绝 → resume denied */
 const props = defineProps<{ visible: boolean; info: InterruptInfo | null; confirming?: boolean }>()
 const emit = defineEmits<{ confirm: [approved: boolean] }>()
 </script>

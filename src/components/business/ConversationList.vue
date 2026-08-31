@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 
-/** 会话列表（docs/02 §6.2）：并入主侧边栏「对话」下方；深色样式、自包含 store/router */
+/** 会话列表（《02》前端设计 §6.2）：并入主侧边栏「对话」下方；深色样式、自包含 store/router */
 const chat = useChatStore()
 const router = useRouter()
 

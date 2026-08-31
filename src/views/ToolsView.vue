@@ -8,7 +8,7 @@ import ToolSearchBar from '@/components/business/ToolSearchBar.vue'
 import AsyncState from '@/components/common/AsyncState.vue'
 import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
 
-/** 工具管理（docs/02 §4 / docs/03 §5.5）：注册/启用开关/沙盒测试/MCP 源；元工具（tool_search 等发现层）与常规工具区分 */
+/** 工具管理（《02》前端设计 §4 / 《02》接口契约 §5.5）：注册/启用开关/沙盒测试/MCP 源；元工具（tool_search 等发现层）与常规工具区分 */
 const store = useToolStore()
 
 const activeTool = ref<ToolDefinition | null>(null)

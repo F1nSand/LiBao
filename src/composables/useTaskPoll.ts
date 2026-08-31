@@ -1,7 +1,7 @@
 import { onScopeDispose, ref, watch, type Ref } from 'vue'
 
 /**
- * 任务/状态轮询（docs/02 §5.1 FD-6 简单场景）：组件卸载自动 stop。
+ * 任务/状态轮询（《02》前端设计 §5.1 FD-6 简单场景）：组件卸载自动 stop。
  */
 export function useTaskPoll<T>(
   fetcher: () => Promise<T>,

@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { formatDuration, toolCallPreview } from '@/utils/format'
 import JsonViewer from '@/components/common/JsonViewer.vue'
 
-/** 工具调用活动行（docs/02 §5.4.3）：无外框平铺行——默认收起只显示单行摘要预览，
+/** 工具调用活动行（《02》前端设计 §5.4.3）：无外框平铺行——默认收起只显示单行摘要预览，
  * hover 行左侧出现三角，整行点击展开详情（入参/输出/耗时，轻量代码块无卡片边框）。
  * 失败仅保留错误文案——重试由 agent/用户以语言发起，不由前端点击重试决定。 */
 const props = defineProps<{

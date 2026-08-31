@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test'
  * 真实后端 e2e：对接本机后端（127.0.0.1:8000），抓前后端契约回归。
  * - 前端以 `--mode real` 启动（VITE_USE_MOCK=false，vite 代理 /api → 后端）
  * - 后端 webServer 启动 uvicorn；已运行则复用（reuseExistingServer）
- * - 需 `.env`（后端）配好 DeepSeek/SiliconFlow key；chat 用例走真实 LLM，耗时较长
+ * - 需在 `~/.LiBao/settings.json` 配好 DeepSeek/SiliconFlow key；chat 用例走真实 LLM，耗时较长
  */
 export default defineConfig({
   testDir: './e2e-real',
