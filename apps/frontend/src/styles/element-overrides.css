@@ -1,0 +1,50 @@
+/* Element Plus 主题覆盖（FD-4）：仅映射主色/圆角，不启用全局 dark */
+:root {
+  --el-color-primary: var(--app-primary-fill, #4f46e5);
+  --el-color-primary-light-3: #9a9cf5;
+  --el-color-primary-light-5: #c1c2f9;
+  --el-color-primary-light-7: #dcdcfb;
+  --el-color-primary-light-8: #ececfd;
+  --el-color-primary-light-9: #f4f4fe;
+  --el-color-primary-dark-2: var(--app-primary-dark, #4338ca);
+  --el-border-radius-base: 6px;
+
+  /* 动效时长收紧：Element 默认 .3s/.2s 偏慢，管理台更紧凑跟手 */
+  --el-transition-duration: 0.2s;
+  --el-transition-duration-fast: 0.15s;
+}
+
+/* 公共容器：弹窗始终保留 12px 视口边距，长内容只在弹窗 body 内滚动。 */
+.el-dialog {
+  max-width: calc(100vw - 24px);
+  margin-inline: auto;
+}
+.el-dialog__body {
+  max-height: calc(100vh - 180px);
+  overflow: auto;
+}
+.el-table {
+  max-width: 100%;
+}
+
+/* 按钮按压反馈（emil-design-eng：可按压元素要回应按压，scale 0.95-0.98） */
+.el-button:not(.is-disabled) {
+  transition:
+    color 100ms ease,
+    background-color 100ms ease,
+    border-color 100ms ease,
+    box-shadow 100ms ease,
+    transform 160ms var(--ease-out);
+}
+.el-button:not(.is-disabled):active {
+  transform: scale(0.97);
+}
+
+/* 模态入场升级（emil-design-eng）：scale 0.96 + 轻微上移，从中心缩放（modal 用 center 非 trigger）。
+   同名列覆盖 Element 原 dialog-fade-in（仅 translateY(-20px) 无 scale），to 帧 = 元素自然态。 */
+@keyframes dialog-fade-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.96) translateY(-8px);
+  }
+}

@@ -1,0 +1,86 @@
+/* 设计令牌（《02》前端设计 未定义 → 自定义深色侧栏管理台） */
+:root {
+  /* 侧栏（深色） */
+  --app-sidebar-bg: #1e1e2f;
+  --app-sidebar-border: #2a2a3d;
+  --app-sidebar-text: #a3a3c2;
+  --app-sidebar-text-active: #ffffff;
+  --app-sidebar-item-hover: rgba(255, 255, 255, 0.06);
+  --app-sidebar-item-active-bg: rgba(99, 102, 241, 0.22);
+  --app-sidebar-width: 232px;
+  --app-sidebar-collapsed-width: 64px;
+  --app-sidebar-logo-bg: #171728;
+  --app-sidebar-conv-bg: #26263a; /* 会话列表浅色框（侧边栏一深一浅） */
+
+  /* 内容区（浅色） */
+  --app-bg: #f5f6fa;
+  --app-content-bg: #ffffff;
+  --app-border: #e4e7ed;
+  --app-border-light: #eef0f5;
+
+  /* 主色 */
+  --app-primary: #6366f1;
+  --app-primary-fill: #4f46e5;
+  --app-on-primary: #ffffff;
+  --app-link: #4f46e5;
+  --app-focus-ring: #4f46e5;
+  --app-primary-dark: #4338ca;
+  --app-success: #15803d;
+  --app-warning: #b45309;
+  --app-danger: #dc2626;
+  --app-info: #0369a1;
+
+  /* 文本 */
+  --app-text-main: #1f2329;
+  --app-text-secondary: #5f6b7a;
+  --app-text-tertiary: #667085;
+  --app-text-muted: #667085;
+  --app-text-disabled: #98a2b3;
+
+  /* 间距 / 控件 / 层级 */
+  --app-space-1: 4px;
+  --app-space-2: 8px;
+  --app-space-3: 12px;
+  --app-space-4: 16px;
+  --app-space-5: 20px;
+  --app-space-6: 24px;
+  --app-control-sm: 32px;
+  --app-control-md: 36px;
+  --app-control-touch: 44px;
+  --app-z-dropdown: 1000;
+  --app-z-modal: 2000;
+  --app-z-toast: 3000;
+
+  /* 布局 */
+  --app-topbar-height: 56px;
+
+  /* 缓动曲线（emil-design-eng：内置 ease 太弱，用强 ease-out 起手快更跟手） */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+  /* 圆角 / 阴影 */
+  --app-radius-sm: 4px;
+  --app-radius: 6px;
+  --app-radius-lg: 10px;
+  --app-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.04);
+
+  /* 字体 */
+  --app-font-size-xs: 12px;
+  --app-font-size-sm: 13px;
+  --app-font-size: 14px;
+  --app-font-size-lg: 16px;
+  --app-font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', -apple-system, 'Segoe UI', sans-serif;
+  --app-font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  /* 轨迹页标签色（甘特图 + 台账；主色 = 标签名/甘特块，-bg = 标签框浅色） */
+  --tj-user: #38bdf8;        /* USER 湖蓝 */
+  --tj-user-bg: #bae6fd;
+  --tj-context: #a3e635;     /* CONTEXT 黄绿 */
+  --tj-context-bg: #d9f99d;
+  --tj-assistant: #a78bfa;   /* ASSISTANT 紫罗兰 */
+  --tj-assistant-bg: #ddd6fe;
+  --tj-tool: #fb923c;        /* TOOL 爱马仕橙 */
+  --tj-tool-bg: #fed7aa;
+  --tj-muted: #94a3b8;       /* compacted/次要 灰 */
+  --tj-muted-bg: #e2e8f0;
+}

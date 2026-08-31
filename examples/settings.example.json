@@ -1,0 +1,15 @@
+{
+  "app_env": "dev",
+  "debug": true,
+  "log_level": "INFO",
+  "llm_provider": "deepseek",
+  "llm_model": "deepseek-chat",
+  "llm_api_key": "",
+  "llm_base_url": "",
+  "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+  "embedding_base_url": "https://api.siliconflow.cn/v1",
+  "embedding_api_key": "",
+  "upload_dir": "~/.LiBao/uploads",
+  "max_upload_mb": 20,
+  "tz": "Asia/Shanghai"
+}

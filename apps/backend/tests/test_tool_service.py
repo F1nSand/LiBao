@@ -1,0 +1,194 @@
+"""T2 工具服务层测试：tl_ id 派生、默认关闭、重名 40903、启停同步桥、search、软删。
+
+需要 Docker db（localhost:5432）；DB 不可达自动跳过。
+"""
+from __future__ import annotations
+
+import uuid
+
+import pytest
+from pydantic import ValidationError
+
+from app.api.schemas.tools import CreateToolRequest, UpdateToolRequest
+from app.core.errors import AppError
+from app.orchestration.context_builder import acis_for_tools
+from app.services.serializers import serialize_tool_definition
+from app.services.tool import ToolService
+from app.storage.file.store import get_store
+from app.storage.models import User
+from app.tools.builtin import register_builtin_tools
+from app.tools.registry import ToolSpec, get, register, set_enabled, unregister
+from app.tools.sandbox import SandboxCommand, SandboxLevel
+
+
+@pytest.fixture
+async def tool_fixture():
+    register_builtin_tools()
+    uid = uuid.uuid4().hex[:8]
+    async with get_store().session() as session:
+        await session.flush()
+        user = User(
+            username=f"tools_{uid}", password_hash="hashed", name="T", role="admin", org_id=uuid.UUID(int=0)
+        )
+        session.add(user)
+        await session.commit()
+    yield user
+
+
+async def test_create_tool_default_disabled(tool_fixture):
+    user = tool_fixture
+    async with get_store().session() as session:
+        row = await ToolService().create(session, user, CreateToolRequest(name="stock_query", tool_type="perception"))
+        data = serialize_tool_definition(row)
+        assert data["id"] == "tl_stock_query"  # tl_ 前缀派生
+        assert data["enabled"] is False  # 默认关闭
+
+
+async def test_create_duplicate_name_conflict(tool_fixture):
+    user = tool_fixture
+    async with get_store().session() as session:
+        await ToolService().create(session, user, CreateToolRequest(name="stock_query"))
+        with pytest.raises(AppError) as exc:
+            await ToolService().create(session, user, CreateToolRequest(name="stock_query"))
+        assert exc.value.code == 40903
+
+
+async def test_builtin_time_now_serializes_with_registry_id(tool_fixture):
+    user = tool_fixture
+    async with get_store().session() as session:
+        row = await ToolService().create(session, user, CreateToolRequest(name="time_now"))
+        assert serialize_tool_definition(row)["id"] == "tl_time_now"  # 与 registry spec.id 一致
+
+
+async def test_set_enabled_syncs_registry(tool_fixture):
+    user = tool_fixture
+    async with get_store().session() as session:
+        await ToolService().create(session, user, CreateToolRequest(name="time_now"))
+        await ToolService().set_enabled(session, user, "tl_time_now", enabled=True)
+        assert get("tl_time_now").enabled is True
+        assert len(acis_for_tools(["tl_time_now"])) == 1  # 启用 → ACI 出现
+        await ToolService().set_enabled(session, user, "tl_time_now", enabled=False)
+        assert get("tl_time_now").enabled is False
+        assert acis_for_tools(["tl_time_now"]) == []  # 停用 → ACI 消失（默认关闭原则生效）
+    # 恢复现场
+    set_enabled("tl_time_now", True)
+
+
+async def test_search_case_insensitive(tool_fixture):
+    user = tool_fixture
+    async with get_store().session() as session:
+        await ToolService().create(session, user, CreateToolRequest(name="StockQuery", description="股票查询工具"))
+        hits = await ToolService().search(session, uuid.UUID(int=0), "stock")
+        assert any(h["name"] == "StockQuery" for h in hits)
+        hits2 = await ToolService().search(session, uuid.UUID(int=0), "STOCK")
+        assert len(hits2) == len(hits)
+
+
+async def test_soft_delete(tool_fixture):
+    user = tool_fixture
+    async with get_store().session() as session:
+        await ToolService().create(session, user, CreateToolRequest(name="time_now"))
+        await ToolService().soft_delete(session, user, "tl_time_now")
+        with pytest.raises(AppError) as exc:
+            await ToolService().get_in_org(session, uuid.UUID(int=0), "tl_time_now")
+        assert exc.value.code == 40405
+        assert get("tl_time_now").enabled is False  # 删除即停用（同步桥）
+    set_enabled("tl_time_now", True)
+
+
+async def test_serialize_meta_flag(tool_fixture):
+    """M7 前：serialize_tool_definition 带 meta（元工具标记，前端工具页区分）。"""
+    user = tool_fixture
+    async with get_store().session() as session:
+        row = await ToolService().create(session, user, CreateToolRequest(name="time_now"))
+        assert serialize_tool_definition(row)["meta"] is False  # 常规工具
+        row2 = await ToolService().create(session, user, CreateToolRequest(name="kb_search"))
+        assert serialize_tool_definition(row2)["meta"] is True  # 元工具
+
+
+async def test_search_excludes_meta_tools(tool_fixture):
+    """M7 前：/tools/search 排除 meta 工具（tool_search/kb_search 平台发现层不自发现）。"""
+    user = tool_fixture
+    async with get_store().session() as session:
+        await ToolService().create(session, user, CreateToolRequest(name="kb_search"))
+        await ToolService().create(session, user, CreateToolRequest(name="kb_query_regular", description="检索"))
+        hits = await ToolService().search(session, uuid.UUID(int=0), "kb")
+        names = {h["name"] for h in hits}
+        assert "kb_search" not in names  # meta 工具排除
+        assert "kb_query_regular" in names  # 常规工具保留
+
+
+@pytest.mark.parametrize("sandbox", ["none", "docker", "microvm"])
+def test_tool_request_accepts_supported_sandbox_levels(sandbox):
+    assert CreateToolRequest(name="x", sandbox=sandbox).sandbox is SandboxLevel(sandbox)
+    assert UpdateToolRequest(sandbox=sandbox).sandbox is SandboxLevel(sandbox)
+
+
+def test_tool_request_rejects_unknown_sandbox_level():
+    with pytest.raises(ValidationError):
+        CreateToolRequest(name="x", sandbox="host")
+    with pytest.raises(ValidationError):
+        UpdateToolRequest(sandbox="host")
+
+
+@pytest.mark.parametrize("field", ["timeout_ms", "max_concurrency"])
+def test_tool_request_rejects_non_positive_limits(field):
+    with pytest.raises(ValidationError):
+        CreateToolRequest(name="x", **{field: 0})
+    with pytest.raises(ValidationError):
+        UpdateToolRequest(**{field: 0})
+
+
+async def test_sync_converts_persisted_sandbox_string_to_level(tool_fixture):
+    name = f"docker_sync_{uuid.uuid4().hex[:8]}"
+
+    async def build_command(**kwargs):
+        return SandboxCommand(argv=("bash", "-lc", "true"))
+
+    register(
+        ToolSpec(
+            id=f"tl_{name}",
+            name=name,
+            description="docker sync",
+            sandbox=SandboxLevel.DOCKER,
+            sandbox_command_builder=build_command,
+            enabled=False,
+            handler=lambda: None,
+            builtin=True,
+        )
+    )
+    try:
+        async with get_store().session() as session:
+            await ToolService().create(session, tool_fixture, CreateToolRequest(name=name, sandbox="docker"))
+        assert get(f"tl_{name}").sandbox is SandboxLevel.DOCKER
+        await ToolService().sync_registry_from_file()
+        assert get(f"tl_{name}").sandbox is SandboxLevel.DOCKER
+    finally:
+        unregister(f"tl_{name}")
+
+
+async def test_update_converts_sandbox_string_before_registry_sync(tool_fixture):
+    name = f"docker_update_{uuid.uuid4().hex[:8]}"
+
+    async def build_command(**kwargs):
+        return SandboxCommand(argv=("bash", "-lc", "true"))
+
+    register(
+        ToolSpec(
+            id=f"tl_{name}",
+            name=name,
+            description="docker update",
+            sandbox=SandboxLevel.NONE,
+            sandbox_command_builder=build_command,
+            enabled=False,
+            handler=lambda: None,
+            builtin=True,
+        )
+    )
+    try:
+        async with get_store().session() as session:
+            await ToolService().create(session, tool_fixture, CreateToolRequest(name=name))
+            await ToolService().update(session, tool_fixture, f"tl_{name}", UpdateToolRequest(sandbox="docker"))
+        assert get(f"tl_{name}").sandbox is SandboxLevel.DOCKER
+    finally:
+        unregister(f"tl_{name}")
