@@ -1,4 +1,4 @@
-"""工具领域服务（docs 01 §7.1 / docs 03 §5.5）。
+"""工具领域服务（《02》后端设计 §7.1 / 《02》接口契约 §5.5）。
 
 DB tool_definition 是元数据事实源，registry 是可执行实现宿主，按 name 绑定；
 API id = registry spec.id（内置）或 "tl_" + name（无 spec 的 DB 工具）。

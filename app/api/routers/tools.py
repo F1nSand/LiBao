@@ -1,4 +1,4 @@
-"""工具路由（docs 03 §5.5）。CRUD/启停/测试/搜索 + MCP 源注册/列表/注销（M2.5）。"""
+"""工具路由（《02》接口契约 §5.5）。CRUD/启停/测试/搜索 + MCP 源注册/列表/注销（M2.5）。"""
 
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ async def get_tool(
     row = await ToolService().get_in_org(db, user.org_id, tool_id)
     spec = get_by_name(row.name)
     data = serialize_tool_definition(row)
-    data["aci"] = spec.aci() if spec else None  # docs 03：详情含 ACI schema
+    data["aci"] = spec.aci() if spec else None  # 《02》接口契约：详情含 ACI schema
     return ok(data)
 
 

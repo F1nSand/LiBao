@@ -1,4 +1,4 @@
-"""附件数据访问（docs 04 §3.7）。软删行；status 状态机。文件化：.agent/attachments.json。"""
+"""附件数据访问（《02》数据模型 §3.7）。软删行；status 状态机。文件化：.agent/attachments.json。"""
 
 from __future__ import annotations
 

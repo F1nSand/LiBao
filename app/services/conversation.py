@@ -1,4 +1,4 @@
-"""会话领域服务（docs 01 §5 services/conversation.py）。owner 过滤 → 越权 40401。"""
+"""会话领域服务（《02》后端设计 §5 services/conversation.py）。owner 过滤 → 越权 40401。"""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ class ConversationService:
     async def trajectory(
         self, db: Any, conversation: Conversation, before_seq: int | None = None, limit: int = 50
     ) -> dict[str, Any]:
-        """只读轨迹（docs 03 §5.2.1）：由 message + tool_calls 派生，非独立存储。
+        """只读轨迹（《02》接口契约 §5.2.1）：由 message + tool_calls 派生，非独立存储。
 
         seq 为按消息序的前端派生索引（非持久化；新消息插入会移位，可接受）。
         before_seq 加载更早一页；has_more 表示还有更早。

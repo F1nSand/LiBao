@@ -1,4 +1,4 @@
-"""消息数据访问（docs 04 §3.2 message-as-log）。列表按 created_at 升序返回，供会话完整回放。
+"""消息数据访问（《02》数据模型 §3.2 message-as-log）。列表按 created_at 升序返回，供会话完整回放。
 
 文件化：.agent/sessions/<conversation_id>.jsonl（append-only，追加即落盘）。
 """
@@ -23,7 +23,7 @@ class MessageRepository:
     async def list_by_conversation(
         self, conversation_id: uuid.UUID, *, limit: int = 500, offset: int = 0
     ) -> list[Message]:
-        # 同 commit 的 created_at 会并列 → round 作次级排序（docs 03 §3 逐轮消息扩展）
+        # 同 commit 的 created_at 会并列 → round 作次级排序（《02》接口契约 §3 逐轮消息扩展）
         records = await self.store.jsonl_list(self._rel_path(conversation_id))
         rows = [Message.from_dict(r) for r in records if not r.get("deleted_at")]
         rows.sort(key=lambda m: (m.created_at, m.round))

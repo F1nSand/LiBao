@@ -1,4 +1,4 @@
-"""工作区实体（M7-B，docs 04 §3.11）。
+"""工作区实体（M7-B，《02》数据模型 §3.11）。
 
 工作区 = 本地文件夹（root_path）+ 项目级 agent 增量（project_instructions）+ 独立记忆 + 项目 skills/工具。
 root_path 由后端托管（{workspaces_root}/{id}），用户不指定磁盘路径（防越权）。

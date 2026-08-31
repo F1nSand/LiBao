@@ -1,7 +1,7 @@
-"""工具执行器（docs 01 §7.3 tools/executor.py）。
+"""工具执行器（《02》后端设计 §7.3 tools/executor.py）。
 
 执行安全四层之①输入校验（params_schema JSON Schema）+ 通用超时（OC3：asyncio.wait_for）
-+ 失败静默重试（指数退避+抖动，docs 01 §5.4）+ 幂等去重（仅 idempotent 工具，进程内缓存）。
++ 失败静默重试（指数退避+抖动，《02》后端设计 §5.4）+ 幂等去重（仅 idempotent 工具，进程内缓存）。
 沙盒守卫：MICROVM 明确返回不支持；WORKSPACE/DOCKER 通过命令构建器分别走宿主 runner 或一次性容器执行。
 """
 
@@ -221,7 +221,7 @@ async def _execute_with_retries(
                 summary_original_chars=original_chars,
             )
             # M4 完整版：handler 返回 {"placeholder":true, "job_ref":...} 的占位契约 → 透出到 ToolResult
-            # （initiate_* 异步工具：立即返回占位，后台回填真值，docs 01 §5.5）
+            # （initiate_* 异步工具：立即返回占位，后台回填真值，《02》后端设计 §5.5）
             if isinstance(output, dict) and output.get("job_ref"):
                 placeholder_summary = _bounded_text(str(output.get("summary") or result.summary))
                 result = replace(

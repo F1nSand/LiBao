@@ -1,4 +1,4 @@
-"""任务路由（docs 03 §5.3）。提交/列表/详情/取消/resume（双轨）/events（回放+live-tail）。"""
+"""任务路由（《02》接口契约 §5.3）。提交/列表/详情/取消/resume（双轨）/events（回放+live-tail）。"""
 
 from __future__ import annotations
 
@@ -225,7 +225,7 @@ async def resume_task(
     await TaskService().resume_precheck(db, task)
     approved = bool((req.confirm or {}).get("approved"))
 
-    # I8：thread 有效性校验（无效 → 40402，docs 01 §3.4）
+    # I8：thread 有效性校验（无效 → 40402，《02》后端设计 §3.4）
     graph = request.app.state.graph
     thread_id = TaskService.resolve_resume_thread(task)
     try:

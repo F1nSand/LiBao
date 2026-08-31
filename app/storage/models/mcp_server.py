@@ -1,4 +1,4 @@
-"""MCP 源连接配置实体（docs 01 §7.2 / docs 04 §3.5 补充）。
+"""MCP 源连接配置实体（《02》后端设计 §7.2 / 《02》数据模型 §3.5 补充）。
 
 tool_definition.mcp_source 存 "mcp:{server_id}" 关联；连接配置（命令/URL/headers）
 是启动重建 spec 的唯一依据。

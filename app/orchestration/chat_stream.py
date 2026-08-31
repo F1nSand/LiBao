@@ -1,6 +1,6 @@
-"""Graph→SSE 桥（docs 03 §3.3，M1 核心 + M2 interrupt/resume）。
+"""Graph→SSE 桥（《02》接口契约 §3.3，M1 核心 + M2 interrupt/resume）。
 
-职责（docs 01 §5.2）：graph.astream → SSE 事件信封（共享循环在 stream_core.py）；
+职责（《02》后端设计 §5.2）：graph.astream → SSE 事件信封（共享循环在 stream_core.py）；
 消息持久化在此（节点保持无 DB）：开头落用户消息，流结束落 assistant 最终消息 + run_logs + last_message_at。
 M2：require_confirm 工具 → interrupt 事件（自动建 Task 承接）→ POST /tasks/{id}/resume → resume_stream_events 续流。
 """
@@ -177,7 +177,7 @@ async def chat_stream_events(
 ) -> AsyncIterator[str]:
     emit = sse_emitter()
     msg_repo = MessageRepository(db)
-    # 逐轮消息收集（docs 03 §3 多消息扩展）：stream_core 每轮工具结果齐后 append + 即时落库
+    # 逐轮消息收集（《02》接口契约 §3 多消息扩展）：stream_core 每轮工具结果齐后 append + 即时落库
     round_sink: list[dict[str, Any]] = []
 
     async def _task_cancelled() -> bool:
@@ -288,7 +288,7 @@ async def chat_stream_events(
     )
 
     async def _persist_round(round_msg: dict[str, Any]) -> None:
-        """即时落库（docs 03 §3）：每轮工具结果齐后同步写该轮 Message（任务中 DB 已有已完成轮次）。"""
+        """即时落库（《02》接口契约 §3）：每轮工具结果齐后同步写该轮 Message（任务中 DB 已有已完成轮次）。"""
         row = await msg_repo.create(
             conversation_id=conversation.id,
             role="assistant",
@@ -610,7 +610,7 @@ async def resume_stream_events(
     model_override: Any = None,
     recovery: bool = False,
 ) -> AsyncIterator[str]:
-    """中断恢复（docs 03 §5.3 resume）：读 pending_confirm → 恢复 thread → SSE 续流。
+    """中断恢复（《02》接口契约 §5.3 resume）：读 pending_confirm → 恢复 thread → SSE 续流。
 
     前置状态迁移：approved → running；denied → cancelled（流仍输出 LLM 致歉文本）。
     前端硬约束：续流不得发 message_start（会重置 segments 清掉工具卡）。
@@ -710,7 +710,7 @@ async def resume_stream_events(
         round_offset = max((int(m.round or 0) for m in existing if parent_id and m.parent_id == parent_id), default=0)
 
     async def _persist_round(round_msg: dict[str, Any]) -> None:
-        """即时落库（docs 03 §3）：resume 续流每轮同步写该轮 Message（会话流才落库）。"""
+        """即时落库（《02》接口契约 §3）：resume 续流每轮同步写该轮 Message（会话流才落库）。"""
         if not conversation_id:
             return
         row = await MessageRepository(db).create(
@@ -970,7 +970,7 @@ async def agent_invoke_events(
     trace_id: str,
     model_override: Any = None,
 ) -> AsyncIterator[str]:
-    """Agent 试跑（docs 03 §5.4 invoke）：轻量路径——不建会话、不落消息，thread_id=uuid4()。
+    """Agent 试跑（《02》接口契约 §5.4 invoke）：轻量路径——不建会话、不落消息，thread_id=uuid4()。
 
     中断同样建 Task 承接（conversation_id=None），resume 走任务端点续流。
     """

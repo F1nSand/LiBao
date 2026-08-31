@@ -1,4 +1,4 @@
-"""通知路由（docs 03 §5.11）。分页列表 / 已读 / SSE 实时流（按 user_id）。"""
+"""通知路由（《02》接口契约 §5.11）。分页列表 / 已读 / SSE 实时流（按 user_id）。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""工作区领域服务（M7-B，docs 03 §5.14）。root_path 后端托管；本地文件夹随 create 创建。"""
+"""工作区领域服务（M7-B，《02》接口契约 §5.14）。root_path 后端托管；本地文件夹随 create 创建。"""
 
 from __future__ import annotations
 
@@ -161,7 +161,7 @@ def _open_folder(path: str) -> None:
 def _purge_workspace_files(root: Path, attach_paths: list[str]) -> None:
     """硬删后的磁盘清理（best-effort，DB 已 commit 后调用）。rmtree 容 Windows 文件锁；附件逐个 unlink。
     防御（review I1）：root 必须解析到 workspaces_root 内才 rmtree——空/相对/越界 root_path（
-    默认 workspaces_root="data/workspaces" 为相对值）若不校验可能误删进程 CWD。"""
+    默认 workspaces_root="~/.LiBao/workspaces" 为用户目录）若不校验可能误删进程 CWD。"""
     ws_root = Path(get_settings().workspaces_root).resolve()
     root_resolved = root.resolve()
     if root_resolved.is_relative_to(ws_root):
@@ -324,7 +324,7 @@ class WorkspaceService:
         # DB 是事实源：先 commit，rmtree 失败只是磁盘残留孤儿目录（可手动清理），与附件 soft_delete 模式一致
         await asyncio.to_thread(_purge_workspace_files, root, attach_paths)
 
-    # ---- 文件（资源管理器，docs 03 §5.14）----
+    # ---- 文件（资源管理器，《02》接口契约 §5.14）----
 
     async def list_files(self, db: Any, user: User, workspace_id: str, path: str) -> list[dict[str, Any]]:
         ws = await self.get_in_org(db, user.org_id, workspace_id)
@@ -383,7 +383,7 @@ class WorkspaceService:
         return {"name": target.name, "path": path, "is_dir": False, "size": target.stat().st_size}
 
     async def rename_file(self, db: Any, user: User, workspace_id: str, old_path: str, new_path: str) -> None:
-        """重命名文件/文件夹（目录重命名 = 整棵子树搬移，子项自动跟随；docs 03 §5.14）。"""
+        """重命名文件/文件夹（目录重命名 = 整棵子树搬移，子项自动跟随；《02》接口契约 §5.14）。"""
         ws = await self.get_in_org(db, user.org_id, workspace_id)
         root = Path(ws.root_path)
         old_target = resolve_workspace_path(root, old_path)
@@ -434,7 +434,7 @@ class WorkspaceService:
             target.unlink()
 
     async def reveal(self, db: Any, user: User, workspace_id: str) -> None:
-        """OS 打开 root_path 所在文件夹（M7-B 增强，docs 03 §5.14）。存在校验 + org 隔离，仅 developer+。"""
+        """OS 打开 root_path 所在文件夹（M7-B 增强，《02》接口契约 §5.14）。存在校验 + org 隔离，仅 developer+。"""
         ws = await self.get_in_org(db, user.org_id, workspace_id)
         root = Path(ws.root_path)
         if not root.is_dir():

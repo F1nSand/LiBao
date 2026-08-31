@@ -1,4 +1,4 @@
-"""系统观测领域服务（docs 03 §5.8 / docs 07 M5）。成本聚合逻辑收敛于此（M5 观测模块化）。"""
+"""系统观测领域服务（《02》接口契约 §5.8 / 《04》路线图 M5）。成本聚合逻辑收敛于此（M5 观测模块化）。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class SystemService:
         end: datetime | None = None,
         provider: str | None = None,
     ) -> dict[str, Any]:
-        """成本/调用量统计：按 (日, model) SQL 聚合后 Python 归并 provider/series（docs 03 §5.8 CostStat）。"""
+        """成本/调用量统计：按 (日, model) SQL 聚合后 Python 归并 provider/series（《02》接口契约 §5.8 CostStat）。"""
         rows = await RunLogRepository(db).aggregate_llm(start=start, end=end)
         total_cost = 0.0
         calls = 0

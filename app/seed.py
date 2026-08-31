@@ -18,7 +18,7 @@ from app.storage.models.tool_definition import ToolDefinition
 
 logger = logging.getLogger(__name__)
 
-# 单通用 Agent（docs 01 §3.5）：所有会话/任务固定用这一个；subagent 由主 agent 自主派发。
+# 单通用 Agent（《02》后端设计 §3.5）：所有会话/任务固定用这一个；subagent 由主 agent 自主派发。
 # LLM 侧函数名为 time_now/demo_notify/dispatch_subagent（registry id 是 tl_ 前缀）。
 AGENT_NAME = "通用助手"
 # 旧版 seed prompt 尾部标记（ensure_seed_tools 升级判定：含此标记且缺记忆工具提示 = 旧 seed 版，非用户自定义）

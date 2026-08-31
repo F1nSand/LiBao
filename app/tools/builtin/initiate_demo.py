@@ -1,4 +1,4 @@
-"""tl_initiate_demo 内置工具（docs 01 §5.5 工具级异步最小闭环）。
+"""tl_initiate_demo 内置工具（《02》后端设计 §5.5 工具级异步最小闭环）。
 
 演示 initiate_* 占位/回填：立即返回占位（placeholder:true + job_ref），
 后台延迟 N 秒后 emit `job_done` 事件 → 轮边界（route 节点）排空 → 匹配占位任务

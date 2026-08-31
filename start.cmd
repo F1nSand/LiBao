@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 rem ============================================================
 rem  Agent Platform one-click start (local single-machine)
-rem  backend(:8000) only; frontend built into frontend_dist/ (static hosted)
+rem  backend API (:8000) only; frontend development is started by DevPanel
 rem  Stop: close the "Agent Backend" window
 rem ============================================================
 cd /d "%~dp0"
@@ -56,7 +56,8 @@ echo   backend ready
 echo.
 echo ================================================
 echo  All up:
-echo    App   http://127.0.0.1:8000
+echo    API   http://127.0.0.1:8000/docs
+echo    UI    start DevPanel for the Vite frontend
 echo    Stop: close the "Agent Backend" window
 echo ================================================
 pause

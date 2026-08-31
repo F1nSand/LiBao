@@ -1,4 +1,4 @@
-"""KB 文档处理链（docs 01 §9.1）。uploaded→chunking→indexing→indexed/failed。
+"""KB 文档处理链（《02》后端设计 §9.1）。uploaded→chunking→indexing→indexed/failed。
 
 本地单机化：process_document(document_id) 直连 FileStore（无 sessionmaker 参数）；
 每个状态迁移前 re-read 行（防并发覆盖，F4 模式）；embedding 失败 → failed + error。

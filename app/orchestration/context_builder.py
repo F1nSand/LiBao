@@ -1,4 +1,4 @@
-"""上下文构建器（docs 01 §4.1 context_builder）。
+"""上下文构建器（《02》后端设计 §4.1 context_builder）。
 
 三段式：① system_prompt 静态置顶 ② 工具 ACI 静态（bind_tools，函数定义不进消息正文）③ 动态内容追加尾部。
 前缀稳定性铁律：系统提示词与 ACI 一旦确定不改；动态内容（状态栏等）永远追加末尾。
@@ -30,7 +30,7 @@ def acis_for_tools(tool_ids: list[str], shell_mode: str | None = None) -> list[d
 def build_agent_tools(
     tool_ids: list[str], selected_names: list[str] | None = None, shell_mode: str | None = None
 ) -> list[dict]:
-    """工具 ACI 注入（M2.5 两段式门控，docs 01 §7.1.1 A2）。
+    """工具 ACI 注入（M2.5 两段式门控，《02》后端设计 §7.1.1 A2）。
 
     启用工具数 ≤ aci_full_limit → 维持现状全量 ACI（现有场景零行为变化）；
     超过 → tool_search 常驻 + 上次搜索选中的工具 ACI（渐进式披露），选中按授权过滤。
@@ -133,7 +133,7 @@ def build_context(
     if overlay:
         history.append(SystemMessage(content=overlay))
 
-    # M3 记忆注入（docs 01 §8.2）：历史之后、状态栏之前（动态内容永远追加尾部）
+    # M3 记忆注入（《02》后端设计 §8.2）：历史之后、状态栏之前（动态内容永远追加尾部）
     refs = state.get("memory_refs") or []
     if refs:
         lines = [f"- [{r['title']}] {r['content_text']}" for r in refs]
@@ -144,7 +144,7 @@ def build_context(
     if project_index:
         history.append(SystemMessage(content=project_index))
 
-    # 状态栏（代码维护，append-only 尾部，docs 01 §4.3）
+    # 状态栏（代码维护，append-only 尾部，《02》后端设计 §4.3）
     status_bar = state.get("flags", {}).get("status_bar")
     if status_bar:
         history.append(SystemMessage(content=status_bar))

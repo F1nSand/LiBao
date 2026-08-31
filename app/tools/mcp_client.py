@@ -1,4 +1,4 @@
-"""MCP 客户端连接层（docs 01 §7.2 / docs 03 §5.5）。
+"""MCP 客户端连接层（《02》后端设计 §7.2 / 《02》接口契约 §5.5）。
 
 mcp SDK 2.0：stdio 走 stdio_client(StdioServerParameters)，HTTP 走 streamable_http_client
 （headers 经 httpx2.AsyncClient 注入）；Tool.input_schema / CallToolResult.is_error 为 snake_case。

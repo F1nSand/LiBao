@@ -1,4 +1,4 @@
-"""ORM → API 契约 dict（docs 03 §5 / FrontEnd types，字段 snake_case）。"""
+"""ORM → API 契约 dict（《02》接口契约 §5 / FrontEnd types，字段 snake_case）。"""
 
 from __future__ import annotations
 
@@ -62,13 +62,13 @@ def serialize_message(msg: Message) -> dict[str, Any]:
         "conversation_id": str(msg.conversation_id),
         "role": msg.role,
         "content": msg.content,
-        "thinking": getattr(msg, "thinking", None),  # 该轮推理（docs 03 §3 逐轮消息扩展）
+        "thinking": getattr(msg, "thinking", None),  # 该轮推理（《02》接口契约 §3 逐轮消息扩展）
         "attachments": msg.attachments or [],
         "file_refs": getattr(msg, "file_refs", None) or [],
         "tool_calls": msg.tool_calls or [],
         "token_usage": msg.token_usage,
         "cost": msg.token_usage.get("cost", 0.0) if isinstance(msg.token_usage, dict) else 0.0,
-        "round": getattr(msg, "round", 1),  # 轮次（docs 03 §3 逐轮消息扩展）
+        "round": getattr(msg, "round", 1),  # 轮次（《02》接口契约 §3 逐轮消息扩展）
         "trace_id": msg.trace_id,
         "checkpoint_id": str(msg.checkpoint_id) if getattr(msg, "checkpoint_id", None) else None,
         "history_parent_id": str(msg.history_parent_id) if getattr(msg, "history_parent_id", None) else None,
@@ -77,7 +77,7 @@ def serialize_message(msg: Message) -> dict[str, Any]:
 
 
 def serialize_trajectory_node(m: Message, seq: int) -> dict[str, Any]:
-    """消息 → TrajectoryNode（docs 03 §5.2.1 / FrontEnd TrajectoryNode）。"""
+    """消息 → TrajectoryNode（《02》接口契约 §5.2.1 / FrontEnd TrajectoryNode）。"""
     tool_calls = [
         {
             "tool_call_id": tc.get("tool_call_id"),
@@ -95,7 +95,7 @@ def serialize_trajectory_node(m: Message, seq: int) -> dict[str, Any]:
         "kind": m.role,  # user/assistant（context/steering/compaction 为 mock 扩展，真实无）
         "time": int(m.created_at.timestamp() * 1000) if m.created_at else 0,
         "content": m.content,
-        "thinking": getattr(m, "thinking", None),  # 该轮推理（docs 03 §3 逐轮消息扩展）
+        "thinking": getattr(m, "thinking", None),  # 该轮推理（《02》接口契约 §3 逐轮消息扩展）
         "diff": None,  # 无 context/system 更新差异
         "token_usage": m.token_usage,
         "trace_id": m.trace_id,
@@ -104,7 +104,7 @@ def serialize_trajectory_node(m: Message, seq: int) -> dict[str, Any]:
 
 
 def serialize_tool_definition(t: ToolDefinition) -> dict[str, Any]:
-    """工具序列化（docs 03 §5.5）。API id = registry spec.id（内置），无 spec 的 DB 工具 = "tl_" + name。"""
+    """工具序列化（《02》接口契约 §5.5）。API id = registry spec.id（内置），无 spec 的 DB 工具 = "tl_" + name。"""
     spec = get_by_name(t.name)
     return {
         "id": spec.id if spec else f"tl_{t.name}",
@@ -119,13 +119,13 @@ def serialize_tool_definition(t: ToolDefinition) -> dict[str, Any]:
         "max_concurrency": t.max_concurrency,
         "mcp_source": t.mcp_source,
         "idempotent": t.idempotent,
-        "meta": spec.meta if spec else False,  # 元工具标记（前端工具页区分元工具/常规工具，docs 03 §5.5）
+        "meta": spec.meta if spec else False,  # 元工具标记（前端工具页区分元工具/常规工具，《02》接口契约 §5.5）
         "created_at": _dt(t.created_at),
     }
 
 
 def serialize_workspace(w: Workspace) -> dict[str, Any]:
-    """工作区序列化（M7-B，docs 03 §5.14 / FrontEnd Workspace）。"""
+    """工作区序列化（M7-B，《02》接口契约 §5.14 / FrontEnd Workspace）。"""
     return {
         "id": str(w.id),
         "org_id": str(w.org_id),
@@ -140,7 +140,7 @@ def serialize_workspace(w: Workspace) -> dict[str, Any]:
 
 
 def serialize_mcp_server(s: McpServer, tool_count: int = 0) -> dict[str, Any]:
-    """MCP 源序列化（docs 03 §5.5 补充）。url_or_command 原样回显（command 或 url）。"""
+    """MCP 源序列化（《02》接口契约 §5.5 补充）。url_or_command 原样回显（command 或 url）。"""
     return {
         "id": str(s.id),
         "name": s.name,
@@ -154,7 +154,7 @@ def serialize_mcp_server(s: McpServer, tool_count: int = 0) -> dict[str, Any]:
 
 
 def serialize_attachment(a: Attachment) -> dict[str, Any]:
-    """附件（docs 03 §5.9 / FrontEnd Attachment + UploadResponse）。
+    """附件（《02》接口契约 §5.9 / FrontEnd Attachment + UploadResponse）。
 
     S1：attachment_id 与 id 并存（前端 POST /uploads 消费 attachment_id，旧消费方读 id）。
     """
@@ -170,7 +170,7 @@ def serialize_attachment(a: Attachment) -> dict[str, Any]:
 
 
 def serialize_kb_collection(c: KbCollection, document_count: int = 0) -> dict[str, Any]:
-    """知识库集合（docs 03 §5.6 / FrontEnd KbCollection）。"""
+    """知识库集合（《02》接口契约 §5.6 / FrontEnd KbCollection）。"""
     return {
         "id": str(c.id),
         "name": c.name,
@@ -188,7 +188,7 @@ def kb_document_progress(status: str) -> int:
 
 
 def serialize_kb_document(d: KbDocument) -> dict[str, Any]:
-    """知识库文档（docs 03 §5.6 / FrontEnd KbDocument）。"""
+    """知识库文档（《02》接口契约 §5.6 / FrontEnd KbDocument）。"""
     return {
         "id": str(d.id),
         "collection_id": str(d.collection_id),
@@ -204,7 +204,7 @@ def serialize_kb_document(d: KbDocument) -> dict[str, Any]:
 
 
 def serialize_longterm(card: LongTermMemory) -> dict[str, Any]:
-    """长期记忆卡片（docs 03 §5.7 / FrontEnd LongTermMemory，body 对齐 content）。"""
+    """长期记忆卡片（《02》接口契约 §5.7 / FrontEnd LongTermMemory，body 对齐 content）。"""
     return {
         "id": str(card.id),
         "card_type": card.card_type,
@@ -219,7 +219,7 @@ def serialize_longterm(card: LongTermMemory) -> dict[str, Any]:
 
 
 def serialize_longterm_version(v: LongTermMemoryVersion, title: str | None = None) -> dict[str, Any]:
-    """版本序列化（docs 03 §5.7 / FrontEnd LongTermMemoryVersion）。"""
+    """版本序列化（《02》接口契约 §5.7 / FrontEnd LongTermMemoryVersion）。"""
     return {
         "id": str(v.id),
         "memory_id": str(v.memory_id),
@@ -231,7 +231,7 @@ def serialize_longterm_version(v: LongTermMemoryVersion, title: str | None = Non
 
 
 def serialize_notification(n: Notification) -> dict[str, Any]:
-    """通知（docs 03 §5.11 / FrontEnd Notification）。"""
+    """通知（《02》接口契约 §5.11 / FrontEnd Notification）。"""
     return {
         "id": str(n.id),
         "title": n.title,
@@ -243,7 +243,7 @@ def serialize_notification(n: Notification) -> dict[str, Any]:
 
 
 def serialize_trace_event(log: RunLog) -> dict[str, Any]:
-    """RunLog → TraceEvent（docs 03 §5.8 / FrontEnd TraceEvent）。"""
+    """RunLog → TraceEvent（《02》接口契约 §5.8 / FrontEnd TraceEvent）。"""
     return {
         "node_type": log.type,  # llm/tool/retrieval/memory/node
         "name": log.node,
@@ -257,7 +257,7 @@ def serialize_trace_event(log: RunLog) -> dict[str, Any]:
 
 
 def serialize_run_log(log: RunLog) -> dict[str, Any]:
-    """系统日志（docs 03 §5.8 / FrontEnd SystemLog）。level 由 status 映射（run_log 无 level 列）。"""
+    """系统日志（《02》接口契约 §5.8 / FrontEnd SystemLog）。level 由 status 映射（run_log 无 level 列）。"""
     level = {"ok": "INFO", "error": "ERROR", "retried": "WARNING"}.get(log.status, "INFO")
     out = log.output or {}
     message = str(out.get("content") or out.get("summary") or "")[:500] or None
@@ -276,7 +276,7 @@ def serialize_run_log(log: RunLog) -> dict[str, Any]:
 
 
 def serialize_task(t: Task) -> dict[str, Any]:
-    """任务序列化（docs 03 §5.3）。error 保留可恢复分类，兼容旧字符串消费者。"""
+    """任务序列化（《02》接口契约 §5.3）。error 保留可恢复分类，兼容旧字符串消费者。"""
     error = t.error
     if isinstance(error, str):
         error = {"code": "task_error", "message": error, "retryable": False, "recoverable": False}

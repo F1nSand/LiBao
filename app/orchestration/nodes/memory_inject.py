@@ -1,4 +1,4 @@
-"""memory_inject 节点（docs 01 §8.2 / docs 03 §3.1 记忆注入）。
+"""memory_inject 节点（《02》后端设计 §8.2 / 《02》接口契约 §3.1 记忆注入）。
 
 每轮从长期记忆取 top-N 卡片写入 state.memory_refs，build_context 渲染为尾部块。
 P2 起为 RAG 检索：query = 最近 user 消息，语义检索（memory_vectors.lance）；

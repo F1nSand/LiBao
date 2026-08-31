@@ -174,7 +174,7 @@ async def test_resume_approved_done(interrupt_fixture):
         assert events[0]["payload"]["phase"] == "tool"
         assert types[-1] == "done"
         done = events[-1]
-        assert done["payload"]["message"]["tool_calls"] == []  # 最终轮无工具（逐轮消息，docs 03 §3）
+        assert done["payload"]["message"]["tool_calls"] == []  # 最终轮无工具（逐轮消息，《02》接口契约 §3）
         # 中断轮（confirm 工具）在 message 事件（resume 用工具结果重建轮，content 空）
         seal = next(e for e in events if e["type"] == "message")
         assert seal["payload"]["message"]["round"] == 1

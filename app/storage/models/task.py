@@ -1,4 +1,4 @@
-"""任务实体（docs 04 §3.3）。后台任务和普通聊天运行都以 Task 作为取消/恢复载体。"""
+"""任务实体（《02》数据模型 §3.3）。后台任务和普通聊天运行都以 Task 作为取消/恢复载体。"""
 
 import uuid
 from dataclasses import dataclass, field

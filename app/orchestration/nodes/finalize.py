@@ -1,4 +1,4 @@
-"""finalize 节点（docs 01 §3.1/§5.4）。轻量 verifier + 组装最终消息 dict（对齐 message 持久化 / done 事件）。
+"""finalize 节点（《02》后端设计 §3.1/§5.4）。轻量 verifier + 组装最终消息 dict（对齐 message 持久化 / done 事件）。
 
 final_message shape：{role, content, tool_calls[], token_usage, trace_id?}；tool_calls 来自 tool_results（独立核对）。
 """

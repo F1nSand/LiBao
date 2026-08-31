@@ -1,4 +1,4 @@
-"""工具定义数据访问（docs 04 §3.5）。文件是工具元数据事实源；软删过滤。
+"""工具定义数据访问（《02》数据模型 §3.5）。文件是工具元数据事实源；软删过滤。
 文件化：.agent/tool_definitions.json。"""
 
 from __future__ import annotations

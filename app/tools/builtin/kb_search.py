@@ -1,4 +1,4 @@
-"""kb_search 内置工具（docs 01 §9.2 Agentic RAG 预留：检索封装为工具，LLM 自主决定搜什么）。
+"""kb_search 内置工具（《02》后端设计 §9.2 Agentic RAG 预留：检索封装为工具，LLM 自主决定搜什么）。
 
 五层约束下工具层→存储层合法：经 FileStore + KbRepository.hybrid_search（RRF 单一来源）。
 本地单机化：org 上下文缺失 → 恒用默认 org（折叠）。

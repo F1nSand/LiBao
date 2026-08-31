@@ -1,4 +1,4 @@
-"""工具定义实体（docs 04 §3.5）。
+"""工具定义实体（《02》数据模型 §3.5）。
 
 内置工具与 MCP 注册的工具同走 tool_definition 生命周期；enabled 默认关闭（约束优先）。
 sandbox: none / docker / microvm；tool_type: perception / execution / collaboration / user_comms / event。

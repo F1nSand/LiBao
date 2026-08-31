@@ -1,4 +1,4 @@
-"""应用工厂（docs 01 §5.1）。create_app + lifespan + trace_id 中间件 + 统一异常 → 信封。
+"""应用工厂。create_app + lifespan + trace_id 中间件 + 统一异常 → 信封。
 
 Windows 关键：psycopg async 需 SelectorEventLoop，而 Windows 默认 ProactorEventLoop 不兼容；
 在模块顶层设置策略，使 uvicorn 创建事件循环时即用 Selector（langgraph AsyncPostgresSaver 依赖）。
@@ -136,7 +136,7 @@ def create_app() -> FastAPI:
     ):
         app.include_router(router, prefix=settings.base_url)
 
-    # 本地单机化：前端构建产物静态托管（单端口 8000；SPA 深链 fallback → index.html）
+    # 可选静态托管：生产打包阶段可将 frontend_dist 放回源码目录；纯源码运行仅提供 API。
     from pathlib import Path
 
     from fastapi.staticfiles import StaticFiles

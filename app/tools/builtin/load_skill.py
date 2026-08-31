@@ -1,4 +1,4 @@
-"""load_skill 内置 meta 工具（M7-A/M7-B）：按 name 取回 skill 正文（渐进式披露，docs 01 §4.2.1）。
+"""load_skill 内置 meta 工具（M7-A/M7-B）：按 name 取回 skill 正文（渐进式披露，《02》后端设计 §4.2.1）。
 
 两级查找（2026-08-25 简化，删 org）：① 工作区 `.agent/skills/<name>/SKILL.md`（兼容旧 `skills/`）；
 ② 全局 `~/.LiBao/skills/<name>/SKILL.md`。上下文缺失 → 降级错误结果（不抛）。

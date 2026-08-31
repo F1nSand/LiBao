@@ -1,4 +1,4 @@
-"""Skill 路由（M7-A 简化，docs 03 §5.14）。只读目录展示：全局 ~/.LiBao/skills + 工作区 .agent/skills。
+"""Skill 路由（M7-A 简化，《02》接口契约 §5.14）。只读目录展示：全局 ~/.LiBao/skills + 工作区 .agent/skills。
 
 2026-08-25：删 org CRUD 与 git 导入；skills 全部走文件系统，此处仅列目录供前端展示。
 """

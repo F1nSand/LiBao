@@ -1,4 +1,4 @@
-"""知识库实体（docs 04 §3.6）。集合/文档/分块三级；向量存 LanceDB（本地单机化）。
+"""知识库实体（《02》数据模型 §3.6）。集合/文档/分块三级；向量存 LanceDB（本地单机化）。
 
 EMBED_DIM 是维度单一来源：LanceDB schema + EmbeddingService 运行期校验共用。
 分块为派生数据：文本+序号进集合 index.json，向量进 kb/vectors.lance；无软删列（reindex 硬删重建）。

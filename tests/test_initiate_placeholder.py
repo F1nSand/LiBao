@@ -1,4 +1,4 @@
-"""M4 完整版：initiate_* 占位/回填最小闭环测试（docs 01 §5.5 + §5.3.1/5.3.2）。
+"""M4 完整版：initiate_* 占位/回填最小闭环测试（《02》后端设计 §5.5 + §5.3.1/5.3.2）。
 
 覆盖：handler 占位契约 → executor 透出 placeholder/job_ref → route 安全点排空 →
 job_done 命中占位任务发回填 tool_result；regular 事件渲染成系统备注。

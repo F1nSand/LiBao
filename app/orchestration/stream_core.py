@@ -1,4 +1,4 @@
-"""Graph→SSE 事件映射共享循环（docs 01 §5.2 / docs 03 §3.3）。
+"""Graph→SSE 事件映射共享循环（《02》后端设计 §5.2 / 《02》接口契约 §3.3）。
 
 单次运行（chat_stream_events）与恢复续流（resume_stream_events）共用同一循环：
 producer/queue/keepalive + messages/updates/values 三模式映射。
@@ -121,7 +121,7 @@ def _chunk_text(chunk: Any) -> str:
 
 
 def _build_round_message(round_data: dict[str, Any], tool_results: list[dict[str, Any]]) -> dict[str, Any]:
-    """逐轮消息（docs 03 §3）：content 剥 thinking + thinking(reasoning_content) + 该轮 tool_calls + round。"""
+    """逐轮消息（《02》接口契约 §3）：content 剥 thinking + thinking(reasoning_content) + 该轮 tool_calls + round。"""
     by_id = {r.get("tool_call_id"): r for r in tool_results}
     tool_calls = []
     for tc in round_data["tool_calls"]:
@@ -291,7 +291,7 @@ async def stream_graph_events(
     - on_interrupt(value)：中断时回调（返回 SSE 帧或 None），随后流结束；
     - on_final(final_state)：正常结束回调（返回 done payload dict 或 None）；
     - on_error(exc)：图级异常回调（后台运行器用它把任务置 failed）。
-    - round_sink：逐轮消息收集（docs 03 §3 多消息扩展）——每轮工具结果齐后 emit `message` 事件，
+    - round_sink：逐轮消息收集（《02》接口契约 §3 多消息扩展）——每轮工具结果齐后 emit `message` 事件，
       并把该轮消息（含 id/content/tool_calls/round）append 进 sink；on_final 据此补最终轮（id 一致）。
     - on_round_message：每轮工具结果齐后同步落库回调（即时落库：任务中 DB 已有已完成轮次，
       前端轨迹轮询/切会话即见）；on_final 不再重复落已落库轮次。
@@ -400,7 +400,7 @@ async def stream_graph_events(
             unregister_running_task(run_id, producer_task)
     keepalive_task = asyncio.create_task(keepalive())
     final_state: dict[str, Any] | None = None
-    # 逐轮消息（docs 03 §3）：round_seq 计数；pending_round = 本轮 agent_execute 的 AIMessage（有 tool_calls）
+    # 逐轮消息（《02》接口契约 §3）：round_seq 计数；pending_round = 本轮 agent_execute 的 AIMessage（有 tool_calls）
     round_seq = 0
     pending_round: dict[str, Any] | None = None
     attempt_metrics: dict[str, Any] = {
@@ -497,7 +497,7 @@ async def stream_graph_events(
                     attempt_metrics["text_chars"] += len(text)
                     if text:
                         yield emit("token", {"text": text})
-                    # 推理增量（DeepSeek reasoning_content；docs 03 §3 thinking 事件，前端累积到一轮一条）
+                    # 推理增量（DeepSeek reasoning_content；《02》接口契约 §3 thinking 事件，前端累积到一轮一条）
                     rc = (getattr(chunk, "additional_kwargs", {}) or {}).get("reasoning_content")
                     if rc:
                         attempt_metrics["reasoning_chars"] += len(rc)
@@ -551,7 +551,8 @@ async def stream_graph_events(
                             if task_event_sink is not None:
                                 await task_event_sink("tool_result", payload)
                             yield emit("tool_result", payload)
-                        # 逐轮消息封口（docs 03 §3）：本轮工具结果齐后发 `message` 事件（前端追加独立消息 + sealRound）
+                        # 逐轮消息封口（《02》接口契约 §3）：本轮工具结果齐后发 `message` 事件。
+                        # 前端追加独立消息并执行 sealRound。
                         if pending_round is not None:
                             round_seq += 1
                             yield await _emit_round(

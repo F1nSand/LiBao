@@ -1,4 +1,4 @@
-"""系统路由（docs 03 §5.8）。health + 运行日志分页/单 trace 时间线（2f）。"""
+"""系统路由（《02》接口契约 §5.8）。health + 运行日志分页/单 trace 时间线（2f）。"""
 
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ async def get_cost(
     user: User = Depends(require_admin),
     db: Any = Depends(get_db),
 ):
-    """成本/调用量统计（docs 03 §5.8 CostStat）：token_usage.cost SQL 聚合（M5 观测模块化）。"""
+    """成本/调用量统计（《02》接口契约 §5.8 CostStat）：token_usage.cost SQL 聚合（M5 观测模块化）。"""
     data = await SystemService().get_cost(
         db, start=_parse_iso(start), end=_parse_iso(end), provider=provider
     )

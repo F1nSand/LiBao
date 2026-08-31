@@ -1,4 +1,4 @@
-"""工作区数据访问（M7-B，docs 04 §3.11）。软删过滤。文件化：.agent/workspaces.json。"""
+"""工作区数据访问（M7-B，《02》数据模型 §3.11）。软删过滤。文件化：.agent/workspaces.json。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""记忆卡片向量索引（主动记忆 RAG，docs 01 §8.2/§8.3）。
+"""记忆卡片向量索引（主动记忆 RAG，《02》后端设计 §8.2/§8.3）。
 
 LanceDB 独立库 `.agent/memory_vectors.lance`（与 kb/vectors.lance 分离，规避 kb 集合遍历），
 单表 memory_vectors：card_id 主键 / user_id / workspace_id(""=全局) / importance / content / vector(1024)。

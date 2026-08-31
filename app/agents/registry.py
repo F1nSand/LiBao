@@ -1,8 +1,8 @@
-"""内置 subagent 注册表（docs 01 §3.5 单主 Agent 派发 subagent）。
+"""内置 subagent 注册表（《02》后端设计 §3.5 单主 Agent 派发 subagent）。
 
 与 Claude Code 的 subagent 同构：每个 subagent = 独立 prompt + 独立工具集 + 上下文隔离
 （主 Agent 只传「任务描述 + 已确认事实 + 文件路径」，subagent 只回传结论）。
-内置注册表（代码定义）；用户自建 subagent / 工作流属于后续「工作区」项目（docs 07）。
+内置注册表（代码定义）；用户自建 subagent / 工作流属于后续「工作区」项目（《04》路线图）。
 """
 
 from __future__ import annotations

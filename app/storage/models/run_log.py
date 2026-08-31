@@ -1,4 +1,4 @@
-"""运行日志实体（docs 04 §3.10）。全链路 append-only，trace_id 贯穿；M5 演进为 span 树。
+"""运行日志实体（《02》数据模型 §3.10）。全链路 append-only，trace_id 贯穿；M5 演进为 span 树。
 
 type: llm / tool / retrieval / memory / node / custom；status: ok / error / retried。
 """

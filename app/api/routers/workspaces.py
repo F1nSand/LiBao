@@ -1,4 +1,4 @@
-"""工作区路由（M7-B，docs 03 §5.14）。CRUD（developer+）。"""
+"""工作区路由（M7-B，《02》接口契约 §5.14）。CRUD（developer+）。"""
 
 from __future__ import annotations
 
@@ -79,12 +79,12 @@ async def reveal_workspace(
     user: User = Depends(require_developer),
     db: Any = Depends(get_db),
 ):
-    """OS 打开工作区本地文件夹（docs 03 §5.14）。存在校验 40416 + developer+。"""
+    """OS 打开工作区本地文件夹（《02》接口契约 §5.14）。存在校验 40416 + developer+。"""
     await WorkspaceService().reveal(db, user, workspace_id)
     return ok()
 
 
-# ---- 文件（资源管理器，docs 03 §5.14）：读 → 组织成员；写/删 → developer+ ----
+# ---- 文件（资源管理器，《02》接口契约 §5.14）：读 → 组织成员；写/删 → developer+ ----
 
 @router.get("/workspaces/{workspace_id}/files")
 async def list_files(
@@ -123,7 +123,7 @@ async def rename_file(
     user: User = Depends(require_developer),
     db: Any = Depends(get_db),
 ):
-    """重命名文件/文件夹（目录子项前缀自动同步；docs 03 §5.14）。"""
+    """重命名文件/文件夹（目录子项前缀自动同步；《02》接口契约 §5.14）。"""
     await WorkspaceService().rename_file(db, user, workspace_id, req.old_path, req.new_path)
     return ok()
 

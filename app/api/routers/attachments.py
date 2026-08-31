@@ -1,4 +1,4 @@
-"""附件路由（docs 03 §5.9）。上传（multipart）/二进制流/分析/删除。"""
+"""附件路由（《02》接口契约 §5.9）。上传（multipart）/二进制流/分析/删除。"""
 
 from __future__ import annotations
 

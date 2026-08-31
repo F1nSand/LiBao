@@ -1,4 +1,4 @@
-"""记忆 schema（docs 03 §5.7）。创建/更新共用；body 恒为 dict（note 存 {"text": str}）。
+"""记忆 schema（《02》接口契约 §5.7）。创建/更新共用；body 恒为 dict（note 存 {"text": str}）。
 
 P5：创建支持 workspace_id（工作区项目卡片可选）/ importance；更新端点启用版本化改写。
 """

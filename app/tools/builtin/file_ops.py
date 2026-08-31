@@ -1,4 +1,4 @@
-"""工作区文件操作内置工具（M7-B，docs 01 §7.5 / §7.8）。
+"""工作区文件操作内置工具（M7-B，《02》后端设计 §7.5 / §7.8）。
 
 read_file/write_file/edit_file/glob/grep 走路径强限制（resolve_workspace_path）；
 shell/bash 走规则 + 独立 LLM 语义审查（先审查再执行）。均读工作区根上下文（get_tool_workspace_root）；
@@ -226,7 +226,7 @@ async def grep_handler(pattern: str, path: str | None = None) -> dict[str, Any]:
     return {"matches": hits}
 
 
-# ---- Bash 语义审查（2026-08-25 独立 curl LLM 通道，docs 01 §7.8 ②）----
+# ---- Bash 语义审查（2026-08-25 独立 curl LLM 通道，《02》后端设计 §7.8 ②）----
 # 三重防线：语义审查 + 注入检测（提示词声明 + 输出注入迹象扫描）+ 输出校验（严格 JSON / 仅认 ALLOW）。
 # 混合降级：风险分级 × 熔断状态 × failopen_max_grade（不硬编码 open/close 二选一）。
 
@@ -574,7 +574,7 @@ def _degraded_review(grade: str, why: str) -> dict[str, str]:
 
 
 async def _review_command(command: str) -> dict[str, str]:
-    """Bash 语义审查（bash+curl 独立 LLM 通道，docs 01 §7.8 ②）。
+    """Bash 语义审查（bash+curl 独立 LLM 通道，《02》后端设计 §7.8 ②）。
 
     三重防线：语义审查 + 注入检测（提示词声明 + 输出注入迹象扫描）+ 输出校验（严格 JSON / 仅认 ALLOW）。
     混合降级：风险分级 × 熔断状态 × failopen_max_grade。

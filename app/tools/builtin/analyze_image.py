@@ -1,4 +1,4 @@
-"""内置工具 tl_analyze_image：分析附件（docs 04 F4 / docs 01 §7.6）。
+"""内置工具 tl_analyze_image：分析附件（《02》数据模型 F4 / 《02》后端设计 §7.6）。
 
 五层约束下工具层→存储层合法：经 sessionmaker 桥读附件 + storage.attachment_analysis 分析。
 无 org 归属 join（UUID 不可猜 + MVP 文档标注）；分析结果已落库则返回存储值，否则即时计算。

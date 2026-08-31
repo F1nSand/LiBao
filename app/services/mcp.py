@@ -1,4 +1,4 @@
-"""MCP 源服务（docs 01 §7.2 / docs 03 §5.5）。
+"""MCP 源服务（《02》后端设计 §7.2 / 《02》接口契约 §5.5）。
 
 验证即注册：连接 → list_tools 成功才落库（失败 50201）；工具与内置工具同生命周期
 （tool_definition 行 + registry spec，默认关闭、agent 勾选、confirm/幂等/超时全复用）。

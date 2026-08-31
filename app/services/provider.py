@@ -1,4 +1,4 @@
-"""Provider 配置领域服务（docs 02 /settings Provider tab）。
+"""Provider 配置领域服务（《02》前端设计 /settings Provider tab）。
 
 安全约定（前端契约）：api_key 只写不读——响应仅 has_key 布尔；明文只存库供同步到 LLM 客户端。
 激活语义（2026-08-27）：多配置 + 唯一激活——activate 把目标置 enabled、其余置 disabled，并热同步到 Settings。

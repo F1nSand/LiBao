@@ -1,4 +1,4 @@
-"""Provider 配置数据访问（docs 02 /settings）。文件化：.agent/providers.json。"""
+"""Provider 配置数据访问（《02》前端设计 /settings）。文件化：.agent/providers.json。"""
 
 from __future__ import annotations
 

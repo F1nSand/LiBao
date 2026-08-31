@@ -1,4 +1,4 @@
-"""工具 schema（docs 03 §5.5）。创建默认 enabled=false（默认关闭原则，由服务层强制）。"""
+"""工具 schema（《02》接口契约 §5.5）。创建默认 enabled=false（默认关闭原则，由服务层强制）。"""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ class ToolTestRequest(BaseModel):
 
 
 class McpRegisterRequest(BaseModel):
-    """MCP 源注册（docs 03 §5.5 / FrontEnd McpRegisterRequest）。name 可选，缺省派生。"""
+    """MCP 源注册（《02》接口契约 §5.5 / FrontEnd McpRegisterRequest）。name 可选，缺省派生。"""
 
     name: str | None = None
     url_or_command: str  # 命令（stdio）或 http(s) URL

@@ -1,4 +1,4 @@
-"""内置工具 tl_fetch_url：只读抓取网页（docs 07 RM-8 / docs 04 F4）。
+"""内置工具 tl_fetch_url：只读抓取网页（《04》路线图 RM-8 / 《02》数据模型 F4）。
 
 出站黑名单（Settings.fetch_url_denylist，默认空 = 全放行；精确域名或 *.example.com 通配）；
 内容清洗（D3：剥 script/style + 折叠空白）；默认不启用（管理员显式开启）。异常兜底 error。

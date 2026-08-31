@@ -1,4 +1,4 @@
-"""通用分页（docs 03 §5 契约：Paged<T> = {items, total, page, page_size}）。"""
+"""通用分页（《02》接口契约 §5 契约：Paged<T> = {items, total, page, page_size}）。"""
 
 from __future__ import annotations
 

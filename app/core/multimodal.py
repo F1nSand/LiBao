@@ -1,4 +1,4 @@
-"""多模态消息适配核心（2026-08-27，docs 01 §6 多模态）。
+"""多模态消息适配核心（2026-08-27，《02》后端设计 §6 多模态）。
 
 设计：b64 载荷与消息分离——HumanMessage 里只放轻量 image_ref 引用块（几十字节 dict），
 真正的 base64 进 graph_config.configurable（configurable 不落 checkpoint）。JsonFileSaver

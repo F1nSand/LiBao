@@ -1,4 +1,4 @@
-"""会话路由（docs 03 §5.2）。全部 owner 过滤；越权 → 40401。"""
+"""会话路由（《02》接口契约 §5.2）。全部 owner 过滤；越权 → 40401。"""
 
 from __future__ import annotations
 

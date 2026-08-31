@@ -1,4 +1,4 @@
-"""M4.5 subagent 派发测试（docs 01 §3.5）：注册表 + 嵌套 LLM 循环 + agent_switch 事件（进入/离开）+ 子工具执行。
+"""M4.5 subagent 派发测试（《02》后端设计 §3.5）：注册表 + 嵌套 LLM 循环 + agent_switch 事件（进入/离开）+ 子工具执行。
 
 纯单测（不碰 DB）：dispatch ctx 注入假模型 / 事件汇；executor.execute 用 monkeypatch 桩（子工具不真跑）。
 """

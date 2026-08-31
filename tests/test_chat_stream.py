@@ -177,7 +177,7 @@ async def test_chat_stream_event_sequence(chat_fixture):
         assert tool_call["payload"]["tool_name"] == "time_now"
         tool_result = next(e for e in events if e["type"] == "tool_result")
         assert tool_result["payload"]["ok"] is True
-        # 逐轮消息（docs 03 §3）：第 1 轮（工具）发 message 事件；最终轮由 done 承载
+        # 逐轮消息（《02》接口契约 §3）：第 1 轮（工具）发 message 事件；最终轮由 done 承载
         seal = next(e for e in events if e["type"] == "message")
         assert seal["payload"]["message"]["round"] == 1
         assert seal["payload"]["message"]["tool_calls"][0]["tool_name"] == "time_now"
@@ -401,7 +401,7 @@ async def test_message_seal_carries_cost(chat_fixture):
 
 
 async def test_thinking_event_and_persistence(chat_fixture):
-    """thinking（reasoning_content）：SSE 发射 + 按轮持久化（docs 03 §3）。"""
+    """thinking（reasoning_content）：SSE 发射 + 按轮持久化（《02》接口契约 §3）。"""
 
     from app.tools.builtin import register_builtin_tools
 

@@ -1,4 +1,4 @@
-"""附件领域服务（docs 01 §7.6 / docs 03 §5.9）。本地磁盘存储 MVP（MinIO 为 M4 接缝）。
+"""附件领域服务（《02》后端设计 §7.6 / 《02》接口契约 §5.9）。本地磁盘存储 MVP（MinIO 为 M4 接缝）。
 
 状态机：uploaded → analyzing → ready | failed（内部抽取缓存；不表示模型已读取）。
 分析链：图片只记录中性 `analysis_on_send`；txt/md → utf-8 提取；pdf/docx → 正文抽取；legacy .doc 拒绝上传。

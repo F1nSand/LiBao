@@ -1,9 +1,9 @@
-"""tool_execute 节点（docs 01 §3.1/§7.3）。执行模型发起的工具调用 → ToolMessage + tool_results。
+"""tool_execute 节点（《02》后端设计 §3.1/§7.3）。执行模型发起的工具调用 → ToolMessage + tool_results。
 
-M2：require_confirm 工具 → interrupt() 等待人工确认（docs 01 §3.4）——恢复后节点从头重执行，
+M2：require_confirm 工具 → interrupt() 等待人工确认（《02》后端设计 §3.4）——恢复后节点从头重执行，
 interrupt() 返回 {approved: bool}；拒绝分支不执行，写 cancelled ToolMessage，LLM 接续。
 每节点每轮只确认第一个 require_confirm 工具（规避 LangGraph 多 interrupt 按 id 映射的复杂度，文档化限制）。
-结果 shape 对齐 docs 04 §3.2 message.tool_calls（含 status：done/error/cancelled，前端读此字段）。
+结果 shape 对齐 《02》数据模型 §3.2 message.tool_calls（含 status：done/error/cancelled，前端读此字段）。
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _result(
     placeholder: bool = False,
     job_ref: str | None = None,
 ) -> dict:
-    """工具结果条目（docs 04 §3.2 message.tool_calls shape，三个分支共用）。"""
+    """工具结果条目（《02》数据模型 §3.2 message.tool_calls shape，三个分支共用）。"""
     return {
         "tool_call_id": tc["id"],
         "tool_name": tc["name"],
@@ -112,7 +112,7 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
             continue
 
         approved_for_call = False
-        # M2：预检-确认两段式（docs 01 §7.3 层③）——不可逆操作需人工确认
+        # M2：预检-确认两段式（《02》后端设计 §7.3 层③）——不可逆操作需人工确认
         needs_confirm = spec.require_confirm or (
             gate_decision is not None and gate_decision.action == ToolGateAction.CONFIRM
         )
@@ -230,7 +230,7 @@ async def tool_execute_node(state: AgentState, config: Optional[RunnableConfig] 
                 "input": tc.get("args", {}),
                 "output": {"summary": result.summary[:500], "ok": result.ok, "error": result.error},
                 "duration_ms": result.duration_ms,
-                # docs 04 run_log.status：retried（重试后成功）/ ok / error
+                # 《02》数据模型 run_log.status：retried（重试后成功）/ ok / error
                 "status": "retried" if result.retries > 0 and result.ok else ("ok" if result.ok else "error"),
             }
         )

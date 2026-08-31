@@ -1,4 +1,4 @@
-"""错误码与业务异常（docs 03 §2.3 分段：400xx 请求 / 401xx 认证 / 403xx 权限 /
+"""错误码与业务异常（《02》接口契约 §2.3 分段：400xx 请求 / 401xx 认证 / 403xx 权限 /
 404xx 未找到 / 500xx 服务器 / 600xx Agent 运行时）。
 
 0 成功；业务错误一般 HTTP 200 + envelope code；401xx/403xx 同时映射到对应 HTTP 状态（前端 http.ts 两者都处理）。
@@ -18,7 +18,7 @@ ERR_DOMAIN_NOT_ALLOWED = 40013
 ERR_INPUT_TOO_LONG = 40014
 ERR_WORKSPACE_FILE_REF_INVALID = 40015  # 工作区文件引用非法或不可读取（不泄露路径状态）
 
-# ---- 进化闭环候选区 400xx（docs 03 §5.13）----
+# ---- 进化闭环候选区 400xx（《02》接口契约 §5.13）----
 ERR_CANDIDATE_STATE_INVALID = 40020      # 状态迁移不允许
 ERR_CANDIDATE_CARRIER_UNSUPPORTED = 40021  # 非 prompt 载体未实现
 ERR_CANDIDATE_NO_CASES = 40022           # 无验证用例
@@ -28,11 +28,11 @@ ERR_SKILL_INVALID = 40024                # SKILL.md 格式非法（缺 frontmatt
 # ---- 认证 401xx ----
 ERR_UNAUTHORIZED = 40101
 ERR_TOKEN_EXPIRED = 40102
-ERR_HOOK_TOKEN = 40103  # webhook x-hook-token 缺失/不匹配（docs 03 §5.10）
+ERR_HOOK_TOKEN = 40103  # webhook x-hook-token 缺失/不匹配（《02》接口契约 §5.10）
 
 # ---- 权限 403xx ----
 ERR_FORBIDDEN = 40301
-ERR_WORKSPACE_PATH_FORBIDDEN = 40302  # 路径越出工作区范围（docs 01 §7.8）
+ERR_WORKSPACE_PATH_FORBIDDEN = 40302  # 路径越出工作区范围（《02》后端设计 §7.8）
 
 # ---- 未找到 404xx ----
 ERR_CONVERSATION_NOT_FOUND = 40401
@@ -50,7 +50,7 @@ ERR_EVAL_SET_NOT_FOUND = 40412
 ERR_EVAL_CASE_NOT_FOUND = 40413
 ERR_EVAL_RUN_NOT_FOUND = 40414
 ERR_WORKSPACE_NOT_FOUND = 40416
-ERR_PROVIDER_NOT_FOUND = 40418  # LLM Provider 不存在（docs 02 /settings）
+ERR_PROVIDER_NOT_FOUND = 40418  # LLM Provider 不存在（《02》前端设计 /settings）
 
 # ---- 冲突 409xx ----
 ERR_TASK_RUNNING = 40901

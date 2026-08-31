@@ -1,4 +1,4 @@
-"""Agent 配置数据访问（docs 04 §3.4）。单通用 Agent 模型：一条 is_default=True 的通用 Agent。
+"""Agent 配置数据访问（《02》数据模型 §3.4）。单通用 Agent 模型：一条 is_default=True 的通用 Agent。
 
 文件化：.agent/agents.json（AgentConfig）+ .agent/agent_versions.json（AgentVersion 快照）。
 """

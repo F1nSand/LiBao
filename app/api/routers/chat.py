@@ -1,4 +1,4 @@
-"""对话流式路由（docs 03 §5.2 ★ M1 核心端点 POST /chat/stream）。"""
+"""对话流式路由（《02》接口契约 §5.2 ★ M1 核心端点 POST /chat/stream）。"""
 
 from __future__ import annotations
 

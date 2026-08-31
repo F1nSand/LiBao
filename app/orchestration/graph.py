@@ -1,5 +1,5 @@
-"""主图（docs 01 §3.1，ADR-01）。单主图 + 节点策略；单通用 Agent，subagent 由主 Agent 经
-tl_dispatch_subagent 派发（嵌套 LLM 循环，主图拓扑不变，docs 01 §3.5）。
+"""主图（《02》后端设计 §3.1，ADR-01）。单主图 + 节点策略；单通用 Agent，subagent 由主 Agent 经
+tl_dispatch_subagent 派发（嵌套 LLM 循环，主图拓扑不变，《02》后端设计 §3.5）。
 
 流：START→route→memory_inject→agent_execute→(有 tool_calls ?→tool_execute→memory_inject
 | 无→context_update)→finalize→END

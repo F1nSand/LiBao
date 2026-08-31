@@ -1,4 +1,4 @@
-"""API 层依赖注入（docs 01 §2 api/deps.py）。
+"""API 层依赖注入（《02》后端设计 §2 api/deps.py）。
 
 依赖方向：api → services → storage。本地单机化：get_current_user 恒返回固定 admin
 （单用户折叠，无 JWT/登录）；get_db 返回文件存储请求上下文（FileContext）。

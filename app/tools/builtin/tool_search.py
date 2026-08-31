@@ -1,4 +1,4 @@
-"""tool_search 元工具（docs 01 §7.1.1 A2）。
+"""tool_search 元工具（《02》后端设计 §7.1.1 A2）。
 
 模型侧只暴露"搜索工具目录"一个接口（不塞全量工具定义）；返回匹配工具的
 名称 + 路由描述（何时用/何时别用），**不含全量 ACI 参数 schema**。
@@ -11,7 +11,7 @@ from typing import Any
 
 from app.tools.registry import all_tools
 
-_SELECT_LIMIT = 5  # 两段式选中注入上限（docs 01 §7.1.1：选中 1-2 个，防上下文爆炸）
+_SELECT_LIMIT = 5  # 两段式选中注入上限（《02》后端设计 §7.1.1：选中 1-2 个，防上下文爆炸）
 
 
 def _catalog_projection(catalog: list, include_mcp_source: bool) -> list[dict]:
@@ -56,7 +56,8 @@ async def tool_search_handler(query: str) -> dict[str, Any]:
             return {"matches": [], "hint": "无匹配工具，可在工具管理页创建"}
         matches.sort(key=lambda m: m["id"])
         return {"matches": matches}
-    except Exception:  # noqa: BLE001  I4：检索逻辑挂 → 降级全量目录（仅名称+路由描述），不阻塞模型
+    except Exception:  # noqa: BLE001
+        # I4：检索逻辑挂 → 降级全量目录（仅名称+路由描述），不阻塞模型
         fallback = _catalog_projection(catalog, include_mcp_source=False)  # 不经过检索逻辑
         fallback.sort(key=lambda m: m["id"])
         return {"matches": fallback, "hint": None}

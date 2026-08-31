@@ -1,4 +1,4 @@
-"""会话实体（docs 04 §3.2）。conversation.id = LangGraph thread_id（ADR-03 sessionless）。"""
+"""会话实体（《02》数据模型 §3.2）。conversation.id = LangGraph thread_id（ADR-03 sessionless）。"""
 
 import uuid
 from dataclasses import dataclass

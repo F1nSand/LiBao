@@ -1,7 +1,7 @@
-"""Embedding 服务（docs 01 §9.1 / 05 §1.2）。直接 httpx 调 OpenAI 兼容 /embeddings 端点。
+"""Embedding 服务（《02》后端设计 §9.1 / 05 §1.2）。直接 httpx 调 OpenAI 兼容 /embeddings 端点。
 
 选 httpx 而非 litellm：embedding 是批量离线路径（索引/检索），单端点自控重试/错误分类，
-测试可用 MockTransport 干净注入。API key 走 Settings（.env），不入库。
+测试可用 MockTransport 干净注入。API key 走 Settings（~/.LiBao/settings.json），不入库。
 维度 EMBED_DIM 与迁移 0004 的 vector(1024) 一致（见 models/kb.py）。
 """
 

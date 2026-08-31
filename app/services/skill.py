@@ -1,4 +1,4 @@
-"""Skill 领域服务（M7-A，docs 01 §4.2.1 / docs 03 §5.14）。
+"""Skill 领域服务（M7-A，《02》后端设计 §4.2.1 / 《02》接口契约 §5.14）。
 
 2026-08-25 简化：删除 org skills 层与 git 导入，skills 全部走文件系统——
 全局 `~/.LiBao/skills` + 工作区 `.agent/skills`（两级）。SKILL.md = YAML frontmatter

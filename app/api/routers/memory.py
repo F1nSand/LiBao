@@ -1,4 +1,4 @@
-"""记忆路由（docs 03 §5.7）。长期记忆 CRUD（版本只增/软删）+ maintenance（读最近 messages）+
+"""记忆路由（《02》接口契约 §5.7）。长期记忆 CRUD（版本只增/软删）+ maintenance（读最近 messages）+
 P5：项目记忆文件列表（GET /memory/project，工作区 .agent/memory/*.md 索引）+ update 端点。"""
 
 from __future__ import annotations

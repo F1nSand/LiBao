@@ -1,6 +1,6 @@
-"""route 节点（docs 01 §3.1/§5.3.1）。轮边界安全点：排空事件收件箱 + 裁决 + 回填/超时占位任务。
+"""route 节点（《02》后端设计 §3.1/§5.3.1）。轮边界安全点：排空事件收件箱 + 裁决 + 回填/超时占位任务。
 
-M4 完整版最小闭环（docs 01 §5.3.1/§5.3.2）+ M5/M6 前补强：
+M4 完整版最小闭环（《02》后端设计 §5.3.1/§5.3.2）+ M5/M6 前补强：
 - `job_done` 命中在途占位任务 → 经 dispatch ctx 发回填 tool_result（前端占位卡解析）；
 - 占位任务超 TTL（看门狗）→ 发超时回填 tool_result（placeholder:false + error）+ 移除；
 - urgent 事件置顶进 context（「紧急」优先响应；regular 排后；light 预留）。
@@ -19,7 +19,7 @@ from app.orchestration.state_schema import AgentState
 from app.services.events import arbitrate, drain_events
 from app.tools.context import get_dispatch_ctx
 
-# 占位任务 TTL（docs 01 §5.5 看门狗：超时未回填 → 置失败；轮边界惰性判定，无独立定时器）
+# 占位任务 TTL（《02》后端设计 §5.5 看门狗：超时未回填 → 置失败；轮边界惰性判定，无独立定时器）
 PLACEHOLDER_TTL_S = 120
 
 
@@ -70,7 +70,7 @@ async def route_node(state: AgentState, config: Optional[RunnableConfig] = None)
                 done_refs.add(job_ref)
                 _push_backfill(push, match, ok=True, summary="后台任务完成", structured=ev.get("result"))
 
-    # ② 占位 TTL 看门狗：超时未回填 → 置失败（docs 01 §5.5，轮边界惰性判定）
+    # ② 占位 TTL 看门狗：超时未回填 → 置失败（《02》后端设计 §5.5，轮边界惰性判定）
     now = time.time()
     for p in placeholder_jobs:
         if p["job_ref"] in done_refs:

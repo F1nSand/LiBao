@@ -1,4 +1,4 @@
-"""知识库 schema（docs 03 §5.6）。集合创建/检索请求。"""
+"""知识库 schema（《02》接口契约 §5.6）。集合创建/检索请求。"""
 
 from __future__ import annotations
 

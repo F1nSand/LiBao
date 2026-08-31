@@ -1,7 +1,7 @@
-"""事件收件箱 + 规则裁决器（docs 01 §5.3.1/§5.3.2 最小闭环）。
+"""事件收件箱 + 规则裁决器（《02》后端设计 §5.3.1/§5.3.2 最小闭环）。
 
 事件（后台任务回填、外部触发）只在**轮边界安全点**被消费——route 节点入口 drain，
-绝不在工具执行中途插入（docs 01 §5.3.1）。本轮最小闭环：`regular` 事件排空进 context
+绝不在工具执行中途插入（《02》后端设计 §5.3.1）。本轮最小闭环：`regular` 事件排空进 context
 （模型下一轮可见）+ 匹配占位任务的 `job_done` 触发回填 tool_result；`urgent/light` 预留。
 
 进程内收件箱（keyed by thread_key）：事件在后台任务完成时 emit，直到下一次 route drain 才取出，
@@ -43,7 +43,7 @@ def drain_events(thread_key: str) -> list[dict[str, Any]]:
 
 
 def arbitrate(events: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """规则裁决器（docs 01 §5.3.2，默认规则起步）：按 priority 分类。
+    """规则裁决器（《02》后端设计 §5.3.2，默认规则起步）：按 priority 分类。
     - urgent：置顶进 context（紧急优先响应，M6 前补强）；
     - regular：排空进 context；
     - light：预留（独立并行执行，本轮不进 context）。

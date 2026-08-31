@@ -1,4 +1,4 @@
-"""工具注册中心（docs 01 §7.1 tools/registry.py）。
+"""工具注册中心（《02》后端设计 §7.1 tools/registry.py）。
 
 ToolSpec 字段即 M2 工具系统的接缝（sandbox/require_confirm/allowlist/idempotent 已预留）。
 aci() 生成 OpenAI function schema，函数名取 spec.name（LLM 侧）；注册表键为 spec.id（稳定唯一）。
@@ -60,7 +60,7 @@ class ToolSpec:
     mcp_source: str | None = None
     timeout_ms: int = 30000
     max_concurrency: int = 10  # 默认 10（对齐 seed DB 默认）；进程内信号量限流（M4 完整版）
-    max_retries: int = 0  # 失败静默重试次数（docs 01 §5.4；0=不重试）
+    max_retries: int = 0  # 失败静默重试次数（《02》后端设计 §5.4；0=不重试）
     allowlist: list[str] | None = None
     handler: Callable[..., Any] | None = None
     sandbox_command_builder: Callable[
@@ -155,5 +155,5 @@ def enabled_tools() -> list[ToolSpec]:
 
 
 def acis() -> list[dict[str, Any]]:
-    """全部工具 ACI，按 id 排序（前缀稳定铁律 docs 01 §4.1）。"""
+    """全部工具 ACI，按 id 排序（前缀稳定铁律 《02》后端设计 §4.1）。"""
     return [s.aci() for s in sorted(_REGISTRY.values(), key=lambda s: s.id)]

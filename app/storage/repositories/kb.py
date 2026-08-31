@@ -1,4 +1,4 @@
-"""知识库数据访问（docs 04 §3.6）。集合/文档软删；分块硬删重建（派生数据）。
+"""知识库数据访问（《02》数据模型 §3.6）。集合/文档软删；分块硬删重建（派生数据）。
 
 本地单机化：
 - 集合：.agent/kb_collections.json（FileTable）
@@ -29,7 +29,7 @@ from app.storage.models.kb import KbChunk, KbCollection, KbDocument
 logger = logging.getLogger(__name__)
 
 _CJK = re.compile(r"([一-鿿])")
-_RRF_K = 60  # 倒数排名融合常数（docs 01 §9.1）
+_RRF_K = 60  # 倒数排名融合常数（《02》后端设计 §9.1）
 _RERANK_CANDIDATES = 20  # rerank 粗排候选数（RRF 取 top 20 → Cross-Encoder 精排 → top_k）
 
 

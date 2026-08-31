@@ -1,4 +1,4 @@
-"""Rerank 服务（docs 01 §9.1 重排序）。httpx 调 SiliconFlow `/rerank`（Qwen3-Reranker，OpenAI 兼容）。
+"""Rerank 服务（《02》后端设计 §9.1 重排序）。httpx 调 SiliconFlow `/rerank`（Qwen3-Reranker，OpenAI 兼容）。
 
 复用 embedding 的 base_url/api_key（同一家供应商）；Cross-Encoder 重排 RRF 粗排候选，
 精排后取 top_k。选 httpx 而非 litellm：单端点自控重试/错误分类，测试可用 MockTransport 注入。

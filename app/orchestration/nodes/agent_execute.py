@@ -1,4 +1,4 @@
-"""agent_execute 节点（docs 01 §3.1/§4）。bind_tools(ACI) + model.ainvoke 驱动 LLM 决策。
+"""agent_execute 节点（《02》后端设计 §3.1/§4）。bind_tools(ACI) + model.ainvoke 驱动 LLM 决策。
 
 token 级流式不在此 yield：T10 用 graph.astream(stream_mode=["messages"]) 截获模型 chunk。
 测试注入：config["configurable"]["model"] 可覆盖模型（mock LLM）。
@@ -183,7 +183,7 @@ async def agent_execute_node(state: AgentState, config: Optional[RunnableConfig]
 
     token_usage = dict(usage or {})
     token_usage["cost"] = cost
-    # 把本轮 cost 随消息带出（含 usage 全量），供 stream_core 逐轮 cost 表面化（docs 03 §3 逐轮消息扩展）
+    # 把本轮 cost 随消息带出（含 usage 全量），供 stream_core 逐轮 cost 表面化（《02》接口契约 §3 逐轮消息扩展）
     response.usage_metadata = token_usage
 
     return {

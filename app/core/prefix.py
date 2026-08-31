@@ -1,4 +1,4 @@
-"""静态前缀哈希（docs 01 §4.1）。seed 与 context_builder 共用同一算法，字节稳定。
+"""静态前缀哈希（《02》后端设计 §4.1）。seed 与 context_builder 共用同一算法，字节稳定。
 
 缓存键 = sha256({model, system_prompt, tools(sorted)})；任何静态前缀改动即产生新 hash。
 """

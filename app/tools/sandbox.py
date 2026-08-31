@@ -1,4 +1,4 @@
-"""沙箱运行契约（docs 01 §7.3 D1）。
+"""沙箱运行契约（《02》后端设计 §7.3 D1）。
 
 命令只携带工作区相对路径；WORKSPACE 由本模块的宿主 shell runner 执行，DOCKER
 由一次性容器 runner 执行，NONE 保持普通 handler。DOCKER/MICROVM 的级别可被配置和持久化，

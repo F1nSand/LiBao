@@ -1,4 +1,4 @@
-"""tl_dispatch_subagent 内置工具（docs 01 §3.5）：主 Agent 自主派发 subagent（Claude Code 式）。
+"""tl_dispatch_subagent 内置工具（《02》后端设计 §3.5）：主 Agent 自主派发 subagent（Claude Code 式）。
 
 handler 内跑嵌套 LLM 循环：
 - 子 agent 独立 prompt + 独立工具集（bind_tools(subagent_acis)），上下文隔离（只传任务+补充事实）；

@@ -1,4 +1,4 @@
-"""设置路由（docs 02 /settings Provider tab，前端契约 api/provider.ts）。LLM Provider 配置管理。
+"""设置路由（《02》前端设计 /settings Provider tab，前端契约 api/provider.ts）。LLM Provider 配置管理。
 
 api_key 只写不读：请求可带 api_key，响应仅 has_key 布尔（永不回传明文）。
 模型/供应商切换（2026-08-27）：多配置 + 唯一激活（activate 热切换）+ 纯 OpenAI 格式（裸名 + 请求地址/完整 URL 开关）。

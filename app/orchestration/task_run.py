@@ -1,4 +1,4 @@
-"""任务后台运行器（docs 01 §5.3）。POST /tasks 提交 → 独立 session 跑图（thread_id = task.id）。
+"""任务后台运行器（《02》后端设计 §5.3）。POST /tasks 提交 → 独立 session 跑图（thread_id = task.id）。
 
 M2 最小实现：asyncio.create_task 后台执行（完整任务队列为 M4）。
 中断时任务自身转 waiting_confirm（pending_confirm 落自身行）；resume 走 Command(resume)。
@@ -136,7 +136,7 @@ async def _run_graph_common(
 
             for log in final_state.get("run_logs", []):
                 await RunLogRepository(db).create(task_id=task_id, **log)
-            # M6 前：占位任务写端（docs 04 §3.3 F5）——任务结束时把在途占位状态落 task.placeholder_events
+            # M6 前：占位任务写端（《02》数据模型 §3.3 F5）——任务结束时把在途占位状态落 task.placeholder_events
             placeholder_events = final_state.get("placeholder_jobs", [])
             if placeholder_events:
                 updated.placeholder_events = placeholder_events

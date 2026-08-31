@@ -1,4 +1,4 @@
-"""Agent 领域服务（docs 01 §5 services/agent.py）。
+"""Agent 领域服务（《02》后端设计 §5 services/agent.py）。
 
 单通用 Agent 模型：所有会话/任务固定用组织默认通用 Agent，不再配置多 Agent/自选；
 subagent 由主 Agent 经 tl_dispatch_subagent 自主派发（内置注册表 app/agents/registry.py）。

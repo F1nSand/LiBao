@@ -1,4 +1,4 @@
-"""临时会话工作区 TTL 清理（2026-08-25 方案 A 后置，docs 01 §7.5）。
+"""临时会话工作区 TTL 清理（2026-08-25 方案 A 后置，《02》后端设计 §7.5）。
 
 非工作区对话的文件落地在 ~/.LiBao/cache/sessions/<conv_id>/（见 chat.py `_session_workspace`），
 不清理会无限堆积。启动时清一次 + 周期扫描，删除超过 cache_ttl_days 未改动的会话目录。

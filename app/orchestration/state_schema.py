@@ -1,4 +1,4 @@
-"""LangGraph State 定义（docs 01 §3.2）。
+"""LangGraph State 定义（《02》后端设计 §3.2）。
 
 messages 是规范消息流（system/user/assistant/tool），add_messages reducer 负责追加与更新。
 tool_results 单独存放，供 finalize 独立核对（不信任模型自述）。

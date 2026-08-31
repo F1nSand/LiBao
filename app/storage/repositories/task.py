@@ -1,4 +1,4 @@
-"""任务数据访问（docs 04 §3.3）。status 状态机：pending/running/waiting_confirm/cancelled/done/failed。
+"""任务数据访问（《02》数据模型 §3.3）。status 状态机：pending/running/waiting_confirm/cancelled/done/failed。
 
 文件化：.agent/tasks.json（FileTable，内存过滤/排序/分页；字段赋值经 Row 标脏，commit 落盘）。
 """

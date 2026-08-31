@@ -1,4 +1,4 @@
-"""通知数据访问（docs 03 §5.11）。append-only；user 过滤 + 已读标记。文件化：.agent/notifications.json。"""
+"""通知数据访问（《02》接口契约 §5.11）。append-only；user 过滤 + 已读标记。文件化：.agent/notifications.json。"""
 
 from __future__ import annotations
 

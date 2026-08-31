@@ -1,4 +1,4 @@
-"""REST 统一信封 {code, message, data, trace_id}（docs 03 §2.1）。"""
+"""REST 统一信封 {code, message, data, trace_id}（《02》接口契约 §2.1）。"""
 
 from __future__ import annotations
 

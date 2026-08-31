@@ -1,4 +1,4 @@
-"""任务领域服务（docs 01 §5.3 / docs 03 §5.3）。
+"""任务领域服务（《02》后端设计 §5.3 / 《02》接口契约 §5.3）。
 
 状态机：pending / running / waiting_confirm / cancelled / done / failed。
 live-tail：进程内订阅表直投（本地单机化，Redis 已删）。
@@ -282,7 +282,7 @@ class TaskService:
             return "start"
 
     async def resume_precheck(self, db: Any, task: Task) -> None:
-        """I8 前置校验（docs 01 §3.4）：状态必须 waiting_confirm 且载荷未超 TTL。"""
+        """I8 前置校验（《02》后端设计 §3.4）：状态必须 waiting_confirm 且载荷未超 TTL。"""
         if task.status != "waiting_confirm":
             raise AppError(ERR_STATE_NOT_CANCELLABLE, "任务状态不允许恢复（非等待确认中）")
         pending = task.pending_confirm or {}

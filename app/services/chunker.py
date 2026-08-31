@@ -1,4 +1,4 @@
-"""分块器（docs 01 §9.1）。纯 Python 字符滑窗，无 jieba 依赖（中文按字符切，MVP 接缝）。
+"""分块器（《02》后端设计 §9.1）。纯 Python 字符滑窗，无 jieba 依赖（中文按字符切，MVP 接缝）。
 
 窗口规则：每块 chunk_size 字符，下一块起点 = 起点 + (chunk_size - overlap)；
 overlap ≥ chunk_size 时归一化为 chunk_size - 1（防无限回退）。

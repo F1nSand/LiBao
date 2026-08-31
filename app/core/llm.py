@@ -1,4 +1,4 @@
-"""LLM 统一封装（docs 01 §6 core/llm.py）。
+"""LLM 统一封装（《02》后端设计 §6 core/llm.py）。
 
 纯 OpenAI 协议（2026-08-27）：统一走 langchain-openai 的 ChatOpenAI，模型名裸写（gpt-4o/deepseek-chat），
 base_url 走 OpenAI 兼容端点（provider 同步时已归一化为 base）。api_key / base_url 从 Settings 注入。

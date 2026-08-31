@@ -1,6 +1,9 @@
-"""内置工具注册。M1 tl_time_now / M2 tl_demo_notify / M2.5 tl_tool_search / M3 tl_kb_search /
-M3.5 tl_fetch_url + tl_analyze_image（docs 07 RM-8 / docs 04 F4）/ M4.5 tl_dispatch_subagent（单主 Agent 派发）/
-P4 tl_remember_memory + tl_recall_memory + tl_forget_memory（主动记忆全套）。"""
+"""内置工具注册。
+
+M1 tl_time_now / M2 tl_demo_notify / M2.5 tl_tool_search / M3 tl_kb_search /
+M3.5 tl_fetch_url + tl_analyze_image（《04》路线图 RM-8 / 《02》数据模型 F4）/
+M4.5 tl_dispatch_subagent（单主 Agent 派发）/ P4 记忆工具全套。
+"""
 
 from __future__ import annotations
 
@@ -161,7 +164,7 @@ def register_builtin_tools() -> None:
             sandbox=SandboxLevel.NONE,
             timeout_ms=5000,
             handler=load_skill.load_skill_handler,
-            meta=True,  # 平台元工具：skill 正文加载始终对 LLM 可见（渐进式披露，docs 01 §4.2.1）
+            meta=True,  # 平台元工具：skill 正文加载始终对 LLM 可见（渐进式披露，《02》后端设计 §4.2.1）
             builtin=True,
         )
     )

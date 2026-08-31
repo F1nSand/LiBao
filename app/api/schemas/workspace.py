@@ -1,4 +1,4 @@
-"""工作区 schema（M7-B，docs 03 §5.14）。"""
+"""工作区 schema（M7-B，《02》接口契约 §5.14）。"""
 
 from __future__ import annotations
 

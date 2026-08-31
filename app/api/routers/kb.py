@@ -1,4 +1,4 @@
-"""知识库路由（docs 03 §5.6）。集合/文档 CRUD + 检索。"""
+"""知识库路由（《02》接口契约 §5.6）。集合/文档 CRUD + 检索。"""
 
 from __future__ import annotations
 

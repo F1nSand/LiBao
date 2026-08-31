@@ -1,4 +1,4 @@
-"""附件实体（docs 04 §3.7）。本地磁盘存储 MVP（MinIO 为 M4 接缝）；软删行 + 删磁盘文件。
+"""附件实体（《02》数据模型 §3.7）。本地磁盘存储 MVP（MinIO 为 M4 接缝）；软删行 + 删磁盘文件。
 
 状态机：uploaded → analyzing → ready | failed（前端 2.5s 轮询 /attachments/{id}/analysis）。
 """

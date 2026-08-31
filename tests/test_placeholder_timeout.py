@@ -1,7 +1,7 @@
 """M6 前开放项：占位 TTL 看门狗（B1）+ 事件 urgent 档（B3）+ placeholder_events 写端 测试。
 
 覆盖：超时占位 → route 回填 error + 移除；新鲜占位不误杀；urgent 事件置顶优先于 regular；
-任务流结束时在途占位写入 task.placeholder_events（docs 04 §3.3 F5）。
+任务流结束时在途占位写入 task.placeholder_events（《02》数据模型 §3.3 F5）。
 """
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ async def test_urgent_event_top_priority():
 
 
 async def test_task_writes_placeholder_events():
-    """任务流结束：在途占位（initiate_demo）写入 task.placeholder_events（docs 04 §3.3 F5）。"""
+    """任务流结束：在途占位（initiate_demo）写入 task.placeholder_events（《02》数据模型 §3.3 F5）。"""
     register_builtin_tools()
     uid = uuid.uuid4().hex[:8]
     try:

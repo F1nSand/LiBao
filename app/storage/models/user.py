@@ -1,4 +1,4 @@
-"""用户实体（docs 04 §3.1）。本地单机化：单用户折叠为固定 admin（constants.py）。
+"""用户实体（《02》数据模型 §3.1）。本地单机化：单用户折叠为固定 admin（constants.py）。
 
 角色：admin / developer / viewer（保留字段语义，折叠后恒 admin）。
 """

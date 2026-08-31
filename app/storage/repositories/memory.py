@@ -1,4 +1,4 @@
-"""记忆数据访问（docs 04 §3.8）。卡片软删过滤；版本 append-only（JSONL 分文件）。
+"""记忆数据访问（《02》数据模型 §3.8）。卡片软删过滤；版本 append-only（JSONL 分文件）。
 
 文件化：.agent/memory_cards.json（卡片 FileTable）+ .agent/memory/default/cards/<card_id>.versions.jsonl。
 recent_messages_for_maintenance 走会话 JSONL 扫描。
@@ -45,7 +45,7 @@ class MemoryRepository:
     def _versions_path(self, card_id: uuid.UUID) -> str:
         return f"memory/default/cards/{card_id}.versions.jsonl"
 
-    # ---- maintenance 原料（改读 messages，docs 04 §3.2 message-as-log）----
+    # ---- maintenance 原料（改读 messages，《02》数据模型 §3.2 message-as-log）----
 
     async def recent_messages_for_maintenance(self, user_id: uuid.UUID, limit: int) -> list[Message]:
         """maintenance 原料：该用户最近 user+assistant 消息（conversations.json 过滤归属 +

@@ -1,4 +1,4 @@
-"""SSE 事件构造（docs 03 §3：信封 {id, seq, type, ts, payload}；ts 为 epoch 毫秒）。"""
+"""SSE 事件构造（《02》接口契约 §3：信封 {id, seq, type, ts, payload}；ts 为 epoch 毫秒）。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 SSE_EVENT_TYPES = (
     "message_start",
-    "message",  # 逐轮消息封口（docs 03 §3 多消息扩展）：每非最终轮工具结果齐后发射
+    "message",  # 逐轮消息封口（《02》接口契约 §3 多消息扩展）：每非最终轮工具结果齐后发射
     "token",
     "tool_call",
     "tool_result",
@@ -42,7 +42,7 @@ def format_sse(env: dict[str, Any]) -> str:
 
 
 def sse_emitter() -> Callable[[str, dict[str, Any]], str]:
-    """SSE 帧发射器（seq 单调从 1 起，docs 03 §3.2）。各流式入口共用，避免重复闭包。"""
+    """SSE 帧发射器（seq 单调从 1 起，《02》接口契约 §3.2）。各流式入口共用，避免重复闭包。"""
     seq = 0
 
     def emit(event_type: str, payload: dict[str, Any]) -> str:
