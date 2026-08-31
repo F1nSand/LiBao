@@ -1,0 +1,2 @@
+# Windows 下统一 LF，避免 CRLF 让 diff 噪声大（对协作看 diff 友好）
+* text=auto eol=lf

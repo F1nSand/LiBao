@@ -1,0 +1,165 @@
+import { describe, it, expect } from 'vitest'
+import { renderMarkdown, splitStreamingText, renderStreamingMarkdown, splitStreamingCode, inOpenFence, MARKDOWN_WHITELIST } from './markdown'
+
+describe('renderMarkdown 管线', () => {
+  it('GFM 表格渲染为 table', () => {
+    const html = renderMarkdown('| a | b |\n|---|---|\n| 1 | 2 |')
+    expect(html).toContain('<table>')
+    expect(html).toContain('<th>a</th>')
+  })
+
+  it('任务列表渲染 checkbox', () => {
+    const html = renderMarkdown('- [x] 已完成\n- [ ] 未完成')
+    expect(html).toContain('type="checkbox"')
+    expect(html).toContain('checked')
+  })
+
+  it('代码块语法高亮', () => {
+    const html = renderMarkdown('```js\nconst a = 1\n```')
+    expect(html).toContain('language-js')
+    expect(html).toContain('<code class="language-js">')
+  })
+
+  it('不支持的代码语言降级为纯文本，不抛错', () => {
+    const html = renderMarkdown('```nosuchlang\n<foo>\n```')
+    expect(html).toContain('<code')
+    expect(html).not.toContain('<foo>')
+  })
+
+  it('超长行容错解析不崩', () => {
+    const long = 'x'.repeat(20_000)
+    const html = renderMarkdown(long)
+    expect(html.length).toBeGreaterThan(0)
+  })
+})
+
+describe('XSS 防护', () => {
+  it('script 标签被净化', () => {
+    const html = renderMarkdown('<script>alert(1)</script>')
+    expect(html).not.toContain('<script>')
+  })
+
+  it('事件属性被移除（raw HTML 被转义为文本，无活动属性）', () => {
+    const html = renderMarkdown('<img src=x onerror=alert(1)>')
+    expect(html).not.toContain('<img') // 无原始 img 标签
+    expect(html).toContain('&lt;img') // 以转义文本形式呈现
+  })
+
+  it('javascript: 协议链接不产生可点击 href', () => {
+    const html = renderMarkdown('[x](javascript:alert(1))')
+    expect(html).not.toContain('href="javascript')
+    expect(html).not.toContain('href=\'javascript')
+  })
+
+  it('iframe 被移除（转义为文本）', () => {
+    const html = renderMarkdown('<iframe src="https://evil"></iframe>')
+    expect(html).not.toContain('<iframe')
+  })
+
+  it('代码块内的原始 HTML 保持文本不执行', () => {
+    const html = renderMarkdown('```html\n<script>alert(1)</script>\n```')
+    expect(html).not.toContain('<script>')
+    expect(html).not.toContain('<script>alert(1)</script>')
+    expect(html).toContain('&lt;') // 尖括号被转义
+  })
+
+  it('合法链接保留且带 noopener', () => {
+    const html = renderMarkdown('[ok](https://example.com)')
+    expect(html).toContain('https://example.com')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="noopener noreferrer"')
+  })
+})
+
+describe('splitStreamingText 流式拆分', () => {
+  it('无换行 → 全部为 tail（末行局部）', () => {
+    expect(splitStreamingText('第一行')).toEqual({ stable: '', tail: '第一行' })
+  })
+
+  it('有换行 → 换行前为 stable、末行为 tail', () => {
+    expect(splitStreamingText('第一行\n第二行')).toEqual({ stable: '第一行\n', tail: '第二行' })
+  })
+
+  it('以换行结尾 → 无 tail', () => {
+    expect(splitStreamingText('第一行\n')).toEqual({ stable: '第一行\n', tail: '' })
+  })
+
+  it('空串 → 全空', () => {
+    expect(splitStreamingText('')).toEqual({ stable: '', tail: '' })
+  })
+})
+
+describe('renderStreamingMarkdown 流式渲染', () => {
+  it('已完成部分渲染 markdown，tail 为原始末行', () => {
+    const r = renderStreamingMarkdown('# 标题\n正文中')
+    expect(r.html).toContain('<h1>标题</h1>')
+    expect(r.tail).toBe('正文中')
+  })
+
+  it('tail 保持原始（模板插值转义，不注入脚本）', () => {
+    const r = renderStreamingMarkdown('正常\n<script>')
+    expect(r.tail).toBe('<script>') // 原始文本；由 Vue 插值转义
+    expect(r.html).not.toContain('<script>')
+  })
+
+  it('代码围栏未闭合：整段一起渲染，末行留在代码块内（不逃逸成纯文本）', () => {
+    const r = renderStreamingMarkdown('```js\nconst a = 1\nco')
+    expect(r.html).toContain('language-js')
+    expect(r.html).toContain('hljs-keyword') // const 被高亮包裹 → 代码块含该行
+    expect(r.tail).toBe('') // 末行并入代码块，不再逃逸
+    expect(r.html).toContain('co') // 末行内容在代码块内
+  })
+
+  it('代码围栏已闭合：恢复 stable/tail 拆分（围栏外才按行切）', () => {
+    const r = renderStreamingMarkdown('```js\nconst a = 1\n```\n正文')
+    expect(r.html).toContain('language-js')
+    expect(r.tail).toBe('正文')
+  })
+
+  it('长代码块流式：末行持续留在代码块内', () => {
+    const r = renderStreamingMarkdown('```python\ndef foo():\n    print("x")\n    pri')
+    expect(r.tail).toBe('')
+    expect(r.html).toContain('def')
+    expect(r.html).toContain('pri') // 末行内容在代码块内（高亮 span 会拆 'def foo' 连续性）
+  })
+})
+
+describe('splitStreamingCode 代码围栏感知拆分', () => {
+  it('普通段：同 splitStreamingText，inCode=false', () => {
+    expect(splitStreamingCode('# 标题\n正文中')).toEqual({ stable: '# 标题\n', tail: '正文中', inCode: false })
+  })
+
+  it('代码围栏内：stable=换行前整段（含未闭合围栏）、tail=末行、inCode=true', () => {
+    expect(splitStreamingCode('```js\nconst a = 1\nco')).toEqual({ stable: '```js\nconst a = 1\n', tail: 'co', inCode: true })
+  })
+
+  it('代码围栏已闭合：恢复正常（inCode=false）', () => {
+    expect(splitStreamingCode('```js\nconst a = 1\n```\n正文')).toEqual({ stable: '```js\nconst a = 1\n```\n', tail: '正文', inCode: false })
+  })
+})
+
+describe('inOpenFence 围栏检测', () => {
+  it('未闭合围栏 → true', () => {
+    expect(inOpenFence('```python\nx')).toBe(true)
+  })
+
+  it('已闭合围栏 → false', () => {
+    expect(inOpenFence('```python\nx\n```')).toBe(false)
+  })
+
+  it('无围栏 → false', () => {
+    expect(inOpenFence('普通文本\n第二行')).toBe(false)
+  })
+
+  it('行内 ``` 不以行首出现不误判', () => {
+    expect(inOpenFence('使用 ```inline``` 标记')).toBe(false)
+  })
+})
+
+describe('白名单', () => {
+  it('拒绝 script/iframe/onerror', () => {
+    expect(MARKDOWN_WHITELIST.tags).not.toContain('script')
+    expect(MARKDOWN_WHITELIST.tags).not.toContain('iframe')
+    expect(MARKDOWN_WHITELIST.attrs).not.toContain('onerror')
+  })
+})

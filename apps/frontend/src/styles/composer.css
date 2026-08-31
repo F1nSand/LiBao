@@ -1,0 +1,203 @@
+/* Chat / Workspace 共用输入区：统一卡片层次、控件尺寸与响应式行为。 */
+.composer {
+  --composer-control-size: 36px;
+  --composer-radius: 16px;
+  margin: 12px 16px 16px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--composer-radius);
+  background: var(--app-content-bg);
+  padding: 8px;
+  box-shadow:
+    0 8px 24px rgba(31, 35, 41, 0.06),
+    0 1px 3px rgba(31, 35, 41, 0.04);
+  transition:
+    border-color 0.15s var(--ease-out),
+    background 0.15s var(--ease-out),
+    box-shadow 0.15s var(--ease-out);
+}
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--app-primary-fill) 55%, var(--app-border));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--app-primary-fill) 12%, transparent),
+    0 8px 24px rgba(31, 35, 41, 0.06),
+    0 1px 3px rgba(31, 35, 41, 0.04);
+}
+.composer.dragging {
+  border-color: var(--app-primary-fill);
+  background: color-mix(in srgb, var(--app-primary-fill) 4%, var(--app-content-bg));
+}
+.composer-input {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.composer-textarea {
+  min-width: 0;
+  width: 100%;
+}
+.composer-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.composer-leading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.composer-divider {
+  color: var(--app-border);
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+}
+.composer .el-textarea__inner {
+  min-height: var(--composer-control-size);
+  padding: 8px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--app-text-main);
+  line-height: 20px;
+  transition:
+    background 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out);
+}
+.composer .el-textarea__inner:hover,
+.composer .el-textarea__inner:focus {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--app-bg) 42%, transparent);
+  box-shadow: none;
+}
+.composer .el-textarea__inner::placeholder {
+  color: var(--app-text-muted);
+}
+.composer .uploader .upload-btn,
+.composer .el-button {
+  box-sizing: border-box;
+  min-height: var(--composer-control-size);
+  height: var(--composer-control-size);
+  border-radius: 10px;
+  font-size: 13px;
+  transition:
+    background 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    color 0.15s var(--ease-out),
+    box-shadow 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out);
+}
+.composer .uploader .upload-btn {
+  display: inline-flex;
+  width: var(--composer-control-size);
+  min-width: var(--composer-control-size);
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--app-text-secondary);
+}
+.composer .uploader .upload-btn:hover {
+  background: var(--app-border-light);
+  color: var(--app-primary);
+}
+.composer .uploader .upload-btn:focus-visible {
+  outline: 2px solid var(--app-focus-ring);
+  outline-offset: 2px;
+}
+.composer .el-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+.composer .el-button:focus-visible {
+  outline: 2px solid var(--app-focus-ring);
+  outline-offset: 2px;
+}
+.composer .model-btn {
+  min-width: 36px;
+  max-width: 180px;
+  color: var(--app-text-secondary);
+}
+.composer .model-btn:hover {
+  background: var(--app-border-light);
+  color: var(--app-primary);
+}
+.composer .composer-leading .el-button:hover {
+  background: var(--app-border-light);
+  color: var(--app-primary);
+}
+.composer .composer-submit,
+.composer .composer-stop {
+  min-width: 72px;
+  font-weight: 600;
+}
+.composer-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+.composer .composer-submit {
+  background: var(--app-primary-fill);
+  color: var(--app-on-primary);
+}
+.composer .composer-submit:hover {
+  background: var(--app-primary-dark);
+  color: var(--app-on-primary);
+}
+.composer .composer-stop {
+  background: color-mix(in srgb, var(--app-danger) 10%, transparent);
+  color: var(--app-danger);
+}
+.composer .composer-stop:hover {
+  background: color-mix(in srgb, var(--app-danger) 16%, transparent);
+}
+@media (max-width: 768px) {
+  .composer {
+    --composer-control-size: 44px;
+    margin: 8px 10px 10px;
+    padding: 6px;
+  }
+  .composer-input {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+  }
+  .composer-textarea {
+    width: 100%;
+  }
+  .composer-toolbar {
+    width: 100%;
+    gap: 8px;
+  }
+  .composer-leading {
+    flex: 1 1 auto;
+  }
+  .composer-actions {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+  }
+  .composer .el-textarea__inner {
+    min-height: var(--composer-control-size);
+    padding: 10px 12px;
+  }
+  .composer .model-btn {
+    min-width: var(--composer-control-size);
+    max-width: none;
+  }
+  .composer .el-button {
+    min-width: var(--app-control-touch);
+    min-height: var(--app-control-touch);
+  }
+}
