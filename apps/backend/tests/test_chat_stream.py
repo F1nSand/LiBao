@@ -21,6 +21,7 @@ from app.services.task import TaskService
 from app.services.task_events import list_task_events
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Conversation, User
+from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.task import TaskRepository
 
@@ -551,6 +552,16 @@ async def test_chat_recovers_same_thread_after_model_error(chat_fixture, tmp_pat
         ]
 
     first_types = await run("失败消息", "trace-error-first")
+
+    # The failed turn must leave a durable explicit empty graph cursor.  Reload
+    # the file store to ensure recovery does not rely on the detached object.
+    async with get_store().session() as session:
+        await session.rollback()
+        persisted = await ConversationRepository(session).table.get(conv.id)
+    assert persisted is not None
+    assert persisted.graph_cursor_initialized is True
+    assert persisted.active_graph_checkpoint_id is None
+
     second_types = await run("恢复消息", "trace-error-second")
 
     assert first_types[-1] == "error"
@@ -601,3 +612,4 @@ async def test_disconnect_drains_and_finalizes(chat_fixture):
         assert any("慢速回复完成" in (m.content or "") for m in msgs)
         # 会话标题也被首句更新（首条消息落库路径）
         assert conv.title == "慢速任务"
+

@@ -511,11 +511,21 @@ async def chat_stream_events(
 
     async def on_error(exc: Exception) -> None:
         await checkpoint_service.store.seal_checkpoint(conversation.id, checkpoint.id, interrupted=True)
-        with contextlib.suppress(Exception):
-            await _bind_graph_run()
         if task is None:
+            # Direct callers do not have TaskService's commit below.  Persist the
+            # graph root cursor explicitly so the next request cannot replay the
+            # failed user input after the FileContext is reloaded.
+            with contextlib.suppress(Exception):
+                await _bind_graph_run()
+            with contextlib.suppress(Exception):
+                await db.commit()
             return
         await db.rollback()
+        # Rollback above may discard the Conversation object mutation performed
+        # before the task transition.  Re-bind against the clean context so the
+        # failed run's graph cursor survives the task failure commit.
+        with contextlib.suppress(Exception):
+            await _bind_graph_run()
         current_task = await TaskRepository(db).get_by_id(task.id)
         if current_task is not None and current_task.status != "cancelled":
             error_payload = {
@@ -1036,3 +1046,4 @@ async def agent_invoke_events(
         on_final=on_final,
     ):
         yield frame
+
