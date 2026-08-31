@@ -1,0 +1,45 @@
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node and build output
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+playwright-report/
+test-results/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# LiBao user/runtime data
+.LiBao/
+agent_data/
+cache/
+checkpoints/
+data/
+kb/
+uploads/
+*.log
+
+# Local migration/agent bookkeeping
+.migration-backup/
+.artifacts/
+.uv-cache/
+progress.md
+
+# Editors and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
