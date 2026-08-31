@@ -266,6 +266,50 @@ async def test_failed_run_bounds_skip_failed_input_checkpoint(tmp_path):
     assert parent_bound is True
 
 
+async def test_failed_run_bounds_ignore_trailing_checkpoint_after_error(tmp_path):
+    """LangGraph 可能在错误写入后再落一条收尾记录，仍须回到失败输入之前。"""
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-trailing-error"}}
+    saver.put(config, _checkpoint("c0"), {"source": "loop"}, {})
+    input_config = {
+        "configurable": {
+            "thread_id": "t-trailing-error",
+            "checkpoint_id": "c0",
+            "code_checkpoint_id": "code-3",
+        }
+    }
+    saver.put(input_config, _checkpoint("c1"), {"source": "input"}, {})
+    saver.put(
+        {"configurable": {**input_config["configurable"], "checkpoint_id": "c1"}},
+        _checkpoint("c2"),
+        {"source": "loop"},
+        {},
+    )
+    saver.put_writes(
+        {"configurable": {"thread_id": "t-trailing-error", "checkpoint_id": "c2"}},
+        [("__error__", RuntimeError("boom"))],
+        "task-3",
+    )
+    saver.put(
+        {
+            "configurable": {
+                "thread_id": "t-trailing-error",
+                "checkpoint_id": "c2",
+                "code_checkpoint_id": "code-3",
+            }
+        },
+        _checkpoint("c3"),
+        {"source": "loop"},
+        {},
+    )
+
+    parent, output, parent_bound = await saver.aget_run_bounds(config, "code-3")
+
+    assert parent == "c0"
+    assert output == "c0"
+    assert parent_bound is True
+
+
 async def test_run_bounds_persist_parent_from_put_config(tmp_path):
     saver = _saver(tmp_path)
     base = {"configurable": {"thread_id": "t-config-parent"}}

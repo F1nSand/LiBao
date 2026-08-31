@@ -34,14 +34,17 @@ from app.orchestration.checkpoint_codec import JsonCheckpointCodec
 SCHEMA_VERSION = 2
 
 
-def _checkpoint_before_failed_input(records: dict[str, Any], latest_id: str, codec: JsonCheckpointCodec) -> str | None:
-    latest = records[latest_id]
-    has_error = any(
+def _has_error_writes(record: dict[str, Any]) -> bool:
+    return any(
         pair[0] == "__error__"
-        for task_writes in (latest.get("writes") or {}).values()
+        for task_writes in (record.get("writes") or {}).values()
         for pair in task_writes
     )
-    if not has_error:
+
+
+def _checkpoint_before_failed_input(records: dict[str, Any], latest_id: str, codec: JsonCheckpointCodec) -> str | None:
+    latest = records[latest_id]
+    if not _has_error_writes(latest):
         return latest_id
     ids = list(records)
     for index in range(ids.index(latest_id), -1, -1):
@@ -57,8 +60,7 @@ def _latest_failed_checkpoint_id(records: dict[str, Any]) -> str | None:
     # Checkpoint IDs are UUIDs, so lexical order is unrelated to write order.
     # Python dictionaries preserve the on-disk insertion order of checkpoints.
     for checkpoint_id in reversed(records):
-        writes = records[checkpoint_id].get("writes") or {}
-        if any(channel == "__error__" for task_writes in writes.values() for channel, _ in task_writes):
+        if _has_error_writes(records[checkpoint_id]):
             return checkpoint_id
     return None
 
@@ -276,19 +278,17 @@ class JsonFileSaver(BaseCheckpointSaver):
             if input_match is not None:
                 parent_id, parent_bound = _record_parent(input_match[1], self.codec)
             latest_id = matches[-1][0]
-            latest = matches[-1][1]
+            failed_id = next(
+                (checkpoint_id for checkpoint_id, record in reversed(matches) if _has_error_writes(record)),
+                None,
+            )
             # A failed input checkpoint contains the user message that must not be
             # replayed on the next turn.  LangGraph's retry helper already knows how
             # to walk back to the node immediately before that input; use the same
             # rule for the cursor persisted on the code anchor.
-            has_error = any(
-                pair[0] == "__error__"
-                for task_writes in (latest.get("writes") or {}).values()
-                for pair in task_writes
-            )
             output_id = (
-                _checkpoint_before_failed_input(data["checkpoints"], latest_id, self.codec)
-                if has_error
+                _checkpoint_before_failed_input(data["checkpoints"], failed_id, self.codec)
+                if failed_id is not None
                 else latest_id
             )
             return parent_id, output_id, parent_bound

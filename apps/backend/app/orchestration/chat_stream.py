@@ -395,7 +395,7 @@ async def chat_stream_events(
         parent_id, output_id, parent_bound = await resolver(
             {"configurable": {"thread_id": str(conversation.id)}}, str(checkpoint.id)
         )
-        if output_id is None:
+        if output_id is None and not parent_bound:
             return
         await checkpoint_service.store.bind_graph_run(
             conversation.id,
@@ -768,7 +768,7 @@ async def resume_stream_events(
         parent_graph_id, output_graph_id, parent_bound = await resolver(
             {"configurable": {"thread_id": str(thread_id)}}, str(checkpoint_id)
         )
-        if conversation_id and output_graph_id is not None:
+        if conversation_id and (output_graph_id is not None or parent_bound):
             await checkpoint_service.store.bind_graph_run(
                 conversation_id,
                 checkpoint_id,
