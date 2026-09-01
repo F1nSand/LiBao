@@ -388,24 +388,25 @@ async def chat_stream_events(
         start_graph_from_root=start_graph_from_root,
     )
 
-    async def _bind_graph_run() -> None:
+    async def _bind_graph_run(target_conversation: Conversation | None = None) -> None:
+        bound_conversation = target_conversation or conversation
         resolver = getattr(graph_checkpointer, "aget_run_bounds", None)
         if resolver is None:
             return
         parent_id, output_id, parent_bound = await resolver(
-            {"configurable": {"thread_id": str(conversation.id)}}, str(checkpoint.id)
+            {"configurable": {"thread_id": str(bound_conversation.id)}}, str(checkpoint.id)
         )
         if output_id is None and not parent_bound:
             return
         await checkpoint_service.store.bind_graph_run(
-            conversation.id,
+            bound_conversation.id,
             checkpoint.id,
             graph_parent_checkpoint_id=parent_id,
             graph_parent_bound=parent_bound,
             graph_output_checkpoint_id=output_id,
         )
-        conversation.active_graph_checkpoint_id = output_id
-        conversation.graph_cursor_initialized = True
+        bound_conversation.active_graph_checkpoint_id = output_id
+        bound_conversation.graph_cursor_initialized = True
 
     async def on_interrupt(value: dict[str, Any]) -> str:
         nonlocal task
@@ -511,11 +512,23 @@ async def chat_stream_events(
 
     async def on_error(exc: Exception) -> None:
         await checkpoint_service.store.seal_checkpoint(conversation.id, checkpoint.id, interrupted=True)
-        with contextlib.suppress(Exception):
-            await _bind_graph_run()
         if task is None:
+            # Direct callers do not have TaskService's commit below.  Persist the
+            # graph root cursor explicitly so the next request cannot replay the
+            # failed user input after the FileContext is reloaded.
+            with contextlib.suppress(Exception):
+                await _bind_graph_run()
+            with contextlib.suppress(Exception):
+                await db.commit()
             return
         await db.rollback()
+        # FileContext.rollback() replaces table rows.  Re-read the Conversation
+        # before binding the cursor so the following Task failure commit flushes
+        # the same live row instead of a detached object.
+        fresh_conversation = await ConversationRepository(db).table.get(conversation.id)
+        if fresh_conversation is not None:
+            with contextlib.suppress(Exception):
+                await _bind_graph_run(fresh_conversation)
         current_task = await TaskRepository(db).get_by_id(task.id)
         if current_task is not None and current_task.status != "cancelled":
             error_payload = {

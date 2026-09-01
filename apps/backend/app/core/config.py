@@ -14,6 +14,7 @@ from pydantic_settings import (
 
 # 用户全局数据根（2026-08-25：会话/记忆/配置/工作区/知识库/附件全在此，源码只读后数据不随代码更新丢失）
 _LIB = str(Path.home() / ".LiBao")
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -82,7 +83,7 @@ class Settings(BaseSettings):
     cache_dir: str = f"{_LIB}/cache"  # 临时会话工作区（非工作区对话的文件落地；可 TTL 清理）
     cache_ttl_days: int = 7  # 临时会话工作区保留天数（超过即后台清理，见 core/session_cache.py）
     checkpoint_retention_days: int = 30  # 消息级代码 checkpoint 非活跃会话保留天数
-    frontend_dist: str = "frontend_dist"  # 前端构建产物（FastAPI 静态托管，源码目录）
+    frontend_dist: str = str(_BACKEND_ROOT / "frontend_dist")  # 发布包内由 FastAPI 静态托管的 SPA 构建物
 
     # ---- LLM（纯 OpenAI 协议，2026-08-27）----
     # 模型名裸写（gpt-4o / deepseek-chat），base_url 为 OpenAI 兼容 base（ChatOpenAI 自动拼 /chat/completions）

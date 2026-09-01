@@ -99,6 +99,47 @@ async def test_error_pending_write_roundtrip_is_loadable(tmp_path):
     assert tup.pending_writes[0][:2] == ("task-error", "__error__")
 
 
+async def test_failed_then_successful_run_keeps_latest_success_checkpoint(tmp_path):
+    """隐式 latest 读取不能被更早失败轮的 error write 劫持。"""
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-failed-then-success"}}
+    saver.put(config, _checkpoint("c0"), {"source": "input"}, {})
+    saver.put(
+        {"configurable": {"thread_id": "t-failed-then-success", "checkpoint_id": "c0"}},
+        _checkpoint("c1"),
+        {"source": "loop"},
+        {},
+    )
+    saver.put(
+        {"configurable": {"thread_id": "t-failed-then-success", "checkpoint_id": "c1"}},
+        _checkpoint("c2"),
+        {"source": "input"},
+        {},
+    )
+    saver.put_writes(
+        {"configurable": {"thread_id": "t-failed-then-success", "checkpoint_id": "c2"}},
+        [("__error__", RuntimeError("old failure"))],
+        "task-failed",
+    )
+    saver.put(
+        {"configurable": {"thread_id": "t-failed-then-success", "checkpoint_id": "c2"}},
+        _checkpoint("c3"),
+        {"source": "input"},
+        {},
+    )
+    saver.put(
+        {"configurable": {"thread_id": "t-failed-then-success", "checkpoint_id": "c3"}},
+        _checkpoint("c4"),
+        {"source": "loop"},
+        {},
+    )
+
+    tup = await saver.aget_tuple(config)
+
+    assert tup is not None
+    assert tup.checkpoint["id"] == "c4"
+
+
 async def test_get_failed_config_returns_explicit_error_checkpoint(tmp_path):
     saver = _saver(tmp_path)
     config = {"configurable": {"thread_id": "t-failed-config"}}
@@ -308,6 +349,84 @@ async def test_failed_run_bounds_ignore_trailing_checkpoint_after_error(tmp_path
     assert parent == "c0"
     assert output == "c0"
     assert parent_bound is True
+
+
+async def test_failed_run_bounds_find_error_after_anchor_config_is_dropped(tmp_path):
+    """后续 LangGraph 写入可能丢弃自定义 anchor 配置，仍须识别同一轮错误。"""
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-anchor-config-drop"}}
+    saver.put(config, _checkpoint("c0"), {"source": "loop"}, {})
+    saver.put(
+        {
+            "configurable": {
+                "thread_id": "t-anchor-config-drop",
+                "checkpoint_id": "c0",
+                "code_checkpoint_id": "code-4",
+            }
+        },
+        _checkpoint("c1"),
+        {"source": "input"},
+        {},
+    )
+    saver.put(
+        {"configurable": {"thread_id": "t-anchor-config-drop", "checkpoint_id": "c1"}},
+        _checkpoint("c2"),
+        {"source": "loop"},
+        {},
+    )
+    saver.put_writes(
+        {"configurable": {"thread_id": "t-anchor-config-drop", "checkpoint_id": "c2"}},
+        [("__error__", RuntimeError("boom"))],
+        "task-4",
+    )
+    saver.put(
+        {"configurable": {"thread_id": "t-anchor-config-drop", "checkpoint_id": "c2"}},
+        _checkpoint("c3"),
+        {"source": "loop"},
+        {},
+    )
+
+    parent, output, parent_bound = await saver.aget_run_bounds(config, "code-4")
+
+    assert parent == "c0"
+    assert output == "c0"
+    assert parent_bound is True
+
+
+async def test_next_input_record_bounds_the_previous_run(tmp_path):
+    """后续输入轮的错误不能污染较早 code anchor 的 run bounds。"""
+    saver = _saver(tmp_path)
+    config = {"configurable": {"thread_id": "t-next-input-bound"}}
+    saver.put(config, _checkpoint("c0"), {"source": "loop"}, {})
+    old_input = {
+        "configurable": {
+            "thread_id": "t-next-input-bound",
+            "checkpoint_id": "c0",
+            "code_checkpoint_id": "code-old",
+        }
+    }
+    saver.put(old_input, _checkpoint("c1"), {"source": "input"}, {})
+    saver.put(
+        {"configurable": {**old_input["configurable"], "checkpoint_id": "c1"}},
+        _checkpoint("c2"),
+        {"source": "loop"},
+        {},
+    )
+    new_input = {
+        "configurable": {
+            "thread_id": "t-next-input-bound",
+            "checkpoint_id": "c2",
+            "code_checkpoint_id": "code-new",
+        }
+    }
+    saver.put(new_input, _checkpoint("c3"), {"source": "input"}, {})
+    saver.put_writes(
+        {"configurable": {"thread_id": "t-next-input-bound", "checkpoint_id": "c3"}},
+        [("__error__", RuntimeError("later failure"))],
+        "task-later",
+    )
+
+    assert await saver.aget_run_bounds(config, "code-old") == ("c0", "c2", True)
 
 
 async def test_run_bounds_persist_parent_from_put_config(tmp_path):

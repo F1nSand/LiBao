@@ -41,7 +41,7 @@ def create_app() -> FastAPI:
     register_middleware(app)
     register_routers(app, settings.base_url)
 
-    # 可选静态托管：生产打包阶段可将 frontend_dist 放回源码目录；纯源码运行仅提供 API。
+    # 发布包将前端构建物放在后端目录内；纯源码运行没有此目录时仅提供 API。
     dist = Path(settings.frontend_dist)
     if dist.is_dir():
         app.mount("/", SPAStaticFiles(directory=str(dist), html=True), name="frontend")

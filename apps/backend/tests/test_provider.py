@@ -28,14 +28,14 @@ async def test_provider_crud_and_api_key_write_only(provider_fixture):
     async with get_store().session() as session:
         p = await svc.create(
             session, user, name="deepseek", base_url="https://api.deepseek.com", model="deepseek-chat",
-            api_key="sk-secret-123", enabled=True,
+            api_key="test-provider-key", enabled=True,
         )
         pid = p.id
         listed = await svc.list(session, user)
         assert listed[0]["name"] == "deepseek"
         assert listed[0]["has_key"] is True
         assert "api_key" not in listed[0]  # api_key 永不回传
-        assert "sk-secret-123" not in str(listed[0])
+        assert "test-provider-key" not in str(listed[0])
 
         patched = await svc.patch(session, user, pid, enabled=False, model="deepseek-v4-flash")
         assert patched.enabled is False and patched.model == "deepseek-v4-flash"
@@ -58,11 +58,11 @@ async def test_provider_sync_active_to_settings(provider_fixture, monkeypatch):
     async with get_store().session() as session:
         await svc.create(
             session, user, name="custom", base_url="https://custom.example", model="custom/model",
-            api_key="sk-custom", enabled=True,
+            api_key="test-provider-key", enabled=True,
         )
         await svc.sync_active_to_settings(session, uuid.UUID(int=0))
 
-    assert settings.llm_api_key == "sk-custom"
+    assert settings.llm_api_key == "test-provider-key"
     assert settings.llm_model == "custom/model"
     assert settings.llm_base_url == "https://custom.example"
 
@@ -170,7 +170,7 @@ async def test_provider_serialize_new_fields(provider_fixture):
     async with get_store().session() as session:
         p = await svc.create(
             session, user, name="我的 DeepSeek", website="https://platform.deepseek.com",
-            base_url="https://api.deepseek.com", is_full_url=False, model="deepseek-chat", api_key="sk-x",
+            base_url="https://api.deepseek.com", is_full_url=False, model="deepseek-chat", api_key="test-provider-key",
         )
         d = serialize_provider(p)
         assert d["name"] == "我的 DeepSeek"

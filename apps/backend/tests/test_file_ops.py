@@ -372,7 +372,7 @@ def test_curl_review_template_no_key_in_argv(monkeypatch):
     """key/endpoint 走 curl -K 配置，命令行只出现 $BASH_REVIEW_CONFIG（key 不落 ps）。"""
     s = _review_settings(
         bash_review_endpoint="https://api.example.com/v1/chat/completions",
-        bash_review_api_key="sk-super-secret",
+        bash_review_api_key="test-review-key",
     )
     monkeypatch.setattr(file_ops, "get_settings", lambda: s)
     monkeypatch.setattr(file_ops, "_bash_executable", lambda: "/usr/bin/bash")
@@ -397,8 +397,8 @@ def test_curl_review_template_no_key_in_argv(monkeypatch):
     assert captured["args"][0] == "/usr/bin/bash"
     cmdline = " ".join(captured["args"][2:])
     assert "curl -sS -K \"$BASH_REVIEW_CONFIG\"" in cmdline
-    assert "sk-super-secret" not in cmdline  # key 不进命令行
-    assert "sk-super-secret" in captured["cfg"]  # key 在配置文件
+    assert "test-review-key" not in cmdline  # key 不进命令行
+    assert "test-review-key" in captured["cfg"]  # key 在配置文件
     assert 'data-binary = "@' in captured["cfg"]  # body 走 @file（引号内 @路径）
     assert "https://api.example.com" in captured["cfg"]
 
