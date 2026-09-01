@@ -39,10 +39,10 @@ def test_build_model_uses_chatopenai_kwargs(monkeypatch):
             captured.update(kw)
 
     monkeypatch.setattr(llm_mod, "ReasoningChatOpenAI", _FakeChat)
-    s = SimpleNamespace(llm_model="deepseek-chat", llm_api_key="sk-x", llm_base_url="https://api.deepseek.com")
+    s = SimpleNamespace(llm_model="deepseek-chat", llm_api_key="test-llm-key", llm_base_url="https://api.deepseek.com")
     llm_mod.LLMService.build_model(settings=s)
     assert captured["model"] == "deepseek-chat"
-    assert captured["api_key"] == "sk-x"
+    assert captured["api_key"] == "test-llm-key"
     assert captured["base_url"] == "https://api.deepseek.com"
     assert captured["streaming"] is True
     assert captured["max_retries"] == 0
@@ -131,7 +131,7 @@ def test_reasoning_chunk_conversion_extracts_reasoning():
 
     from app.core.llm import ReasoningChatOpenAI
 
-    m = ReasoningChatOpenAI(model="deepseek-v4-flash", api_key="sk-x")
+    m = ReasoningChatOpenAI(model="deepseek-v4-flash", api_key="test-llm-key")
     chunk = {
         "choices": [{"delta": {"role": "assistant", "reasoning_content": "思考", "content": ""}, "finish_reason": None}]
     }

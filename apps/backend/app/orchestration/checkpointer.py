@@ -65,6 +65,15 @@ def _latest_failed_checkpoint_id(records: dict[str, Any]) -> str | None:
     return None
 
 
+def _record_source(record: dict[str, Any], codec: JsonCheckpointCodec) -> Any:
+    """Read checkpoint source while supporting schema-v1 and schema-v2 records."""
+
+    source = record.get("metadata_source")
+    if source is not None:
+        return source
+    return codec.loads(record["metadata"], channel="metadata").get("source")
+
+
 def _record_parent(record: dict[str, Any], codec: JsonCheckpointCodec) -> tuple[str | None, bool]:
     """Return a record's parent and whether that relationship is provable.
 
@@ -215,8 +224,27 @@ class JsonFileSaver(BaseCheckpointSaver):
             elif cfg.get("start_graph_from_root"):
                 return None
             elif recs:
-                latest_id = next(reversed(recs))
-                checkpoint_id = _checkpoint_before_failed_input(recs, latest_id, self.codec)
+                ordered = list(recs.items())
+                latest_id = ordered[-1][0]
+                # Only the newest input-to-input interval can affect implicit
+                # latest reads.  An old failed run must not roll a later
+                # successful run back past its own input.
+                run_start = next(
+                    (
+                        index
+                        for index in range(len(ordered) - 1, -1, -1)
+                        if _record_source(ordered[index][1], self.codec) == "input"
+                    ),
+                    0,
+                )
+                latest_run = ordered[run_start:]
+                failed_id = next(
+                    (checkpoint_id for checkpoint_id, record in reversed(latest_run) if _has_error_writes(record)),
+                    None,
+                )
+                checkpoint_id = _checkpoint_before_failed_input(
+                    recs, failed_id if failed_id is not None else latest_id, self.codec
+                )
                 if checkpoint_id is None:
                     return None
                 record = recs[checkpoint_id]
@@ -257,29 +285,46 @@ class JsonFileSaver(BaseCheckpointSaver):
         path = self._path(config)
         with self._lock(str(path)):
             data = self._load(path)
-            matches = [
-                (checkpoint_id, record)
-                for checkpoint_id, record in data["checkpoints"].items()
+            records = list(data["checkpoints"].items())
+            matching_indices = [
+                index
+                for index, (_, record) in enumerate(records)
                 if str(record.get("code_checkpoint_id") or "") == str(code_checkpoint_id)
             ]
-            if not matches:
+            if not matching_indices:
                 return None, None, False
-            input_match = next(
+            input_index = next(
                 (
-                    (checkpoint_id, record)
-                    for checkpoint_id, record in matches
-                    if record.get("metadata_source") == "input"
-                    or self.codec.loads(record["metadata"], channel="metadata").get("source") == "input"
+                    index
+                    for index in matching_indices
+                    if records[index][1].get("metadata_source") == "input"
+                    or _record_source(records[index][1], self.codec) == "input"
                 ),
                 None,
             )
             parent_id: str | None = None
             parent_bound = False
-            if input_match is not None:
-                parent_id, parent_bound = _record_parent(input_match[1], self.codec)
-            latest_id = matches[-1][0]
+            if input_index is not None:
+                parent_id, parent_bound = _record_parent(records[input_index][1], self.codec)
+            else:
+                input_index = matching_indices[0]
+
+            # ``code_checkpoint_id`` is guaranteed on the input record, but
+            # LangGraph may omit custom config keys on later writes.  Bound the
+            # run by the next metadata ``source=input`` record instead of
+            # assuming every graph checkpoint carries the code anchor.
+            run_end = next(
+                (
+                    index
+                    for index in range(input_index + 1, len(records))
+                    if _record_source(records[index][1], self.codec) == "input"
+                ),
+                len(records),
+            )
+            run_records = records[input_index:run_end]
+            latest_id = run_records[-1][0]
             failed_id = next(
-                (checkpoint_id for checkpoint_id, record in reversed(matches) if _has_error_writes(record)),
+                (checkpoint_id for checkpoint_id, record in reversed(run_records) if _has_error_writes(record)),
                 None,
             )
             # A failed input checkpoint contains the user message that must not be

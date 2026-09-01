@@ -21,6 +21,7 @@ from app.services.task import TaskService
 from app.services.task_events import list_task_events
 from app.storage.file.store import get_store
 from app.storage.models import AgentConfig, Conversation, User
+from app.storage.repositories.conversation import ConversationRepository
 from app.storage.repositories.message import MessageRepository
 from app.storage.repositories.task import TaskRepository
 
@@ -530,18 +531,31 @@ async def test_chat_recovers_same_thread_after_model_error(chat_fixture, tmp_pat
     model = FailOnceModel()
     graph = build_graph(JsonFileSaver(tmp_path / "chat-checkpoints"))
 
-    async def run(content: str, trace_id: str) -> list[str]:
+    async def create_task(conversation: Conversation, content: str):
+        async with get_store().session() as session:
+            task = await TaskService().submit_for_conversation(
+                session,
+                user,
+                agent.id,
+                conversation.id,
+                {"conversation_id": str(conversation.id), "message": content},
+            )
+            await TaskService().set_running(session, task)
+            return task
+
+    async def run(content: str, trace_id: str, conversation: Conversation, task) -> list[str]:
         frames: list[str] = []
         async with get_store().session() as session:
             async for frame in chat_stream_events(
                 db=session,
                 graph=graph,
-                conversation=conv,
+                conversation=conversation,
                 agent=agent,
                 user=user,
                 content=content,
                 trace_id=trace_id,
                 model_override=model,
+                task=task,
             ):
                 frames.append(frame)
         return [
@@ -550,8 +564,22 @@ async def test_chat_recovers_same_thread_after_model_error(chat_fixture, tmp_pat
             if not frame.startswith(":")
         ]
 
-    first_types = await run("失败消息", "trace-error-first")
-    second_types = await run("恢复消息", "trace-error-second")
+    first_task = await create_task(conv, "失败消息")
+    first_types = await run("失败消息", "trace-error-first", conv, first_task)
+
+    # The failed turn must leave a durable explicit empty graph cursor.  Reload
+    # the file store to ensure recovery does not rely on the detached object.
+    async with get_store().session() as session:
+        await session.rollback()
+        persisted = await ConversationRepository(session).table.get(conv.id)
+        failed_task = await TaskRepository(session).get_by_id(first_task.id)
+    assert persisted is not None
+    assert persisted.graph_cursor_initialized is True
+    assert persisted.active_graph_checkpoint_id is None
+    assert failed_task is not None and failed_task.status == "failed"
+
+    second_task = await create_task(persisted, "恢复消息")
+    second_types = await run("恢复消息", "trace-error-second", persisted, second_task)
 
     assert first_types[-1] == "error"
     assert second_types[-1] == "done"
