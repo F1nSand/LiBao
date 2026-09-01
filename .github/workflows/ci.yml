@@ -160,4 +160,6 @@ jobs:
           cmd /d /c "scripts\build-release.cmd --help"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmd /d /c "scripts\build-release.cmd --version .."
-          if ($LASTEXITCODE -eq 0) { throw 'invalid release version unexpectedly succeeded' }
+          $invalidVersionExit = $LASTEXITCODE
+          if ($invalidVersionExit -eq 0) { throw 'invalid release version unexpectedly succeeded' }
+          exit 0
