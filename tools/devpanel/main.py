@@ -39,9 +39,20 @@ STATIC = Path(__file__).resolve().parent / "static"
 WIN = sys.platform == "win32"
 CREATE_NO_WINDOW = 0x08000000 if WIN else 0
 
-BE_PORT = 8000
-FE_PORT = 5173
-PANEL_PORT_DEFAULT = 9100
+def read_port(name: str, default: int) -> int:
+    raw = os.environ.get(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} 必须是 1 到 65535 的整数") from exc
+    if not 1 <= value <= 65535:
+        raise ValueError(f"{name} 必须是 1 到 65535 的整数")
+    return value
+
+
+BE_PORT = read_port("LIBAO_BACKEND_PORT", 8000)
+FE_PORT = read_port("LIBAO_FRONTEND_PORT", 5173)
+PANEL_PORT_DEFAULT = read_port("LIBAO_DEVPANEL_PORT", 9100)
 
 # 状态常量
 STOPPED = "stopped"
@@ -157,7 +168,7 @@ class ServiceManager:
             id="frontend", label="前端", port=FE_PORT,
             cmd=[_NODE or "node", str(_FE_ENTRY), "--host", "127.0.0.1", "--port", str(FE_PORT), "--strictPort"],
             cwd=FRONTEND,
-            extra_env={"VITE_USE_MOCK": "false", "VITE_API_PROXY": "http://127.0.0.1:8000"},
+            extra_env={"VITE_USE_MOCK": "false", "VITE_API_PROXY": f"http://127.0.0.1:{BE_PORT}"},
             health_url=f"http://127.0.0.1:{FE_PORT}/")
 
     # ---------- 内部 ----------

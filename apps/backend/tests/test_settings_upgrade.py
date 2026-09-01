@@ -58,7 +58,7 @@ def test_initialize_user_settings_writes_safe_defaults(tmp_path):
 def test_normalize_legacy_model_prefix_strips(tmp_path):
     settings_file = tmp_path / "settings.json"
     settings_file.write_text(
-        json.dumps({"llm_model": "deepseek/deepseek-v4-flash", "llm_api_key": "sk-x"}),
+        json.dumps({"llm_model": "deepseek/deepseek-v4-flash", "llm_api_key": "test-settings-key"}),
         encoding="utf-8",
     )
     settings = SimpleNamespace(llm_model="deepseek/deepseek-v4-flash", agent_data_dir=str(tmp_path))

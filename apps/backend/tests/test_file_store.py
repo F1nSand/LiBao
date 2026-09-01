@@ -53,6 +53,41 @@ async def test_rollback_reloads_from_disk():
     assert got.status == "pending"
 
 
+async def test_rollback_detaches_old_row_and_fresh_row_persists(tmp_path):
+    """rollback 后旧行不再属于表；只有重新读取的行能参与后续提交。"""
+    from types import SimpleNamespace
+
+    from app.storage.file.store import FileContext, FileStore
+    from app.storage.file.tables import FileTable
+    from app.storage.models.conversation import Conversation
+
+    store = FileStore(
+        SimpleNamespace(agent_data_dir=str(tmp_path / ".agent"), kb_root=str(tmp_path / "kb"))
+    )
+    await store.init()
+    table = store.table("conversations")
+    conversation = Conversation(user_id=uuid.UUID(int=0), agent_id=uuid.UUID(int=1), title="原始标题")
+    table.register(conversation)
+    await FileContext(store).commit()
+
+    old_row = conversation
+    old_row.title = "旧对象修改"
+    await FileContext(store).rollback()
+    fresh_row = await table.get(old_row.id)
+
+    assert fresh_row is not None
+    assert fresh_row is not old_row
+    old_row.title = "回滚后的旧对象修改"
+    await FileContext(store).commit()
+    reloaded = await FileTable(tmp_path / ".agent", "conversations.json", Conversation).get(old_row.id)
+    assert reloaded is not None and reloaded.title == "原始标题"
+
+    fresh_row.title = "新对象修改"
+    await FileContext(store).commit()
+    reloaded = await FileTable(tmp_path / ".agent", "conversations.json", Conversation).get(old_row.id)
+    assert reloaded is not None and reloaded.title == "新对象修改"
+
+
 async def test_concurrent_appends_serialized():
     store = get_store()
 

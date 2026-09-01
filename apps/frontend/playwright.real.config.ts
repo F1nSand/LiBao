@@ -8,6 +8,8 @@ import { defineConfig, devices } from '@playwright/test'
  * - 需在 `~/.LiBao/settings.json` 配好 LLM key；chat 用例走真实 LLM，耗时较长
  */
 const FRONTEND_URL = process.env.E2E_FRONTEND_URL ?? 'http://127.0.0.1:5173'
+const BACKEND_URL = process.env.E2E_BACKEND_URL ?? 'http://127.0.0.1:8000'
+const FRONTEND_PORT = new URL(FRONTEND_URL).port || '5173'
 
 export default defineConfig({
   testDir: './e2e-real',
@@ -19,7 +21,13 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: `npm run dev -- --mode real --host 127.0.0.1 --port ${new URL(FRONTEND_URL).port || '5173'}`,
+    command: `npm run dev -- --mode real --host 127.0.0.1 --port ${FRONTEND_PORT}`,
+    env: {
+      ...process.env,
+      E2E_BACKEND_URL: BACKEND_URL,
+      VITE_API_PROXY: BACKEND_URL,
+      VITE_USE_MOCK: 'false',
+    },
     url: FRONTEND_URL,
     reuseExistingServer: true,
     timeout: 120_000,

@@ -7,4 +7,5 @@
 - [API 与 SSE 契约](api/contract.md)
 - [测试指南](development/testing.md)
 - [本地运行（Windows）](operations/local-windows.md)
+- [本地运行（Linux/macOS）](operations/local-linux.md)
 - [发布包边界](operations/release.md)
