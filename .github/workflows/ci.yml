@@ -76,6 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
       - uses: gitleaks/gitleaks-action@v3
@@ -83,7 +84,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
   dependency-review:
-    if: github.event_name == 'pull_request'
+    # GitHub only supports dependency-review for public repositories or private
+    # repositories with GitHub Advanced Security enabled.  Keep the check ready
+    # for the public release without making a private development repository fail.
+    if: github.event_name == 'pull_request' && github.event.repository.visibility == 'public'
     runs-on: ubuntu-latest
     permissions:
       contents: read

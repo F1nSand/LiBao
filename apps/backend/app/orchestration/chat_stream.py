@@ -408,6 +408,20 @@ async def chat_stream_events(
         bound_conversation.active_graph_checkpoint_id = output_id
         bound_conversation.graph_cursor_initialized = True
 
+    async def _bind_failed_graph_run(target_conversation: Conversation | None = None) -> None:
+        """Persist the cursor before this failed input without inspecting a partial run."""
+        bound_conversation = target_conversation or conversation
+        await checkpoint_service.store.bind_graph_run(
+            bound_conversation.id,
+            checkpoint.id,
+            graph_parent_checkpoint_id=graph_parent_checkpoint_id,
+            graph_parent_bound=graph_parent_bound,
+            graph_output_checkpoint_id=None,
+        )
+        # A failed input must never become the next turn's implicit graph state.
+        bound_conversation.active_graph_checkpoint_id = graph_parent_checkpoint_id
+        bound_conversation.graph_cursor_initialized = True
+
     async def on_interrupt(value: dict[str, Any]) -> str:
         nonlocal task
         await _bind_graph_run()
@@ -517,7 +531,7 @@ async def chat_stream_events(
             # graph root cursor explicitly so the next request cannot replay the
             # failed user input after the FileContext is reloaded.
             with contextlib.suppress(Exception):
-                await _bind_graph_run()
+                await _bind_failed_graph_run()
             with contextlib.suppress(Exception):
                 await db.commit()
             return
@@ -528,7 +542,7 @@ async def chat_stream_events(
         fresh_conversation = await ConversationRepository(db).table.get(conversation.id)
         if fresh_conversation is not None:
             with contextlib.suppress(Exception):
-                await _bind_graph_run(fresh_conversation)
+                await _bind_failed_graph_run(fresh_conversation)
         current_task = await TaskRepository(db).get_by_id(task.id)
         if current_task is not None and current_task.status != "cancelled":
             error_payload = {
