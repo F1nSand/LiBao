@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { ChatRequest, KbCollection, KbDocument, Message, RestoreConversationPlan, RestorePreview, RestoreResult, RollbackMode, SseEnvelope, TaskError, ToolDefinition, Workspace } from '@/types'
+import type { ChatRequest, KbCollection, KbDocument, McpServer, Message, RestoreConversationPlan, RestorePreview, RestoreResult, RollbackMode, SseEnvelope, TaskError, ToolDefinition, Workspace } from '@/types'
 import {
   DEFAULT_AGENT_ID,
   tools,
@@ -11,6 +11,7 @@ import {
   conversations,
   messages,
   tasks,
+  mcpServers,
   kbCollections,
   kbDocuments,
   longtermMemories,
@@ -813,26 +814,88 @@ export const mockServer = {
     }
 
     /* ===== 工具 ===== */
+    if (method === 'GET' && pathname === '/tools/mcp') {
+      return void json(res, ok(mcpServers))
+    }
+    if (method === 'POST' && pathname === '/tools/mcp/register') {
+      const urlOrCommand = String(body.json?.url_or_command ?? '').trim()
+      const serverId = uid('mcp')
+      const transport: 'http' | 'stdio' = /^https?:\/\//i.test(urlOrCommand) ? 'http' : 'stdio'
+      const server: McpServer = {
+        id: serverId,
+        name: String(body.json?.name ?? '').trim() || `mcp_${randHex(4)}`,
+        transport,
+        url_or_command: urlOrCommand,
+        header_names: Object.keys((body.json?.headers ?? {}) as Record<string, unknown>).sort(),
+        enabled: body.json?.enable !== false,
+        tool_count: 2,
+        created_at: isoDate(0),
+      }
+      const source = `mcp:${serverId}`
+      const discoveredTools = [
+        {
+          id: uid('tl'),
+          name: `mcp_${serverId}_search`,
+          description: 'MCP 源搜索工具',
+          params_schema: {},
+          tool_type: 'execution' as const,
+          enabled: true,
+          require_confirm: false,
+          sandbox: 'none' as const,
+          timeout_ms: 30_000,
+          max_concurrency: 2,
+          mcp_source: source,
+          created_at: isoDate(0),
+        },
+        {
+          id: uid('tl'),
+          name: `mcp_${serverId}_fetch`,
+          description: 'MCP 源抓取工具',
+          params_schema: {},
+          tool_type: 'execution' as const,
+          enabled: true,
+          require_confirm: false,
+          sandbox: 'none' as const,
+          timeout_ms: 30_000,
+          max_concurrency: 2,
+          mcp_source: source,
+          created_at: isoDate(0),
+        },
+      ] as ToolDefinition[]
+      mcpServers.unshift(server)
+      tools.unshift(...discoveredTools)
+      return void json(res, ok({ server, tools: discoveredTools }))
+    }
+    p = match(pathname, '/tools/mcp/:server_id')
+    if (method === 'DELETE' && p) {
+      const serverId = p.server_id
+      const index = mcpServers.findIndex((server) => server.id === serverId)
+      if (index < 0) return void json(res, fail(40401, 'MCP 源不存在'))
+      mcpServers.splice(index, 1)
+      for (let i = tools.length - 1; i >= 0; i -= 1) {
+        if (tools[i].mcp_source === `mcp:${serverId}`) tools.splice(i, 1)
+      }
+      return void json(res, ok(null))
+    }
     if (method === 'GET' && pathname === '/tools') {
       const page = Number(query.get('page') ?? 1)
       const size = Number(query.get('page_size') ?? 20)
       return void json(res, ok(paginate(tools, page, size)))
     }
     if (method === 'POST' && pathname === '/tools') {
-      const nt = { id: uid('tl'), name: body.json?.name ?? `tool_${randHex(4)}`, description: body.json?.description ?? '', params_schema: body.json?.params_schema ?? {}, tool_type: body.json?.tool_type ?? 'execution', sandbox: body.json?.sandbox ?? 'none', require_confirm: body.json?.require_confirm ?? false, idempotent: body.json?.idempotent ?? false, enabled: false, created_at: isoDate(0) } as ToolDefinition
+      const nt = { id: uid('tl'), name: body.json?.name ?? `tool_${randHex(4)}`, description: body.json?.description ?? '', params_schema: body.json?.params_schema ?? {}, tool_type: body.json?.tool_type ?? 'execution', sandbox: body.json?.sandbox ?? 'none', require_confirm: body.json?.require_confirm ?? false, idempotent: body.json?.idempotent ?? false, enabled: true, created_at: isoDate(0) } as ToolDefinition
       tools.unshift(nt)
       return void json(res, ok(nt))
     }
     if (method === 'GET' && pathname === '/tools/search') {
-      const q = (query.get('q') ?? '').toLowerCase()
+      const tokens = (query.get('q') ?? '').trim().toLowerCase().split(/[\s,，;；、|/]+/).filter(Boolean)
       // 排除元工具：tool_search 发现的是 domain 工具，不返回自身/其他 meta
-      const hits = tools.filter((t) => !t.meta && (t.name.includes(q) || (t.description ?? '').toLowerCase().includes(q)))
+      const hits = tools.filter((t) => {
+        const name = t.name.toLowerCase()
+        const description = (t.description ?? '').toLowerCase()
+        return !t.meta && tokens.some((token) => name.includes(token) || description.includes(token))
+      })
       return void json(res, ok(hits.map((t) => ({ id: t.id, name: t.name, description: t.description, enabled: t.enabled }))))
-    }
-    if (method === 'POST' && pathname === '/tools/mcp/register') {
-      const nt = { id: uid('tl'), name: 'mcp_' + randHex(4), description: 'MCP 源接入工具', params_schema: {}, tool_type: 'execution' as const, enabled: false, require_confirm: true, sandbox: 'docker' as const, timeout_ms: 30_000, max_concurrency: 2, mcp_source: body.json?.url_or_command, created_at: isoDate(0) }
-      tools.unshift(nt)
-      return void json(res, ok(nt))
     }
     p = match(pathname, '/tools/:id/test')
     if (method === 'POST' && p) {

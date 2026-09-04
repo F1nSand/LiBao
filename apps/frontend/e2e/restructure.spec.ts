@@ -29,13 +29,22 @@ test.describe('布局重构', () => {
     await gotoChat(page)
     await expect(page.locator('.settings-popover')).toBeHidden()
 
-    // 点设置弹气泡（admin 全 5 项，任务已删、技能已加、候选区已删）
+    // 点设置弹气泡（admin 全 6 项，包含工具与 MCP）
     await page.locator('.settings-toggle').click()
-    await expect(page.locator('.settings-popover .sub-item')).toHaveCount(5)
+    await expect(page.locator('.settings-popover .sub-item')).toHaveCount(6)
 
     // 点子项 → 跳转 /tools 且设置按钮高亮
     await page.locator('.settings-popover .sub-item', { hasText: '工具' }).click()
     await expect(page).toHaveURL(/\/tools/)
     await expect(page.locator('.settings-toggle')).toHaveClass(/active/)
+  })
+
+  test('设置气泡包含 MCP 页面入口', async ({ page }) => {
+    await gotoChat(page)
+    await page.locator('.settings-toggle').click()
+    await page.locator('.settings-popover .sub-item', { hasText: 'MCP' }).click()
+
+    await expect(page).toHaveURL(/\/mcp/)
+    await expect(page.getByRole('heading', { name: 'MCP' })).toBeVisible()
   })
 })

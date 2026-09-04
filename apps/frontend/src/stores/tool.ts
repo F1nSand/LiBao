@@ -6,12 +6,16 @@ import {
   updateTool,
   deleteTool,
   testTool,
-  registerMcp,
   searchTools,
 } from '@/api/tool'
 import type { CreateToolRequest, ToolDefinition, ToolSearchHit } from '@/types'
 
 type ToolListStatus = 'idle' | 'loading' | 'success-empty' | 'success' | 'error'
+
+export interface ToggleManyResult {
+  succeeded: ToolDefinition[]
+  failed: Array<{ id: string; reason: unknown }>
+}
 
 /** 工具 store（《02》前端设计 §7）：列表 + 启用开关 + 测试结果 */
 export const useToolStore = defineStore('tool', {
@@ -41,8 +45,20 @@ export const useToolStore = defineStore('tool', {
       await this.list()
     },
     async toggle(id: string, enabled: boolean) {
-      await toggleTool(id, enabled)
-      await this.list()
+      const updated = await toggleTool(id, enabled)
+      const index = this.tools.findIndex((tool) => tool.id === id)
+      if (index >= 0) this.tools.splice(index, 1, updated)
+      return updated
+    },
+    async toggleMany(ids: string[], enabled: boolean): Promise<ToggleManyResult> {
+      const settled = await Promise.allSettled(ids.map((id) => this.toggle(id, enabled)))
+      const succeeded: ToolDefinition[] = []
+      const failed: Array<{ id: string; reason: unknown }> = []
+      settled.forEach((result, index) => {
+        if (result.status === 'fulfilled') succeeded.push(result.value)
+        else failed.push({ id: ids[index], reason: result.reason })
+      })
+      return { succeeded, failed }
     },
     async create(body: CreateToolRequest) {
       await createTool(body)
@@ -58,10 +74,6 @@ export const useToolStore = defineStore('tool', {
     },
     async test(id: string, params: Record<string, unknown>) {
       return testTool(id, params)
-    },
-    async registerMcp(url: string, headers?: Record<string, string>) {
-      await registerMcp({ url_or_command: url, headers })
-      await this.list()
     },
     async search(q: string): Promise<ToolSearchHit[]> {
       return searchTools(q)

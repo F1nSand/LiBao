@@ -44,6 +44,25 @@ async def test_search_matches_name_and_description():
     assert "web_page" in [m["name"] for m in out3["matches"]]  # 描述命中（目录含内置 fetch_url）
 
 
+async def test_search_multi_keyword_query_matches_any_term_and_ranks_relevance():
+    register(_spec("t_test_apify_a", "apify_actor", "网页抓取 crawler actor"))
+    register(_spec("t_test_apify_b", "apify_misc", "Apify helper"))
+
+    out = await tool_search_handler("apify 网页抓取爬虫 scrape crawler actor")
+
+    names = [m["name"] for m in out["matches"]]
+    assert names[0] == "apify_actor"
+    assert "apify_misc" in names
+
+
+async def test_search_blank_query_returns_no_matches():
+    register(_spec("t_test_blank", "blank_query_target", "blank query target"))
+
+    out = await tool_search_handler(" \t\n")
+
+    assert out["matches"] == []
+
+
 async def test_search_empty_hint():
     register(_spec("t_test_a", "stock_query", "股票查询"))
     out = await tool_search_handler("宇宙无敌")

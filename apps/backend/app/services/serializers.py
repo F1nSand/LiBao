@@ -140,13 +140,13 @@ def serialize_workspace(w: Workspace) -> dict[str, Any]:
 
 
 def serialize_mcp_server(s: McpServer, tool_count: int = 0) -> dict[str, Any]:
-    """MCP 源序列化（《02》接口契约 §5.5 补充）。url_or_command 原样回显（command 或 url）。"""
+    """MCP 源序列化（《02》接口契约 §5.5 补充）。只返回请求头名称，不回传凭据。"""
     return {
         "id": str(s.id),
         "name": s.name,
         "transport": s.transport,
         "url_or_command": s.command or s.url,
-        "headers": s.headers,
+        "header_names": sorted((s.headers or {}).keys()),
         "enabled": s.enabled,
         "tool_count": tool_count,
         "created_at": _dt(s.created_at),

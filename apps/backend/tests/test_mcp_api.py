@@ -1,4 +1,4 @@
-"""T4 MCP 服务层测试（文件存储）：注册建行+spec+默认关闭、重名 40904、遮蔽 40903、
+"""T4 MCP 服务层测试（文件存储）：注册建行+spec+默认启用、重名 40904、遮蔽 40903、
 连接失败 50201、enable 标志、注销禁用、列表 tool_count。
 
 validate 用 monkeypatch 固定返回（不真连 server）。
@@ -69,20 +69,36 @@ async def test_register_creates_server_and_tool_rows(mcp_api_fixture):
         tools = await ToolDefinitionRepository().list_for_org_all()
         assert {t.name for t in tools} == {tool_a, tool_b}
         assert all(t.mcp_source == f"mcp:{server_id}" for t in tools)
-        assert all(t.enabled is False for t in tools)
+        assert all(t.enabled is True for t in tools)
 
 
-async def test_register_tools_default_disabled_and_spec_registered(mcp_api_fixture):
+async def test_register_tools_default_enabled_and_spec_registered(mcp_api_fixture):
     user, tool_a, tool_b = mcp_api_fixture
     async with get_store().session() as session:
         res = await McpService().register(session, user, _req())
         for t in res["tools"]:
-            assert t["enabled"] is False  # 默认关闭原则
+            assert t["enabled"] is True  # 新注册 MCP 工具默认启用
         spec = get(f"mc_demo_{tool_a}")
         assert spec is not None
         assert spec.mcp_source == f"mcp:{res['server']['id']}"
         assert spec.handler is not None
-        assert spec.enabled is False
+        assert spec.enabled is True
+
+
+async def test_register_redacts_headers_and_returns_enabled_tools(mcp_api_fixture):
+    user, tool_a, tool_b = mcp_api_fixture
+    async with get_store().session() as session:
+        res = await McpService().register(
+            session,
+            user,
+            _req(headers={"X-Trace": "trace-secret", "Authorization": "bearer-secret"}),
+        )
+
+        assert res["server"]["header_names"] == ["Authorization", "X-Trace"]
+        assert "headers" not in res["server"]
+        assert "trace-secret" not in str(res)
+        assert "bearer-secret" not in str(res)
+        assert all(tool["enabled"] is True for tool in res["tools"])
 
 
 async def test_register_http_transport(mcp_api_fixture):
@@ -133,7 +149,8 @@ async def test_register_enable_flag_controls_server_only(mcp_api_fixture):
     async with get_store().session() as session:
         res = await McpService().register(session, user, _req(enable=False))
         assert res["server"]["enabled"] is False
-        assert res["tools"][0]["enabled"] is False  # 工具仍默认关闭
+        assert res["tools"][0]["enabled"] is True  # 工具默认启用，服务停用只影响 runtime
+        assert get(f"mc_demo_{tool_a}").enabled is False
 
 
 async def test_list_servers_with_tool_count(mcp_api_fixture):

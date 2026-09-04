@@ -1,4 +1,4 @@
-"""T2 工具服务层测试：tl_ id 派生、默认关闭、重名 40903、启停同步桥、search、软删。
+"""T2 工具服务层测试：tl_ id 派生、默认启用、重名 40903、启停同步桥、search、软删。
 
 需要 Docker db（localhost:5432）；DB 不可达自动跳过。
 """
@@ -35,13 +35,13 @@ async def tool_fixture():
     yield user
 
 
-async def test_create_tool_default_disabled(tool_fixture):
+async def test_create_tool_default_enabled(tool_fixture):
     user = tool_fixture
     async with get_store().session() as session:
         row = await ToolService().create(session, user, CreateToolRequest(name="stock_query", tool_type="perception"))
         data = serialize_tool_definition(row)
         assert data["id"] == "tl_stock_query"  # tl_ 前缀派生
-        assert data["enabled"] is False  # 默认关闭
+        assert data["enabled"] is True  # 新注册工具默认启用
 
 
 async def test_create_duplicate_name_conflict(tool_fixture):
@@ -56,8 +56,12 @@ async def test_create_duplicate_name_conflict(tool_fixture):
 async def test_builtin_time_now_serializes_with_registry_id(tool_fixture):
     user = tool_fixture
     async with get_store().session() as session:
+        set_enabled("tl_time_now", False)
         row = await ToolService().create(session, user, CreateToolRequest(name="time_now"))
         assert serialize_tool_definition(row)["id"] == "tl_time_now"  # 与 registry spec.id 一致
+        assert row.enabled is True
+        assert get("tl_time_now").enabled is True
+        set_enabled("tl_time_now", True)
 
 
 async def test_set_enabled_syncs_registry(tool_fixture):
@@ -82,6 +86,25 @@ async def test_search_case_insensitive(tool_fixture):
         assert any(h["name"] == "StockQuery" for h in hits)
         hits2 = await ToolService().search(session, uuid.UUID(int=0), "STOCK")
         assert len(hits2) == len(hits)
+
+
+async def test_search_multi_keyword_query_matches_any_term(tool_fixture):
+    user = tool_fixture
+    name = f"apify_actor_{uuid.uuid4().hex[:8]}"
+    async with get_store().session() as session:
+        await ToolService().create(
+            session,
+            user,
+            CreateToolRequest(name=name, description="网页抓取 crawler actor"),
+        )
+
+        hits = await ToolService().search(
+            session,
+            uuid.UUID(int=0),
+            "apify 网页抓取爬虫 scrape crawler actor",
+        )
+
+        assert [hit["name"] for hit in hits] == [name]
 
 
 async def test_soft_delete(tool_fixture):

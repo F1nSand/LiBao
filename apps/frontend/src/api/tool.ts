@@ -5,7 +5,6 @@ import type {
   CreateToolRequest,
   ToolTestResult,
   ToolSearchHit,
-  McpRegisterRequest,
 } from '@/types'
 
 export function listTools(params: { page?: number; page_size?: number; enabled?: boolean } = {}) {
@@ -30,10 +29,6 @@ export function deleteTool(id: string) {
 
 export function testTool(id: string, params: Record<string, unknown>) {
   return httpPost<ToolTestResult>(`/tools/${id}/test`, { params })
-}
-
-export function registerMcp(body: McpRegisterRequest) {
-  return httpPost<ToolDefinition>('/tools/mcp/register', body)
 }
 
 export function searchTools(q: string) {

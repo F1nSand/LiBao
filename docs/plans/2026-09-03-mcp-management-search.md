@@ -2,6 +2,8 @@
 
 **Goal:** 在 LiBao Web 设置组中新增独立 MCP 管理页，让未来注册的普通/MCP 工具默认启用，并修复 Agent 与 Web 工具搜索的多关键词漏匹配。
 
+**Execution status:** 已完成（2026-09-03）；包含 MCP 管理、工具批量启停、三分类展示与筛选、搜索修复及回归验证。
+
 **Architecture:** 复用现有 MCP 后端注册/列表/删除接口，新增 `McpServer` 前端类型、MCP API 模块、Pinia store 和 `/mcp` 页面；工具页继续负责工具启停/测试，MCP 页只负责服务源生命周期。后端通过领域服务显式切换新工具的 enabled 状态，并通过无依赖的共享关键词评分函数同时服务 runtime `tool_search` 和 REST 工具搜索。
 
 **Global Constraints:**
@@ -172,3 +174,25 @@
 - [ ] Step 4: 运行 mock E2E，核对 MCP 页面注册/列表/删除、工具默认启用、请求头值不出现在 DOM 和网络响应摘要中。
 - [ ] Step 5: 做收尾 review：`git diff --check`；`git status --short` 确认未修改 Codex 配置、未批量改变历史工具状态、未把凭据写入仓库；人工检查 MCP 页面没有编辑/启停实现和搜索逻辑没有新增依赖。
 - [ ] Step 6: 运行现有项目收尾 gate；如果仓库没有可调用的 `/verify`、`/code-review`、`/simplify` 命令，则以已执行的测试、diff 检查和人工 review 记录替代，并在账本中说明。
+
+## Task 7: 工具页区分 MCP 分类
+
+**Files:**
+
+- Create: `apps/frontend/src/utils/tool-category.ts` — 提供 `ToolCategory` 类型和统一的 `getToolCategory(tool)` 派生函数。
+- Create: `apps/frontend/src/utils/tool-category.spec.ts` — 覆盖 MCP、元工具、常规工具及 MCP 优先级。
+- Modify: `apps/frontend/src/views/ToolsView.vue` — 使用统一分类函数渲染类别标签，筛选栏增加 MCP 并按三类互斥筛选。
+- Modify: `apps/frontend/src/views/ToolsView.spec.ts` — 覆盖 MCP 工具标签、三类筛选和 MCP 不进入常规工具筛选。
+- Modify: `apps/frontend/e2e/tools-meta.spec.ts` — 增加 MCP 工具注册后类别展示和筛选验收。
+
+**Interfaces:**
+
+- Consumes: `ToolDefinition.mcp_source?: string | null`、`ToolDefinition.meta?: boolean`。
+- Produces: `getToolCategory(tool: Pick<ToolDefinition, 'mcp_source' | 'meta'>): ToolCategory`，返回 `'mcp' | 'meta' | 'regular'`。
+- UI contract: 分类优先级为 MCP > 元工具 > 常规工具；筛选值与 `ToolCategory` 一致，切换筛选继续清空批量选择。
+
+- [ ] Step 1: 先添加分类函数测试和工具页 MCP fixture，验证三类结果及 MCP 优先级；运行分类与工具页测试，预期新函数/筛选未实现时失败。
+- [ ] Step 2: 实现 `tool-category.ts`，让 `ToolsView` 的标签和筛选共用该函数；新增「MCP」筛选按钮，并保持批量启停调用路径不变。
+- [ ] Step 3: 运行 `npm run test:unit -- --run src/utils/tool-category.spec.ts src/views/ToolsView.spec.ts`，确认分类、标签、筛选和选择清理通过。
+- [ ] Step 4: 更新并运行 mock E2E，确认 MCP 工具显示「MCP」、进入 MCP 筛选、不进入常规筛选；再运行前端类型检查和相关全量测试。
+- [ ] Step 5: 检查分类函数没有修改后端权限/启用语义，更新账本并完成收尾验证。

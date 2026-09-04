@@ -1,4 +1,4 @@
-"""工具 schema（《02》接口契约 §5.5）。创建默认 enabled=false（默认关闭原则，由服务层强制）。"""
+"""工具 schema（《02》接口契约 §5.5）。新注册默认启用由领域服务显式控制。"""
 
 from __future__ import annotations
 
@@ -47,4 +47,4 @@ class McpRegisterRequest(BaseModel):
     name: str | None = None
     url_or_command: str  # 命令（stdio）或 http(s) URL
     headers: dict[str, str] | None = None
-    enable: bool | None = None  # server 连接启用；工具本身默认关闭
+    enable: bool | None = None  # server 连接启用；工具本身由注册领域服务默认启用

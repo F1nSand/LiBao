@@ -11,6 +11,10 @@ describe('isSettingsRoute（设置组路由）', () => {
     expect(isSettingsRoute('/kb')).toBe(false)
     expect(isSettingsRoute('/trajectory/c_001')).toBe(false)
   })
+
+  it('MCP 与工具同属设置组', () => {
+    expect(isSettingsRoute('/mcp')).toBe(true)
+  })
 })
 
 describe('menuItems（层级）', () => {
@@ -18,8 +22,8 @@ describe('menuItems（层级）', () => {
     expect(menuItems.slice(0, 2).map((i) => i.path)).toEqual(['/workspace', '/chat'])
   })
 
-  it('设置项带 children（设置/工具/技能/记忆/系统）', () => {
+  it('设置项带 children（设置/工具/MCP/技能/记忆/系统）', () => {
     const settings = menuItems.find((i) => i.path === '/settings')
-    expect(settings?.children?.map((c) => c.path)).toEqual(['/settings', '/tools', '/skills', '/memory', '/system'])
+    expect(settings?.children?.map((c) => c.path)).toEqual(['/settings', '/tools', '/mcp', '/skills', '/memory', '/system'])
   })
 })

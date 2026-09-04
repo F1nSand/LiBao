@@ -344,10 +344,27 @@ export interface ToolSearchHit {
   enabled: boolean
 }
 
+export interface McpServer {
+  id: string
+  name: string
+  transport: 'http' | 'stdio'
+  url_or_command: string
+  header_names: string[]
+  enabled: boolean
+  tool_count: number
+  created_at: string
+}
+
 export interface McpRegisterRequest {
+  name?: string
   url_or_command: string
   headers?: Record<string, string>
   enable?: boolean
+}
+
+export interface McpRegisterResult {
+  server: McpServer
+  tools: ToolDefinition[]
 }
 
 /** ---------- Skills（M7-A 简化 2026-08-25：两级文件目录，删 org CRUD / git 导入） ---------- */

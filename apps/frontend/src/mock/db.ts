@@ -3,6 +3,7 @@ import type {
   KbCollection,
   KbDocument,
   LongTermMemory,
+  McpServer,
   Message,
   Notification,
   Skill,
@@ -85,6 +86,9 @@ export const tools: ToolDefinition[] = [
     created_at: isoDate(170),
   },
 ]
+
+/** MCP 服务源（内存态；重启即清空，header 只在注册请求中使用） */
+export const mcpServers: McpServer[] = []
 
 export const conversations: Conversation[] = [
   { id: 'c_001', user_id: 'u_admin', agent_id: DEFAULT_AGENT_ID, title: '计算 6*7', status: 'active', max_messages: 1000, last_message_at: isoDate(10), created_at: isoDate(60) },

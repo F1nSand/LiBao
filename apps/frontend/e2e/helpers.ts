@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 
-export const PRIMARY_ROUTES = ['/chat', '/workspace', '/kb', '/tools', '/skills', '/memory', '/system', '/settings'] as const
+export const PRIMARY_ROUTES = ['/chat', '/workspace', '/kb', '/tools', '/mcp', '/skills', '/memory', '/system', '/settings'] as const
 
 export const RESPONSIVE_VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },

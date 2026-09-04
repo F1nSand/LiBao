@@ -1,6 +1,7 @@
 """工具定义实体（《02》数据模型 §3.5）。
 
-内置工具与 MCP 注册的工具同走 tool_definition 生命周期；enabled 默认关闭（约束优先）。
+内置工具与 MCP 注册的工具同走 tool_definition 生命周期；底层行 enabled 默认关闭（约束优先）。
+新注册入口的默认启用策略由领域服务显式设置，不在模型层隐式改变。
 sandbox: none / docker / microvm；tool_type: perception / execution / collaboration / user_comms / event。
 """
 

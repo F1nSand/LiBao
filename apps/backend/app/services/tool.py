@@ -2,7 +2,7 @@
 
 DB tool_definition 是元数据事实源，registry 是可执行实现宿主，按 name 绑定；
 API id = registry spec.id（内置）或 "tl_" + name（无 spec 的 DB 工具）。
-PATCH/DELETE 经 registry.set_enabled 同步启用态（默认关闭原则实时生效）。
+PATCH/DELETE 经 registry.set_enabled 同步启用态；新注册工具默认启用。
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ class ToolService:
             description=req.description or "",
             params_schema=req.params_schema or {"type": "object", "properties": {}, "required": []},
             tool_type=req.tool_type,
-            enabled=False,  # 默认关闭原则（约束优先）
+            enabled=True,  # 领域注册入口默认启用；底层模型默认值保持关闭
             require_confirm=req.require_confirm,
             idempotent=req.idempotent,
             sandbox=_sandbox_level(req.sandbox or SandboxLevel.NONE).value,
@@ -77,6 +77,9 @@ class ToolService:
         )
         await db.commit()
         await db.refresh(row)
+        # 同步桥：若新建行绑定已有 runtime spec，默认启用立即对当前进程生效
+        if spec is not None:
+            set_enabled(spec.id, True)
         return row
 
     async def update(self, db: Any, user: User, tool_id: str, req: Any) -> ToolDefinition:

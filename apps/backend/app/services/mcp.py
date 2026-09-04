@@ -1,7 +1,7 @@
 """MCP 源服务（《02》后端设计 §7.2 / 《02》接口契约 §5.5）。
 
 验证即注册：连接 → list_tools 成功才落库（失败 50201）；工具与内置工具同生命周期
-（tool_definition 行 + registry spec，默认关闭、agent 勾选、confirm/幂等/超时全复用）。
+（tool_definition 行 + registry spec，注册默认启用、confirm/幂等/超时全复用）。
 同名遮蔽拒绝（I7）：工具名与既有 registry / 同 org 工具行冲突 → 40903。
 """
 
@@ -32,7 +32,7 @@ from app.tools.mcp_client import (
     slugify,
 )
 from app.tools.mcp_manager import manager
-from app.tools.registry import ToolSpec, ToolType, get_by_name, register, unregister
+from app.tools.registry import ToolSpec, ToolType, get_by_name, register, set_enabled, unregister
 from app.tools.sandbox import SandboxLevel
 
 
@@ -135,11 +135,13 @@ class McpService:
                 description=t.description or "(MCP 工具)",
                 params_schema=t.input_schema,
                 tool_type="execution",
-                enabled=False,  # 默认关闭原则（约束优先）
+                enabled=True,  # 新注册 MCP 工具默认启用；服务停用由 runtime 状态单独约束
                 mcp_source=f"mcp:{server.id}",
                 mcp_tool_name=t.name,  # 原始工具名（重启重建 spec 时透传 call_tool）
             )
-            register(build_mcp_spec(server, row, cfg))
+            spec = build_mcp_spec(server, row, cfg)
+            register(spec)
+            set_enabled(spec.id, row.enabled and server.enabled)
             tool_rows.append(row)
         await db.commit()
         await db.refresh(server)

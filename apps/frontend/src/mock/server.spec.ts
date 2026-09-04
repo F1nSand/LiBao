@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { ChatRequest } from '@/types'
-import { messages, uploadedAttachments, workspaceFileContents } from './db'
+import type { ChatRequest, ToolDefinition } from '@/types'
+import { messages, mcpServers, tools, uploadedAttachments, workspaceFileContents } from './db'
 import { mockServer } from './server'
 import { buildChatScript, toEnvelope, PERSISTED_TYPES } from './stream'
 import { nextTaskSeq, pushTaskEvent, replayTaskEvents, subscribeTaskLog, taskLastSeq } from './task-events'
@@ -120,6 +120,64 @@ describe('mock checkpoint restore v2 contract', () => {
     })
     expect(operation.data.mode).toBe('both')
     expect(operation.data.conversation).toMatchObject({ action: 'restore_cursor', draft: null })
+  })
+})
+
+describe('mock MCP 管理接口', () => {
+  let registeredServerId: string | null = null
+
+  afterEach(() => {
+    for (let i = tools.length - 1; i >= 0; i -= 1) {
+      if (registeredServerId && tools[i].mcp_source === `mcp:${registeredServerId}`) tools.splice(i, 1)
+    }
+    registeredServerId = null
+    mcpServers.splice(0)
+  })
+
+  it('注册/列表/删除 MCP 服务只返回请求头名称，并维护关联工具', async () => {
+    const ordinaryToolId = tools[0].id
+    const registered = await callMock('POST', '/api/v1/tools/mcp/register', {
+      name: 'my-gateway',
+      url_or_command: 'http://gateway.local/mcp',
+      headers: { Authorization: 'secret-token', 'X-Trace': 'trace-secret' },
+      enable: true,
+    })
+    registeredServerId = registered.data.server.id
+
+    expect(registered.data.server).toMatchObject({
+      name: 'my-gateway',
+      transport: 'http',
+      header_names: ['Authorization', 'X-Trace'],
+      enabled: true,
+      tool_count: 2,
+    })
+    expect(registered.data.server).not.toHaveProperty('headers')
+    expect(JSON.stringify(registered)).not.toContain('secret-token')
+    expect(JSON.stringify(registered)).not.toContain('trace-secret')
+    expect(registered.data.tools).toHaveLength(2)
+    expect(registered.data.tools.every((tool: ToolDefinition) => tool.enabled)).toBe(true)
+    expect(mcpServers).toHaveLength(1)
+
+    const listed = await callMock('GET', '/api/v1/tools/mcp')
+    expect(listed.data).toHaveLength(1)
+    expect(listed.data[0]).toMatchObject({ name: 'my-gateway', header_names: ['Authorization', 'X-Trace'], tool_count: 2 })
+    expect(listed.data[0]).not.toHaveProperty('headers')
+
+    const deleted = await callMock('DELETE', `/api/v1/tools/mcp/${registeredServerId}`)
+    expect(deleted.data).toBeNull()
+    expect(mcpServers).toHaveLength(0)
+    expect(tools.find((tool) => tool.id === ordinaryToolId)).toBeDefined()
+    expect(tools.filter((tool) => tool.mcp_source === `mcp:${registeredServerId}`)).toHaveLength(0)
+  })
+})
+
+describe('mock 工具搜索', () => {
+  it('多关键词查询按任一词命中工具，并排除元工具', async () => {
+    const response = await callMock('GET', '/api/v1/tools/search?q=web%20search%20联网搜索%20网页%20URL')
+    const names = response.data.map((tool: ToolDefinition) => tool.name)
+
+    expect(names).toContain('web_search')
+    expect(names).not.toContain('tool_search')
   })
 })
 

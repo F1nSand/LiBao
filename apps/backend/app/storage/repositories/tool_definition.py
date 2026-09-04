@@ -9,6 +9,7 @@ from typing import Any
 
 from app.storage.file.store import get_store
 from app.storage.models.tool_definition import ToolDefinition
+from app.tools.search_utils import tool_match_score
 
 
 class ToolDefinitionRepository:
@@ -74,18 +75,18 @@ class ToolDefinitionRepository:
         return [t.name for t in rows]
 
     async def search(self, org_id: uuid.UUID, q: str, *, limit: int = 20) -> list[ToolDefinition]:
-        """工具发现（REST 版 G3）：name/description 子串匹配。"""
-        pattern = q.lower()
-        rows = await self.table.list(
-            filter_fn=lambda t: (
-                t.deleted_at is None
-                and (pattern in t.name.lower() or pattern in t.description.lower())
-            ),
-            sort_key=lambda t: t.created_at,
-            desc=True,
-            limit=limit,
-        )
-        return rows
+        """工具发现（REST 版 G3）：多关键词 OR 匹配并按相关度排序。"""
+        rows = await self.table.list(filter_fn=lambda t: t.deleted_at is None)
+        ranked = [
+            (score, row)
+            for row in rows
+            if (score := tool_match_score(row.name, row.description, q)) is not None
+        ]
+        # 稳定排序：相关度优先，同分时保持原有“新建优先”，最后按名称确定顺序。
+        ranked.sort(key=lambda pair: pair[1].name)
+        ranked.sort(key=lambda pair: pair[1].created_at, reverse=True)
+        ranked.sort(key=lambda pair: pair[0], reverse=True)
+        return [row for _, row in ranked[:limit]]
 
     async def create(
         self,

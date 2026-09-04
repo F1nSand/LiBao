@@ -12,7 +12,7 @@ export interface MenuItem {
   children?: MenuItem[]
 }
 
-/** 菜单项配置（《02》前端设计 §4）：侧栏菜单；设置项带 children（工具/记忆/系统/设置 子栏） */
+/** 菜单项配置（《02》前端设计 §4）：侧栏菜单；设置项带 children（工具/MCP/记忆/系统/设置 子栏） */
 export const menuItems: MenuItem[] = [
   // 工作区（M7-B，《02》前端设计 §4）：入口在对话上方；内部 = 文件资源管理器 + 工作区对话
   { path: '/workspace', title: '工作区', icon: 'Grid' },
@@ -25,6 +25,7 @@ export const menuItems: MenuItem[] = [
     children: [
       { path: '/settings', title: '设置', icon: 'Setting' },
       { path: '/tools', title: '工具', icon: 'Tools' },
+      { path: '/mcp', title: 'MCP', icon: 'Link' },
       { path: '/skills', title: '技能', icon: 'Collection' },
       { path: '/memory', title: '记忆', icon: 'Tickets' },
       { path: '/system', title: '系统', icon: 'Odometer' },
@@ -33,7 +34,7 @@ export const menuItems: MenuItem[] = [
 ]
 
 /** 属于「设置」组的路由（子栏在这些页面显示） */
-export const SETTINGS_ROUTES = ['/tools', '/skills', '/memory', '/system', '/settings']
+export const SETTINGS_ROUTES = ['/tools', '/mcp', '/skills', '/memory', '/system', '/settings']
 export const isSettingsRoute = (path: string): boolean => SETTINGS_ROUTES.includes(path)
 
 export const routes: RouteRecordRaw[] = [
@@ -71,6 +72,12 @@ export const routes: RouteRecordRaw[] = [
     name: 'tools',
     component: () => import('@/views/ToolsView.vue'),
     meta: { title: '工具', icon: 'Tools' } satisfies AppRouteMeta,
+  },
+  {
+    path: '/mcp',
+    name: 'mcp',
+    component: () => import('@/views/McpView.vue'),
+    meta: { title: 'MCP', icon: 'Link' } satisfies AppRouteMeta,
   },
   {
     path: '/skills',

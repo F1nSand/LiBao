@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.tools.registry import all_tools
+from app.tools.search_utils import tool_match_score
 
 _SELECT_LIMIT = 5  # 两段式选中注入上限（《02》后端设计 §7.1.1：选中 1-2 个，防上下文爆炸）
 
@@ -30,11 +31,14 @@ def _catalog_projection(catalog: list, include_mcp_source: bool) -> list[dict]:
 
 def _search_catalog(catalog: list, q: str, include_mcp_source: bool = True) -> list[dict]:
     """匹配逻辑（独立函数：I4 降级只兜匹配失败，不兜目录获取）。"""
-    q = q.lower()
-    return [
-        m for m in _catalog_projection(catalog, include_mcp_source)
-        if q in m["name"].lower() or q in (m["description"] or "").lower()
-    ]
+    ranked: list[tuple[tuple[int, int, int, int], dict]] = []
+    for item in _catalog_projection(catalog, include_mcp_source):
+        score = tool_match_score(item["name"], item["description"], q)
+        if score is not None:
+            ranked.append((score, item))
+    ranked.sort(key=lambda pair: pair[1]["id"])
+    ranked.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _, item in ranked]
 
 
 def selected_names(result: dict[str, Any]) -> list[str]:
@@ -47,14 +51,12 @@ def selected_names(result: dict[str, Any]) -> list[str]:
 
 
 async def tool_search_handler(query: str) -> dict[str, Any]:
-    """按名称/描述搜索（不区分大小写），按 id 排序。"""
-    q = query.lower()
+    """按名称/描述做多关键词搜索（不区分大小写），按相关度排序。"""
     catalog = list(all_tools())
     try:
-        matches = _search_catalog(catalog, q)
+        matches = _search_catalog(catalog, query)
         if not matches:
             return {"matches": [], "hint": "无匹配工具，可在工具管理页创建"}
-        matches.sort(key=lambda m: m["id"])
         return {"matches": matches}
     except Exception:  # noqa: BLE001
         # I4：检索逻辑挂 → 降级全量目录（仅名称+路由描述），不阻塞模型

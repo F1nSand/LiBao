@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useToolStore } from '@/stores/tool'
 import type { ToolDefinition } from '@/types'
@@ -7,27 +7,42 @@ import ToolTestModal from '@/components/business/ToolTestModal.vue'
 import ToolSearchBar from '@/components/business/ToolSearchBar.vue'
 import AsyncState from '@/components/common/AsyncState.vue'
 import ResponsiveDialog from '@/components/common/ResponsiveDialog.vue'
+import { getToolCategory, type ToolCategory } from '@/utils/tool-category'
 
-/** 工具管理（《02》前端设计 §4 / 《02》接口契约 §5.5）：注册/启用开关/沙盒测试/MCP 源；元工具（tool_search 等发现层）与常规工具区分 */
+/** 工具管理（《02》前端设计 §4 / 《02》接口契约 §5.5）：注册/启用开关/沙盒测试；元工具（tool_search 等发现层）与常规工具区分 */
 const store = useToolStore()
 
 const activeTool = ref<ToolDefinition | null>(null)
 const testVisible = ref(false)
 const createVisible = ref(false)
-const mcpVisible = ref(false)
 const createSubmitting = ref(false)
-const mcpSubmitting = ref(false)
-const busyToolId = ref<string | null>(null)
+const busyToolIds = ref(new Set<string>())
+const batchSubmitting = ref(false)
+const selectedTools = ref<ToolDefinition[]>([])
+const tableRef = ref<{ clearSelection: () => void } | null>(null)
 
-/** 类别筛选：全部 / 元工具（平台发现层，tool_search 等常驻）/ 常规工具（经 tool_search 发现） */
-const metaFilter = ref<'all' | 'meta' | 'regular'>('all')
+/** 类别筛选：全部 / 元工具（平台发现层）/ MCP / 常规工具（经 tool_search 发现） */
+const categoryFilter = ref<'all' | ToolCategory>('all')
+const CATEGORY_LABEL: Record<ToolCategory, string> = {
+  meta: '元工具',
+  mcp: 'MCP',
+  regular: '常规工具',
+}
+const CATEGORY_TAG_TYPE: Record<ToolCategory, 'warning' | 'success' | 'info'> = {
+  meta: 'warning',
+  mcp: 'success',
+  regular: 'info',
+}
+const CATEGORY_ORDER: Record<ToolCategory, number> = { meta: 0, mcp: 1, regular: 2 }
 const filteredTools = computed(() => {
-  const list = store.tools.filter((t) =>
-    metaFilter.value === 'all' ? true : metaFilter.value === 'meta' ? !!t.meta : !t.meta,
-  )
-  if (metaFilter.value === 'all') list.sort((a, b) => Number(!!b.meta) - Number(!!a.meta))
+  const list = store.tools.filter((tool) => categoryFilter.value === 'all' || getToolCategory(tool) === categoryFilter.value)
+  if (categoryFilter.value === 'all') {
+    list.sort((a, b) => CATEGORY_ORDER[getToolCategory(a)] - CATEGORY_ORDER[getToolCategory(b)])
+  }
   return list
 })
+const selectedToEnable = computed(() => selectedTools.value.filter((tool) => !tool.enabled))
+const selectedToDisable = computed(() => selectedTools.value.filter((tool) => tool.enabled))
 
 const form = reactive({
   name: '',
@@ -36,8 +51,6 @@ const form = reactive({
   require_confirm: false,
   params_schema: '',
 })
-const mcpForm = reactive({ url_or_command: '', enable: true })
-
 const TYPE_LABEL: Record<string, string> = {
   perception: '感知',
   execution: '执行',
@@ -49,25 +62,85 @@ const TYPE_LABEL: Record<string, string> = {
 
 onMounted(() => void store.list())
 
+watch(categoryFilter, () => {
+  selectedTools.value = []
+  void nextTick(() => tableRef.value?.clearSelection())
+})
+
 function openTest(t: ToolDefinition) {
   activeTool.value = t
   testVisible.value = true
 }
 
 async function onToggle(t: ToolDefinition, enabled: boolean) {
-  busyToolId.value = t.id
+  if (busyToolIds.value.has(t.id)) return
+  busyToolIds.value = new Set(busyToolIds.value).add(t.id)
   try {
     if (enabled) {
       await ElMessageBox.confirm(
-        `启用工具「${t.name}」？遵循默认关闭原则，请确认其安全性。`,
+        `启用工具「${t.name}」？请确认其安全性。`,
         '启用确认',
         { type: 'warning', confirmButtonText: '启用', cancelButtonText: '取消' },
       )
     }
     await store.toggle(t.id, enabled)
     ElMessage.success(enabled ? '已启用' : '已停用')
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') {
+      ElMessage.error(e instanceof Error ? e.message : '工具状态更新失败')
+    }
   } finally {
-    busyToolId.value = null
+    const next = new Set(busyToolIds.value)
+    next.delete(t.id)
+    busyToolIds.value = next
+  }
+}
+
+function onSelectionChange(selection: ToolDefinition[]) {
+  selectedTools.value = selection
+}
+
+function clearSelection() {
+  selectedTools.value = []
+  tableRef.value?.clearSelection()
+}
+
+function canSelect(t: ToolDefinition) {
+  return !busyToolIds.value.has(t.id) && !batchSubmitting.value
+}
+
+async function onBatchToggle(enabled: boolean) {
+  const targets = enabled ? selectedToEnable.value : selectedToDisable.value
+  if (!targets.length || batchSubmitting.value) return
+  if (enabled) {
+    try {
+      await ElMessageBox.confirm(
+        `启用所选 ${targets.length} 个工具？请确认其安全性。`,
+        '批量启用确认',
+        { type: 'warning', confirmButtonText: '启用', cancelButtonText: '取消' },
+      )
+    } catch (e) {
+      if (e !== 'cancel' && e !== 'close') ElMessage.error('批量启用确认失败')
+      return
+    }
+  }
+
+  const ids = targets.map((tool) => tool.id)
+  batchSubmitting.value = true
+  busyToolIds.value = new Set([...busyToolIds.value, ...ids])
+  try {
+    const result = await store.toggleMany(ids, enabled)
+    if (result.failed.length) {
+      ElMessage.warning(`已${enabled ? '启用' : '停用'} ${result.succeeded.length} 个，${result.failed.length} 个失败`)
+    } else {
+      ElMessage.success(`已${enabled ? '启用' : '停用'} ${result.succeeded.length} 个工具`)
+    }
+    clearSelection()
+  } finally {
+    const next = new Set(busyToolIds.value)
+    ids.forEach((id) => next.delete(id))
+    busyToolIds.value = next
+    batchSubmitting.value = false
   }
 }
 
@@ -102,22 +175,6 @@ async function createTool() {
   }
 }
 
-async function registerMcp() {
-  if (!mcpForm.url_or_command) {
-    ElMessage.warning('请输入 MCP 源地址或命令')
-    return
-  }
-  mcpSubmitting.value = true
-  try {
-    await store.registerMcp(mcpForm.url_or_command)
-    mcpVisible.value = false
-    mcpForm.url_or_command = ''
-    ElMessage.success('MCP 源已注册')
-  } finally {
-    mcpSubmitting.value = false
-  }
-}
-
 async function onDelete(t: ToolDefinition) {
   await ElMessageBox.confirm(`确认删除工具「${t.name}」？（软删）`, '删除确认', { type: 'warning' })
   await store.remove(t.id)
@@ -130,21 +187,32 @@ async function onDelete(t: ToolDefinition) {
     <div class="app-page-header">
       <div>
         <h2 class="app-page-title">工具</h2>
-        <p class="app-page-subtitle">工具注册 / 启用开关 / 沙盒测试 / MCP 源</p>
+        <p class="app-page-subtitle">工具注册 / 批量启停 / 沙盒测试</p>
       </div>
       <div class="header-actions">
-        <el-button :icon="'Link'" @click="mcpVisible = true">注册 MCP</el-button>
         <el-button type="primary" :icon="'Plus'" @click="createVisible = true">注册工具</el-button>
       </div>
     </div>
 
     <div class="tool-search-wrap app-filter-bar">
       <ToolSearchBar />
-      <el-radio-group v-model="metaFilter" size="small">
+      <el-radio-group v-model="categoryFilter" size="small">
         <el-radio-button value="all">全部</el-radio-button>
         <el-radio-button value="meta">元工具</el-radio-button>
+        <el-radio-button value="mcp">MCP</el-radio-button>
         <el-radio-button value="regular">常规工具</el-radio-button>
       </el-radio-group>
+    </div>
+
+    <div v-if="selectedTools.length" class="tool-batch-bar" data-testid="tool-batch-bar">
+      <span class="tool-batch-count">已选 {{ selectedTools.length }} 项</span>
+      <el-button size="small" :disabled="batchSubmitting || !selectedToEnable.length" @click="onBatchToggle(true)">
+        启用所选
+      </el-button>
+      <el-button size="small" :disabled="batchSubmitting || !selectedToDisable.length" @click="onBatchToggle(false)">
+        停用所选
+      </el-button>
+      <el-button size="small" text :disabled="batchSubmitting" @click="clearSelection">取消选择</el-button>
     </div>
 
     <AsyncState
@@ -156,33 +224,36 @@ async function onDelete(t: ToolDefinition) {
       @action="createVisible = true"
     >
       <div class="app-table-wrap">
-        <el-table :data="filteredTools" class="tool-table">
-      <el-table-column prop="name" label="名称" min-width="140">
-        <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
-      </el-table-column>
-      <el-table-column label="类别" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.meta ? 'warning' : 'info'" size="small" disable-transitions>{{ row.meta ? '元工具' : '常规工具' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="类型" width="110">
-        <template #default="{ row }"><el-tag size="small">{{ TYPE_LABEL[row.tool_type] ?? row.tool_type }}</el-tag></template>
-      </el-table-column>
-      <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip />
-      <el-table-column label="确认" width="90">
-        <template #default="{ row }">{{ row.require_confirm ? '是' : '否' }}</template>
-      </el-table-column>
-      <el-table-column label="启用" width="90">
-        <template #default="{ row }">
-          <el-switch :model-value="row.enabled" size="small" :disabled="busyToolId === row.id" @change="(v: boolean) => onToggle(row, v)" />
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="openTest(row)">测试</el-button>
-          <el-button size="small" type="danger" plain @click="onDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
+        <el-table ref="tableRef" :data="filteredTools" class="tool-table" row-key="id" @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="48" :selectable="canSelect" />
+          <el-table-column prop="name" label="名称" min-width="140">
+            <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
+          </el-table-column>
+          <el-table-column label="类别" width="100">
+            <template #default="{ row }">
+              <el-tag :type="CATEGORY_TAG_TYPE[getToolCategory(row)]" size="small" disable-transitions>
+                {{ CATEGORY_LABEL[getToolCategory(row)] }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="类型" width="110">
+            <template #default="{ row }"><el-tag size="small">{{ TYPE_LABEL[row.tool_type] ?? row.tool_type }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip />
+          <el-table-column label="确认" width="90">
+            <template #default="{ row }">{{ row.require_confirm ? '是' : '否' }}</template>
+          </el-table-column>
+          <el-table-column label="启用" width="90">
+            <template #default="{ row }">
+              <el-switch :model-value="row.enabled" size="small" :disabled="busyToolIds.has(row.id) || batchSubmitting" @change="(v: boolean) => onToggle(row, v)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="180" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" @click="openTest(row)">测试</el-button>
+              <el-button size="small" type="danger" plain @click="onDelete(row)">删除</el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </div>
     </AsyncState>
@@ -208,20 +279,6 @@ async function onDelete(t: ToolDefinition) {
       </template>
     </ResponsiveDialog>
 
-    <!-- 注册 MCP -->
-    <ResponsiveDialog v-model="mcpVisible" title="注册 MCP 源" width="480px">
-      <el-form label-width="140px">
-        <el-form-item label="地址/命令" required>
-          <el-input v-model="mcpForm.url_or_command" placeholder="npx @modelcontextprotocol/server-xxx 或 http://…" />
-        </el-form-item>
-        <el-form-item label="启用"><el-switch v-model="mcpForm.enable" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="mcpVisible = false">取消</el-button>
-        <el-button type="primary" :loading="mcpSubmitting" :disabled="mcpSubmitting" @click="registerMcp">注册</el-button>
-      </template>
-    </ResponsiveDialog>
-
     <ToolTestModal :visible="testVisible" :tool="activeTool" @close="testVisible = false; activeTool = null" />
   </div>
 </template>
@@ -234,6 +291,23 @@ async function onDelete(t: ToolDefinition) {
 .tool-search-wrap {
   margin-bottom: 8px;
   justify-content: space-between;
+}
+.tool-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--app-border-light);
+  border-radius: var(--app-radius);
+  background: var(--app-content-bg);
+}
+.tool-batch-count {
+  margin-right: 4px;
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
 }
 .tool-table {
   min-width: 760px;
@@ -264,6 +338,10 @@ async function onDelete(t: ToolDefinition) {
   }
   .tool-search-wrap :deep(.el-radio-button__inner) {
     width: 100%;
+  }
+  .tool-batch-bar {
+    align-items: flex-start;
+    flex-wrap: wrap;
   }
 }
 </style>

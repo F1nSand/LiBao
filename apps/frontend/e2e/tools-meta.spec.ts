@@ -26,4 +26,31 @@ test.describe('工具页：元工具与常规工具区分（《02》接口契约
     await expect(page.locator('.tool-search-result')).toContainText('web_search')
     await expect(page.locator('.tool-search-result')).not.toContainText('tool_search')
   })
+
+  test('MCP 工具显示 MCP 分类，且不进入常规工具筛选', async ({ page }) => {
+    await gotoChat(page)
+    await page.goto('/mcp')
+    await page.getByRole('button', { name: '注册 MCP' }).first().click()
+
+    const dialog = page.locator('.el-dialog:visible').last()
+    await dialog.locator('input').nth(1).fill('http://mcp.local/mcp')
+    await dialog.getByRole('button', { name: '注册' }).click()
+    await expect(page.locator('.mcp-table .el-table__row')).toHaveCount(1)
+
+    await page.goto('/tools')
+    await page.locator('.tool-table').waitFor({ state: 'visible' })
+    const mcpRows = page.locator('.tool-table .el-table__row', { hasText: 'mcp_' })
+    await expect(mcpRows).toHaveCount(2)
+    await expect(mcpRows.first()).toContainText('MCP')
+
+    await page.locator('.tool-search-wrap .el-radio-button', { hasText: 'MCP' }).click()
+    await expect(page.locator('.tool-table .el-table__row')).toHaveCount(2)
+    await page.locator('.tool-search-wrap .el-radio-button', { hasText: '常规工具' }).click()
+    await expect(page.locator('.tool-table .el-table__row', { hasText: 'mcp_' })).toHaveCount(0)
+
+    await page.goto('/mcp')
+    await page.locator('.mcp-table .el-table__row').first().getByRole('button', { name: '删除' }).click()
+    await page.locator('.el-message-box:visible').getByRole('button', { name: '确定' }).click()
+    await expect(page.locator('.mcp-table .el-table__row')).toHaveCount(0)
+  })
 })
