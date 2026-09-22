@@ -15,6 +15,7 @@ import logging
 import re
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -187,6 +188,16 @@ class KbRepository:
             mutate(index)
 
         return await self.manifests.update(collection_id, compatible_update)
+
+    async def update_manifest(
+        self,
+        collection_id: uuid.UUID,
+        mutate: Callable[[dict[str, Any]], None],
+        *,
+        version: int | None = None,
+    ) -> dict[str, Any]:
+        """Update the normalized manifest without applying v1 repository adapters."""
+        return await self.manifests.update(collection_id, mutate, version=version)
 
     # ---- 文档 ----
 

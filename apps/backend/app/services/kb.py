@@ -115,28 +115,38 @@ class KbService:
 
     async def reindex_document(self, db: Any, user: User, document_id: uuid.UUID) -> None:
         """重索引：仅允许 indexed/failed/archived 发起（处理中 → 40901）。"""
-        doc = await self.get_document(db, user, document_id)
-        if doc.status in {"chunking", "indexing"}:
-            raise AppError(ERR_TASK_RUNNING, "文档正在处理中")
-        doc.status = "uploaded"
-        doc.error = None
-        await KbRepository(db).persist_document(doc)  # index.json 落盘（不走 FileTable）
-        _spawn_pipeline(document_id)
+        from app.services.kb_generation import DOCUMENT_INDEX_LOCKS
+
+        async with DOCUMENT_INDEX_LOCKS.acquire(document_id):
+            doc = await self.get_document(db, user, document_id)
+            if doc.status in {"chunking", "indexing"} or doc.index_state in {"queued", "building"}:
+                raise AppError(ERR_TASK_RUNNING, "文档正在处理中")
+            doc.status = "uploaded"
+            doc.index_state = "queued"
+            doc.error = None
+            await KbRepository(db).persist_document(doc)  # 旧 active generation 保持可检索
+            _spawn_pipeline(document_id)
 
     async def archive_document(self, db: Any, user: User, document_id: uuid.UUID, status: str) -> None:
-        doc = await self.get_document(db, user, document_id)
-        if doc.status in {"chunking", "indexing"}:
-            raise AppError(ERR_TASK_RUNNING, "文档正在处理中")
-        doc.status = status  # archived
-        await KbRepository(db).persist_document(doc)  # index.json 落盘（不走 FileTable）
+        from app.services.kb_generation import DOCUMENT_INDEX_LOCKS
+
+        async with DOCUMENT_INDEX_LOCKS.acquire(document_id):
+            doc = await self.get_document(db, user, document_id)
+            if doc.status in {"chunking", "indexing"} or doc.index_state in {"queued", "building"}:
+                raise AppError(ERR_TASK_RUNNING, "文档正在处理中")
+            doc.status = status  # archived
+            await KbRepository(db).persist_document(doc)  # index.json 落盘（不走 FileTable）
 
     async def delete_document(self, db: Any, user: User, document_id: uuid.UUID) -> None:
         """软删文档 + 硬删 chunks。"""
-        repo = KbRepository(db)
-        doc = await self.get_document(db, user, document_id)
-        await repo.delete_chunks(document_id)
-        await repo.soft_delete_document(doc)
-        await db.commit()
+        from app.services.kb_generation import DOCUMENT_INDEX_LOCKS
+
+        async with DOCUMENT_INDEX_LOCKS.acquire(document_id):
+            repo = KbRepository(db)
+            doc = await self.get_document(db, user, document_id)
+            await repo.delete_chunks(document_id)
+            await repo.soft_delete_document(doc)
+            await db.commit()
 
     # ---- 混合检索（T7）----
 

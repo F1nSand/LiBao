@@ -125,7 +125,11 @@ class KbManifestStore:
         self._atomic_write(path, payload)
 
     async def update(
-        self, collection_id: uuid.UUID, mutate: Callable[[dict[str, Any]], None]
+        self,
+        collection_id: uuid.UUID,
+        mutate: Callable[[dict[str, Any]], None],
+        *,
+        version: int | None = None,
     ) -> dict[str, Any]:
         loop_id = id(asyncio.get_running_loop())
         key = (loop_id, str(self.kb_root.resolve()), str(collection_id))
@@ -133,7 +137,9 @@ class KbManifestStore:
         async with lock:
             manifest = await self.load(collection_id)
             mutate(manifest)
-            await self.save(collection_id, manifest)
+            if version is not None:
+                manifest["_source_version"] = version
+            await self.save(collection_id, manifest, version=version)
             return manifest
 
     @staticmethod

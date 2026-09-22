@@ -130,6 +130,8 @@
 - Modify: `apps/backend/app/services/kb_pipeline.py:18-91`
 - Modify: `apps/backend/app/services/kb.py:116-139`
 - Modify: `apps/backend/app/storage/repositories/kb.py:229-329`
+- Modify: `apps/backend/app/storage/kb/manifest.py` (explicit v2 promotion in atomic updates)
+- Modify: `apps/backend/tests/test_kb_api.py` (move insert-failure injection to the generation writer)
 
 **Interfaces:**
 
@@ -137,11 +139,12 @@
 - Produce `DocumentIndexLocks.acquire(document_id: UUID) -> AsyncContextManager[None]`; reindex, archive, and delete use the same lock registry.
 - Produce `class KbGenerationService`:
   - `build(document_id: UUID, *, embedder: EmbeddingService | None = None) -> IndexBuildResult`
-  - `activate(document: KbDocument, generation: str, chunks: Sequence[KbChunk]) -> str | None`
+  - `activate(document: KbDocument, generation: str, chunks: Sequence[KbChunk]) -> str | None` (async manifest update)
   - `cleanup_generation(document_id: UUID, generation: str) -> None`.
 - Build ordering is exact: write manifest `building_generation`/`building`; split and embed; write Lance rows with `active=False`; validate; set new Lance rows `active=True`; atomically write the new generation's chunk metadata, set manifest `active_generation`, and set document status `indexed` in one manifest update; set old Lance rows `active=False`; remove old manifest chunks and old Lance rows.
 - Before manifest activation, a failure deletes only the new generation. With an existing active generation, restore document status `indexed`, preserve `active_generation`, set `last_index_error`, and clear `building_generation`; without an active generation, set status `failed` and populate `error`.
 - After manifest activation, old-generation cleanup failure sets `index_state="cleanup_pending"`; new active data remains visible.
+- Preserve the legacy generation and `vectors` table when reindexing a v1 document; remove only generations already stored in `chunks_v2` until Task 6 completes migration.
 
 - [ ] Step 1: Write tests for successful first build and successful reindex, asserting exactly one manifest active generation and one set of active Lance rows.
 - [ ] Step 2: Parameterize failure injection at split, embedding, Lance write, validation, manifest activation, and old-generation cleanup. Assert every pre-activation failure preserves old active chunks; cleanup failure produces `cleanup_pending` without reverting the new active generation.

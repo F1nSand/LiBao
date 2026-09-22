@@ -187,7 +187,7 @@ async def test_progress_is_number_for_all_statuses():
         assert isinstance(kb_document_progress(status), int)
 
 
-async def test_pipeline_insert_failure_marks_failed(kb_fixture, monkeypatch):
+async def test_pipeline_lance_write_failure_marks_failed(kb_fixture, monkeypatch):
     """C1：插库段异常 → 文档置 failed（不再永久卡 indexing）。"""
     user, user2 = kb_fixture
     svc = KbService()
@@ -196,7 +196,7 @@ async def test_pipeline_insert_failure_marks_failed(kb_fixture, monkeypatch):
     async def boom(*a, **k):
         raise RuntimeError("simulated insert failure")
 
-    monkeypatch.setattr(KbRepository, "insert_chunks", boom)
+    monkeypatch.setattr("app.storage.repositories.kb_lance.KbLanceStore.write_generation", boom)
     doc_id, _ = await _upload_doc(user, svc, "doc.txt", "abc" * 200)
     await process_document(doc_id, embedder=embedder)
     async with get_store().session() as session:
