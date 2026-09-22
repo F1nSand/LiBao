@@ -4,9 +4,9 @@
 - 集合：.agent/kb_collections.json（FileTable）
 - 文档+分块：kb/<collection_id>/index.json（documents/chunks 内嵌）+ documents/<doc_id>.md（原文）
 - 向量：kb/vectors.lance（LanceDB 单表，chunk_id 主键，merge_insert 增量 upsert）
-- BM25：FileStore.bm25（rank_bm25 内存索引，启动/变更后全量重建）
+- BM25：FileStore.bm25（仅为尚未迁移的 v1 文档提供兼容回退）
 
-混合检索（hybrid_search）代码原样保留：双通道换源，RRF k=60 + rerank + 降级链不变。
+混合检索保留 RRF k=60、rerank 和降级链，并在最终返回前校验 manifest 可见性。
 """
 
 from __future__ import annotations
@@ -199,6 +199,91 @@ class KbRepository:
         """Update the normalized manifest without applying v1 repository adapters."""
         return await self.manifests.update(collection_id, mutate, version=version)
 
+    async def revoke_document_index(
+        self,
+        doc: KbDocument,
+        *,
+        status: str | None = None,
+        deleted_at: datetime | None = None,
+    ) -> None:
+        """Atomically remove a document from retrieval before physical cleanup begins."""
+        fields: dict[str, Any] = {"active_generation": None, "index_state": "cleanup_pending"}
+        if status is not None:
+            fields["status"] = status
+        if deleted_at is not None:
+            fields["deleted_at"] = deleted_at.isoformat()
+
+        def revoke(manifest: dict[str, Any]) -> None:
+            manifest["documents"][str(doc.id)].update(fields)
+
+        await self.update_manifest(doc.collection_id, revoke, version=2)
+        doc.active_generation = None
+        doc.index_state = "cleanup_pending"
+        if status is not None:
+            doc.status = status
+        if deleted_at is not None:
+            doc.deleted_at = deleted_at
+
+    async def cleanup_document_index(
+        self,
+        document_id: uuid.UUID,
+        collection_id: uuid.UUID,
+        *,
+        delete_source: bool,
+    ) -> None:
+        """Delete both Lance layouts, then remove metadata and optional source text."""
+        index = await self.manifests.load(collection_id)
+        raw_generations = index["chunks"].get(str(document_id), {})
+        generations = (
+            {LEGACY_GENERATION: raw_generations}
+            if isinstance(raw_generations, list)
+            else raw_generations
+        )
+        legacy_ids = [
+            chunk["chunk_id"]
+            for generation, chunks in generations.items()
+            if generation == LEGACY_GENERATION
+            for chunk in chunks
+            if chunk.get("chunk_id")
+        ]
+        try:
+            await self.lance.delete_document(document_id)
+            if legacy_ids:
+                await self._lance_delete_document(str(document_id), legacy_ids, raise_errors=True)
+            if delete_source:
+                source_path = (
+                    self.store.kb_root
+                    / str(collection_id)
+                    / "documents"
+                    / f"{document_id}.md"
+                )
+                source_path.unlink(missing_ok=True)
+        except Exception as exc:  # noqa: BLE001  manifest 已撤销可见性，后台可重试物理清理
+            await self._set_cleanup_pending(document_id, collection_id, exc)
+            raise
+
+        def clear_metadata(manifest: dict[str, Any]) -> None:
+            manifest["chunks"].pop(str(document_id), None)
+            doc_state = manifest["documents"].get(str(document_id))
+            if doc_state is not None:
+                doc_state["building_generation"] = None
+                doc_state["index_state"] = "idle"
+                doc_state["chunk_count"] = 0
+                doc_state["last_index_error"] = None
+
+        await self.update_manifest(collection_id, clear_metadata, version=2)
+
+    async def _set_cleanup_pending(
+        self, document_id: uuid.UUID, collection_id: uuid.UUID, error: Exception
+    ) -> None:
+        def mark(manifest: dict[str, Any]) -> None:
+            doc_state = manifest["documents"].get(str(document_id))
+            if doc_state is not None:
+                doc_state["index_state"] = "cleanup_pending"
+                doc_state["last_index_error"] = type(error).__name__
+
+        await self.update_manifest(collection_id, mark, version=2)
+
     # ---- 文档 ----
 
     async def get_document(self, org_id: uuid.UUID, document_id: uuid.UUID) -> KbDocument | None:
@@ -298,13 +383,17 @@ class KbRepository:
         _get_lance_table().delete(f"collection_id = '{collection_id}'")
         self.store.bm25.rebuild(await self._bm25_corpus())
 
-    async def _lance_delete_document(self, document_id: str, chunk_ids: list[str]) -> None:
+    async def _lance_delete_document(
+        self, document_id: str, chunk_ids: list[str], *, raise_errors: bool = False
+    ) -> None:
         if not chunk_ids:
             return
         try:
             _get_lance_table().delete(f"document_id = '{document_id}'")
         except Exception as exc:  # noqa: BLE001  表不存在/空表容错
             logger.debug("lance delete skip: %s", exc)
+            if raise_errors:
+                raise
 
     # ---- 分块 ----
 
@@ -409,6 +498,28 @@ class KbRepository:
                     corpus.append((c["chunk_id"], c["content"], cid))
         return corpus
 
+    async def has_legacy_active_documents(self) -> bool:
+        """Whether startup still needs the compatibility BM25 index for v1 documents."""
+        for coll_dir in _collection_dirs(self.store):
+            collection_id = uuid.UUID(coll_dir.name)
+            try:
+                manifest = await self.manifests.load(collection_id)
+            except Exception as exc:  # noqa: BLE001  recovery reports broken collections separately
+                logger.warning(
+                    "KB legacy detection skipped collection_id=%s error_type=%s",
+                    collection_id,
+                    type(exc).__name__,
+                )
+                continue
+            for document in manifest["documents"].values():
+                if (
+                    document.get("status") == "indexed"
+                    and not document.get("deleted_at")
+                    and document.get("active_generation") == LEGACY_GENERATION
+                ):
+                    return True
+        return False
+
     # ---- 混合检索（T7：双通道换源，RRF/rerank/降级链原样）----
 
     async def semantic_search(
@@ -448,7 +559,7 @@ class KbRepository:
             doc_by_id = index["documents"]
             for did in index["chunks"]:
                 doc = doc_by_id.get(did)
-                if doc is None:
+                if doc is None or doc.get("deleted_at") or doc.get("status") == "archived":
                     continue
                 for c in _active_chunk_records(index, did):
                     if c["chunk_id"] in wanted:
@@ -499,6 +610,13 @@ class KbRepository:
                 texts.setdefault(cid, text)
         if not scores:
             return []
+        # Manifest visibility is authoritative even while a lexical/vector index is awaiting cleanup.
+        sources = await self.chunk_sources(list(scores))
+        visible_ids = {uuid.UUID(chunk_id) for chunk_id in sources}
+        scores = {chunk_id: score for chunk_id, score in scores.items() if chunk_id in visible_ids}
+        texts = {chunk_id: text for chunk_id, text in texts.items() if chunk_id in visible_ids}
+        if not scores:
+            return []
         # RRF 粗排 → 候选池 → Cross-Encoder 精排 → top_k（候选 ≤ top_k 或 rerank 故障则回退 RRF 顺序）
         candidates = sorted(scores.items(), key=lambda kv: -kv[1])[: _RERANK_CANDIDATES]
         rerank_scores: dict[uuid.UUID, float] = {}
@@ -514,7 +632,6 @@ class KbRepository:
                 ranked = candidates[:top_k]
         else:
             ranked = candidates[:top_k]
-        sources = await self.chunk_sources([cid for cid, _ in ranked])
         return [
             {
                 "chunk_id": str(cid),

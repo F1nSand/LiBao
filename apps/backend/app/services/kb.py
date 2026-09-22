@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import get_settings
@@ -25,6 +27,7 @@ from app.storage.models.user import User
 from app.storage.repositories.kb import KbRepository
 
 _ALLOWED_TYPES = {"text/plain", "text/markdown"}
+logger = logging.getLogger(__name__)
 
 
 class KbService:
@@ -62,12 +65,11 @@ class KbService:
         return await KbRepository(db).document_counts(user.org_id, collection_ids)
 
     async def delete_collection(self, db: Any, user: User, collection_id: uuid.UUID) -> None:
-        """软删集合 + 软删其文档 + 硬删 chunks。"""
+        """Revoke and clean every document before soft-deleting its collection."""
         repo = KbRepository(db)
         coll = await self.get_collection(db, user, collection_id)
         for doc in await repo.list_documents(collection_id):
-            await repo.soft_delete_document(doc)
-        await repo.delete_collection_chunks(collection_id)
+            await self.delete_document(db, user, doc.id)
         await repo.soft_delete_collection(coll)
         await db.commit()
 
@@ -134,8 +136,18 @@ class KbService:
             doc = await self.get_document(db, user, document_id)
             if doc.status in {"chunking", "indexing"} or doc.index_state in {"queued", "building"}:
                 raise AppError(ERR_TASK_RUNNING, "文档正在处理中")
-            doc.status = status  # archived
-            await KbRepository(db).persist_document(doc)  # index.json 落盘（不走 FileTable）
+            repo = KbRepository(db)
+            await repo.revoke_document_index(doc, status=status)
+            try:
+                await repo.cleanup_document_index(doc.id, doc.collection_id, delete_source=False)
+            except Exception as exc:  # noqa: BLE001  已隐藏文档，后台恢复重试物理清理
+                logger.warning(
+                    "KB archive cleanup pending collection_id=%s document_id=%s error_type=%s",
+                    doc.collection_id,
+                    doc.id,
+                    type(exc).__name__,
+                )
+            await db.commit()
 
     async def delete_document(self, db: Any, user: User, document_id: uuid.UUID) -> None:
         """软删文档 + 硬删 chunks。"""
@@ -144,8 +156,16 @@ class KbService:
         async with DOCUMENT_INDEX_LOCKS.acquire(document_id):
             repo = KbRepository(db)
             doc = await self.get_document(db, user, document_id)
-            await repo.delete_chunks(document_id)
-            await repo.soft_delete_document(doc)
+            await repo.revoke_document_index(doc, deleted_at=datetime.now(UTC))
+            try:
+                await repo.cleanup_document_index(doc.id, doc.collection_id, delete_source=True)
+            except Exception as exc:  # noqa: BLE001  已隐藏文档，后台恢复重试物理清理
+                logger.warning(
+                    "KB delete cleanup pending collection_id=%s document_id=%s error_type=%s",
+                    doc.collection_id,
+                    doc.id,
+                    type(exc).__name__,
+                )
             await db.commit()
 
     # ---- 混合检索（T7）----

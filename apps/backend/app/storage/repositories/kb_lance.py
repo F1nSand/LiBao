@@ -68,6 +68,17 @@ class KbLanceStore:
 
     def __init__(self, kb_root: Path | str) -> None:
         self.kb_root = Path(kb_root).expanduser().resolve()
+        self._mutation_count = 0
+        self._mutation_lock = threading.Lock()
+
+    @property
+    def mutation_count(self) -> int:
+        with self._mutation_lock:
+            return self._mutation_count
+
+    def _record_mutations(self, count: int = 1) -> None:
+        with self._mutation_lock:
+            self._mutation_count += count
 
     def _table(self) -> Any:
         with _CACHE_LOCK:
@@ -180,13 +191,14 @@ class KbLanceStore:
         self._table().merge_insert("chunk_id").when_matched_update_all().when_not_matched_insert_all().execute(
             records
         )
+        self._record_mutations(len(records))
 
     async def write_generation(self, chunks: Sequence[KbChunk], *, active: bool = False) -> None:
         await asyncio.to_thread(self._write_generation, list(chunks), active)
 
     def _generation_rows(self, document_id: uuid.UUID, generation: str) -> list[dict[str, Any]]:
         condition = f"document_id = {_quote(str(document_id))} AND generation = {_quote(generation)}"
-        return self._table().search().where(condition).to_list()
+        return self._table().search().where(condition).select(["chunk_id", "retrieval_text", "vector"]).to_list()
 
     def _validate_generation(
         self, document_id: uuid.UUID, generation: str, expected_count: int
@@ -215,6 +227,7 @@ class KbLanceStore:
             where=f"document_id = {_quote(str(document_id))} AND generation = {_quote(generation)}",
             values={"active": active},
         )
+        self._record_mutations()
 
     async def set_generation_active(self, document_id: uuid.UUID, generation: str, active: bool) -> None:
         await asyncio.to_thread(self._set_generation_active, document_id, generation, active)
@@ -223,12 +236,14 @@ class KbLanceStore:
         self._table().delete(
             f"document_id = {_quote(str(document_id))} AND generation = {_quote(generation)}"
         )
+        self._record_mutations()
 
     async def delete_generation(self, document_id: uuid.UUID, generation: str) -> None:
         await asyncio.to_thread(self._delete_generation, document_id, generation)
 
     def _delete_document(self, document_id: uuid.UUID) -> None:
         self._table().delete(f"document_id = {_quote(str(document_id))}")
+        self._record_mutations()
 
     async def delete_document(self, document_id: uuid.UUID) -> None:
         await asyncio.to_thread(self._delete_document, document_id)
@@ -286,6 +301,8 @@ class KbLanceStore:
 
     def _optimize(self) -> None:
         self._table().optimize()
+        with self._mutation_lock:
+            self._mutation_count = 0
 
     async def optimize(self) -> None:
         await asyncio.to_thread(self._optimize)

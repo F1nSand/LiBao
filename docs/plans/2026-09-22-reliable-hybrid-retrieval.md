@@ -165,6 +165,9 @@
 - Modify: `apps/backend/app/storage/repositories/kb.py:229-268`
 - Modify: `apps/backend/app/api/lifespan.py:23-66`
 - Modify: `apps/backend/app/core/config.py:122-124`
+- Modify: `apps/backend/app/core/bootstrap.py:1-55` (skip legacy BM25 rebuild when no active v1 documents remain)
+- Modify: `apps/backend/app/storage/repositories/kb_lance.py` (mutation accounting for thresholded optimize)
+- Modify: `apps/backend/app/storage/repositories/kb.py` (manifest-authoritative retrieval post-filter during delayed cleanup)
 
 **Interfaces:**
 
@@ -178,13 +181,15 @@
 - Produce `kb_maintenance_loop(settings)` that retries cleanup and calls `KbLanceStore.optimize()` only when the mutation threshold is reached; cancellation is handled like existing lifespan loops.
 - Archive ordering: acquire document lock, atomically set `status="archived"` and `active_generation=None`, then deactivate/delete all Lance generations. Delete ordering: atomically set `deleted_at` and clear active generation, then remove Lance rows and original markdown. Collection deletion repeats this per document before marking the collection deleted.
 
-- [ ] Step 1: Write tests proving archive/delete become invisible immediately even when `delete_document()` in Lance raises; assert manifest visibility is revoked and `cleanup_pending` is persisted.
-- [ ] Step 2: Write recovery tests for orphaned building generations, pending old generations, missing active rows, repeated idempotent runs, and one broken collection not preventing repair of another.
-- [ ] Step 3: Write lifespan tests proving startup calls reconciliation but never calls legacy BM25 rebuild or Lance FTS replacement when v2 is healthy; maintenance cancellation must not leak tasks.
-- [ ] Step 4: Run `uv run pytest tests/test_kb_recovery.py tests/test_kb_api.py -q`; expect new tests to fail.
-- [ ] Step 5: Implement lifecycle ordering, `reconcile_kb_index()`, mutation counters, and the background maintenance loop; log collection/document IDs and error class but not document text.
-- [ ] Step 6: Run `uv run pytest tests/test_kb_recovery.py tests/test_kb_generation.py tests/test_kb_api.py tests/test_kb_search.py -q`; expect all tests to pass.
-- [ ] Step 7: Commit with `fix: reconcile KB index lifecycle`.
+- [x] Step 1: Write tests proving archive/delete become invisible immediately even when `delete_document()` in Lance raises; assert manifest visibility is revoked and `cleanup_pending` is persisted.
+- [x] Step 2: Write recovery tests for orphaned building generations, pending old generations, missing active rows, repeated idempotent runs, and one broken collection not preventing repair of another.
+- [x] Step 3: Write lifespan tests proving startup calls reconciliation but never calls legacy BM25 rebuild or Lance FTS replacement when v2 is healthy; maintenance cancellation must not leak tasks.
+- [x] Step 4: Run the focused recovery/API tests; new recovery tests first failed on the missing module, then passed after implementation.
+- [x] Step 5: Implement lifecycle ordering, `reconcile_kb_index()`, mutation counters, and the background maintenance loop; log collection/document IDs and error class but not document text.
+- [x] Step 6: Run the recovery, generation, API, and search regression suites; all tests pass.
+- [x] Step 7: Commit with `fix: reconcile KB index lifecycle`.
+
+**Implementation note:** Archive/delete revoke manifest visibility before cleanup. Since legacy BM25 candidates can remain on disk until migration, hybrid retrieval now post-filters candidates through the manifest before reranking. Bootstrap skips the BM25 build if no active v1 document needs the compatibility path; healthy v2 recovery validates Lance rows without initializing/replacing FTS. If orphan-generation cleanup fails, recovery retains its marker, keeps the old active generation visible, and marks cleanup pending for retry.
 
 ## Task 6: 实现 v1→v2 旁路迁移、断点续跑和 legacy 回退
 

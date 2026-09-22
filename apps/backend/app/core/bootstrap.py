@@ -1,5 +1,5 @@
 """共享运行时初始化（本地单机化）：内置工具注册 + FileStore 初始化 + 首启种子 +
-工具/Provider registry 文件同步 + KB BM25 索引构建。
+工具/Provider registry 文件同步 + legacy KB BM25 回退初始化。
 """
 
 from __future__ import annotations
@@ -32,12 +32,10 @@ async def init_runtime(settings: Settings | None = None) -> Runtime:
     await store.init()
     set_store(store)
 
-    # KB BM25 索引（启动构建：扫 kb/*/index.json）
     from app.storage.repositories.bm25 import BM25Index
-    from app.storage.repositories.kb import KbRepository
 
     store.bm25 = BM25Index()
-    store.bm25.rebuild(await KbRepository()._bm25_corpus())  # noqa: SLF001  全量语料（个人量级毫秒级）
+    await rebuild_legacy_bm25_if_needed(store)
 
     # 本地单机化：tool_definitions.json enabled 为事实源 → registry 同步 + MCP 行重建
     from app.seed import ensure_seed_tools, seed_if_first_run
@@ -53,6 +51,17 @@ async def init_runtime(settings: Settings | None = None) -> Runtime:
         await SandboxService().sync_runtime(db)
 
     return Runtime(store=store)
+
+
+async def rebuild_legacy_bm25_if_needed(store: FileStore) -> bool:
+    """Build the temporary BM25 fallback only while indexed v1 documents remain."""
+    from app.storage.repositories.kb import KbRepository
+
+    repo = KbRepository()
+    if not await repo.has_legacy_active_documents():
+        return False
+    store.bm25.rebuild(await repo._bm25_corpus())  # noqa: SLF001  legacy compatibility fallback
+    return True
 
 
 async def cleanup_runtime(runtime: Runtime) -> None:

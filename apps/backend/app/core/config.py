@@ -121,6 +121,9 @@ class Settings(BaseSettings):
 
     # ---- M3 知识库 ----
     kb_max_chunks: int = 2000  # 单文档分块上限（防 20MB 文本爆 embedding 预算）
+    kb_maintenance_interval_s: int = 3600
+    kb_optimize_min_mutations: int = 500
+    kb_recovery_enabled: bool = True
 
     # ---- M3 附件（本地磁盘，~/.LiBao/uploads）----
     upload_dir: str = f"{_LIB}/uploads"
