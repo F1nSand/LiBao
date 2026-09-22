@@ -177,6 +177,8 @@ def serialize_kb_collection(c: KbCollection, document_count: int = 0) -> dict[st
         "description": c.description,
         "chunk_size": c.chunk_size,
         "overlap": c.chunk_overlap,
+        "chunking_strategy": c.chunking_strategy,
+        "fts_tokenizer": c.fts_tokenizer,
         "document_count": document_count,
         "created_at": _dt(c.created_at),
     }
@@ -197,6 +199,9 @@ def serialize_kb_document(d: KbDocument) -> dict[str, Any]:
         "size": d.size_bytes,
         "status": d.status,
         "chunk_count": d.chunk_count,
+        "active_generation": d.active_generation,
+        "index_state": d.index_state,
+        "last_index_error": d.last_index_error,
         "progress": kb_document_progress(d.status),
         "error": d.error,
         "created_at": _dt(d.created_at),

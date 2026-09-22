@@ -58,6 +58,7 @@
 - Create: `apps/backend/tests/test_kb_manifest.py`
 - Modify: `apps/backend/app/storage/models/kb.py:12-47`
 - Modify: `apps/backend/app/storage/repositories/kb.py:146-170,205-239,271-292`
+- Modify: `apps/backend/app/services/kb_pipeline.py:79-94`
 - Modify: `apps/backend/app/services/serializers.py:172-203`
 
 **Interfaces:**
@@ -74,7 +75,7 @@
 - [ ] Step 2: Run `uv run pytest tests/test_kb_manifest.py -q`; expect module import failure.
 - [ ] Step 3: Implement `KbManifestStore` and normalization helpers; move `_index_path`, `_load_index`, and `_save_index` behavior behind it while keeping repository compatibility wrappers during migration.
 - [ ] Step 4: Extend the dataclasses and serializers. Existing document responses retain current fields; add optional `active_generation`, `index_state`, and `last_index_error` without removing `error` or changing progress values.
-- [ ] Step 5: Update `create_collection`, `create_document`, `persist_document`, `list_chunks`, and `count_chunks` to use manifest atomic updates and active-generation lookup; do not change Lance or BM25 behavior in this task.
+- [ ] Step 5: Update `create_collection`, `create_document`, `persist_document`, `list_chunks`, and `count_chunks` to use manifest atomic updates and active-generation lookup; route pipeline state writes through `KbRepository.persist_document()` rather than separate load/save calls. Keep runtime writes in legacy v1 shape until Task 6's v2 migration/cutover so intermediate steps never reinterpret existing chunks as active v2 rows; do not change Lance or BM25 behavior in this task.
 - [ ] Step 6: Run `uv run pytest tests/test_kb_manifest.py tests/test_kb_api.py tests/test_kb_search.py -q`; expect all tests to pass with v1 fixtures normalized in memory.
 - [ ] Step 7: Commit with `refactor: add versioned KB manifests`.
 

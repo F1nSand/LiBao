@@ -11,7 +11,6 @@ import uuid
 from app.core.config import get_settings
 from app.core.embeddings import EmbeddingService
 from app.services.chunker import chunk_text
-from app.storage.file.store import get_store
 from app.storage.models.kb import KbChunk
 from app.storage.repositories.kb import KbRepository
 
@@ -21,14 +20,13 @@ _PROCESSING = {"uploaded", "chunking", "indexing"}
 async def process_document(document_id: uuid.UUID, embedder: EmbeddingService | None = None) -> None:
     """处理链：分块 → 向量化 → 插库 → indexed。异常仅当状态仍在处理中置 failed。"""
     embedder = embedder or EmbeddingService()
-    store = get_store()
     repo = KbRepository()
     # re-read（后台链无请求上下文，全量直查；org 校验在服务层完成）
     doc = await repo.get_document(uuid.UUID(int=0), document_id)
     if doc is None or doc.status != "uploaded":
         return  # 防并发：非 uploaded 直接放弃
     doc.status = "chunking"
-    await _persist_doc(store, repo, doc)
+    await _persist_doc(repo, doc)
 
     coll = await repo.get_collection(uuid.UUID(int=0), doc.collection_id)
     if coll is None:
@@ -43,7 +41,7 @@ async def process_document(document_id: uuid.UUID, embedder: EmbeddingService | 
         return
 
     doc.status = "indexing"
-    await _persist_doc(store, repo, doc)
+    await _persist_doc(repo, doc)
     try:
         vecs = await embedder.embed_documents(chunks)
     except Exception as exc:  # noqa: BLE001  embedding 失败（含 key 缺失）→ failed
@@ -71,16 +69,14 @@ async def process_document(document_id: uuid.UUID, embedder: EmbeddingService | 
         doc.chunk_count = len(rows)
         doc.status = "indexed"
         doc.error = None
-        await _persist_doc(store, repo, doc)
+        await _persist_doc(repo, doc)
     except Exception as exc:  # noqa: BLE001  插库失败 → 置 failed
         await _fail(repo, document_id, f"索引落库失败: {str(exc)[:300]}")
 
 
-async def _persist_doc(store, repo: KbRepository, doc) -> None:
+async def _persist_doc(repo: KbRepository, doc) -> None:
     """文档状态变更落盘（index.json 内嵌 documents 更新）。"""
-    index = await repo._load_index(doc.collection_id)  # noqa: SLF001  同模块内部方法
-    index["documents"][str(doc.id)] = doc.to_dict()
-    await repo._save_index(doc.collection_id, index)  # noqa: SLF001
+    await repo.persist_document(doc)
 
 
 async def _fail(repo: KbRepository, document_id: uuid.UUID, error: str) -> None:
@@ -90,4 +86,4 @@ async def _fail(repo: KbRepository, document_id: uuid.UUID, error: str) -> None:
         return
     doc.status = "failed"
     doc.error = error[:500]
-    await _persist_doc(get_store(), repo, doc)
+    await _persist_doc(repo, doc)

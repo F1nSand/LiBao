@@ -6,6 +6,7 @@ EMBED_DIM 是维度单一来源：LanceDB schema + EmbeddingService 运行期校
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.storage.file.rows import Row
 
@@ -20,6 +21,8 @@ class KbCollection(Row):
     chunk_size: int = 512
     chunk_overlap: int = 64
     embedding_model: str | None = None  # 索引时快照
+    chunking_strategy: str = "auto"
+    fts_tokenizer: str = "icu"
 
 
 @dataclass(kw_only=True)
@@ -33,6 +36,14 @@ class KbDocument(Row):
     status: str = "uploaded"  # uploaded/chunking/indexing/indexed/failed/archived
     chunk_count: int = 0
     error: str | None = None
+    active_generation: str | None = None
+    building_generation: str | None = None
+    index_state: str = "idle"
+    chunking_version: str | None = None
+    retrieval_schema_version: int = 1
+    embedding_dimension: int | None = None
+    last_indexed_at: datetime | None = None
+    last_index_error: str | None = None
 
 
 @dataclass(kw_only=True)
@@ -45,3 +56,10 @@ class KbChunk(Row):
     chunk_index: int
     content: str
     embedding: list | None = None  # 向量（仅 pipeline 传参用，不落 index.json）
+    generation: str = "legacy-v1"
+    retrieval_text: str = ""
+    section_path: tuple[str, ...] = ()
+    start_offset: int = 0
+    end_offset: int = 0
+    token_count: int = 0
+    chunking_strategy: str = "auto"

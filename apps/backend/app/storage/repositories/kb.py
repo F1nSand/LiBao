@@ -11,11 +11,8 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
-import tempfile
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -24,6 +21,7 @@ from typing import Any
 from app.core.embeddings import EmbeddingService
 from app.core.rerank import RerankService
 from app.storage.file.store import get_store
+from app.storage.kb.manifest import LEGACY_GENERATION, KbManifestStore
 from app.storage.models.kb import KbChunk, KbCollection, KbDocument
 
 logger = logging.getLogger(__name__)
@@ -51,6 +49,15 @@ def _collection_dirs(store) -> list:
                 continue
             out.append(entry)
     return out
+
+
+def _active_chunk_records(index: dict[str, Any], document_id: str) -> list[dict[str, Any]]:
+    """Return legacy chunks or the v2 generation selected by the document manifest."""
+    chunks = index["chunks"].get(document_id, [])
+    if isinstance(chunks, list):
+        return chunks
+    active_generation = index["documents"].get(document_id, {}).get("active_generation")
+    return chunks.get(active_generation, []) if active_generation else []
 
 
 # ---- LanceDB（模块级缓存连接，kb_root 固定）----
@@ -101,6 +108,7 @@ class KbRepository:
         self.session = session  # 兼容调用方传参（FileContext），文件化后不使用
         self.store = get_store()
         self.table = self.store.table("kb_collections")
+        self.manifests = KbManifestStore(self.store.kb_root)
 
     # ---- 集合 ----
 
@@ -146,30 +154,34 @@ class KbRepository:
     # ---- 集合目录 index.json ----
 
     def _index_path(self, collection_id: uuid.UUID):
-        return self.store.kb_root / str(collection_id) / "index.json"
+        return self.manifests.path_for(collection_id)
 
     async def _load_index(self, collection_id: uuid.UUID) -> dict[str, Any]:
-        path = self._index_path(collection_id)
-        if not path.exists():
-            return {"version": 1, "documents": {}, "chunks": {}}
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {"version": 1, "documents": {}, "chunks": {}}
+        index = await self.manifests.load(collection_id)
+        if index.get("_source_version") == 1:
+            index["chunks"] = {
+                document_id: generations.get(LEGACY_GENERATION, [])
+                if isinstance(generations, dict)
+                else generations
+                for document_id, generations in index["chunks"].items()
+            }
+        return index
 
     async def _save_index(self, collection_id: uuid.UUID, index: dict[str, Any]) -> None:
-        path = self._index_path(collection_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        await self.manifests.save(collection_id, index)
 
-        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(index, f, ensure_ascii=False)
-            os.replace(tmp, path)
-        except BaseException:
-            with __import__("contextlib").suppress(OSError):
-                os.unlink(tmp)
-            raise
+    async def _update_index(self, collection_id: uuid.UUID, mutate) -> dict[str, Any]:
+        def compatible_update(index: dict[str, Any]) -> None:
+            if index.get("_source_version") == 1:
+                index["chunks"] = {
+                    document_id: generations.get(LEGACY_GENERATION, [])
+                    if isinstance(generations, dict)
+                    else generations
+                    for document_id, generations in index["chunks"].items()
+                }
+            mutate(index)
+
+        return await self.manifests.update(collection_id, compatible_update)
 
     # ---- 文档 ----
 
@@ -217,9 +229,10 @@ class KbRepository:
             status="uploaded",
             chunk_count=0,
         )
-        index = await self._load_index(collection_id)
-        index["documents"][str(row.id)] = row.to_dict()
-        await self._save_index(collection_id, index)
+        await self._update_index(
+            collection_id,
+            lambda index: index["documents"].__setitem__(str(row.id), row.to_dict()),
+        )
         # 原文落盘（目标布局 documents/<doc_id>.md；文档原文即上传文本，小文件同步写可接受）
         md_path = self.store.kb_root / str(collection_id) / "documents" / f"{row.id}.md"
         md_path.parent.mkdir(parents=True, exist_ok=True)
@@ -228,33 +241,44 @@ class KbRepository:
 
     async def soft_delete_document(self, doc: KbDocument) -> None:
         doc.deleted_at = datetime.now(UTC)
-        index = await self._load_index(doc.collection_id)
-        index["documents"][str(doc.id)]["deleted_at"] = doc.deleted_at.isoformat()
-        await self._save_index(doc.collection_id, index)
+        await self.persist_document(doc)
 
     async def persist_document(self, doc: KbDocument) -> None:
         """文档状态/字段变更落盘（服务层直接赋值后调用；index.json 不走 FileTable）。"""
-        index = await self._load_index(doc.collection_id)
-        index["documents"][str(doc.id)] = doc.to_dict()
-        await self._save_index(doc.collection_id, index)
+        def update_document(index: dict[str, Any]) -> None:
+            existing = index["documents"].setdefault(str(doc.id), {})
+            existing.update(doc.to_dict())
+
+        await self._update_index(doc.collection_id, update_document)
 
     async def delete_chunks(self, document_id: uuid.UUID) -> None:
         """硬删分块（reindex 前清旧 / 文档删除）。"""
         for coll_dir in _collection_dirs(self.store):
-            index = await self._load_index(uuid.UUID(coll_dir.name))
-            if str(document_id) not in index["chunks"]:
+            collection_id = uuid.UUID(coll_dir.name)
+            current = await self._load_index(collection_id)
+            if str(document_id) not in current["chunks"]:
                 continue
-            cids = [c["chunk_id"] for c in index["chunks"].pop(str(document_id))]
-            await self._save_index(uuid.UUID(coll_dir.name), index)
+            removed_chunks: list[dict[str, Any]] = []
+
+            def remove_chunks(index: dict[str, Any], target: list[dict[str, Any]] = removed_chunks) -> None:
+                removed = index["chunks"].pop(str(document_id), [])
+                if isinstance(removed, dict):
+                    for generation_chunks in removed.values():
+                        target.extend(generation_chunks)
+                else:
+                    target.extend(removed)
+
+            await self._update_index(collection_id, remove_chunks)
+            if not removed_chunks:
+                continue
+            cids = [c["chunk_id"] for c in removed_chunks]
             await self._lance_delete_document(str(document_id), cids)
             self.store.bm25.rebuild(await self._bm25_corpus())
             return
 
     async def delete_collection_chunks(self, collection_id: uuid.UUID) -> None:
         """集合级分块硬删（集合软删时调用）。"""
-        index = await self._load_index(collection_id)
-        index["chunks"] = {}
-        await self._save_index(collection_id, index)
+        await self._update_index(collection_id, lambda index: index.__setitem__("chunks", {}))
         _get_lance_table().delete(f"collection_id = '{collection_id}'")
         self.store.bm25.rebuild(await self._bm25_corpus())
 
@@ -271,8 +295,8 @@ class KbRepository:
     async def list_chunks(self, document_id: uuid.UUID) -> list[KbChunk]:
         for coll_dir in _collection_dirs(self.store):
             index = await self._load_index(uuid.UUID(coll_dir.name))
-            chunks = index["chunks"].get(str(document_id))
-            if chunks is not None:
+            chunks = _active_chunk_records(index, str(document_id))
+            if chunks:
                 rows = []
                 for c in chunks:
                     row = KbChunk(
@@ -282,6 +306,13 @@ class KbRepository:
                         org_id=uuid.UUID(int=0),
                         chunk_index=c["chunk_index"],
                         content=c["content"],
+                        generation=c.get("generation", LEGACY_GENERATION),
+                        retrieval_text=c.get("retrieval_text", c["content"]),
+                        section_path=tuple(c.get("section_path", ())),
+                        start_offset=c.get("start_offset", 0),
+                        end_offset=c.get("end_offset", 0),
+                        token_count=c.get("token_count", 0),
+                        chunking_strategy=c.get("chunking_strategy", "auto"),
                     )
                     rows.append(row)
                 rows.sort(key=lambda c: c.chunk_index)
@@ -296,18 +327,35 @@ class KbRepository:
         if not rows:
             return
         collection_id = rows[0].collection_id
-        index = await self._load_index(collection_id)
-        index["chunks"][str(rows[0].document_id)] = [
+        chunks = [
             {
                 "chunk_id": str(r.id),
                 "document_id": str(r.document_id),
                 "collection_id": str(r.collection_id),
                 "chunk_index": r.chunk_index,
                 "content": r.content,
+                "generation": r.generation,
+                "retrieval_text": r.retrieval_text or r.content,
+                "section_path": list(r.section_path),
+                "start_offset": r.start_offset,
+                "end_offset": r.end_offset,
+                "token_count": r.token_count,
+                "chunking_strategy": r.chunking_strategy,
             }
             for r in rows
         ]
-        await self._save_index(collection_id, index)
+
+        def add_chunks(index: dict[str, Any]) -> None:
+            document_id = str(rows[0].document_id)
+            if index.get("_source_version") == 1:
+                index["chunks"][document_id] = chunks
+            else:
+                index["chunks"].setdefault(document_id, {})[rows[0].generation] = chunks
+
+        await self._update_index(
+            collection_id,
+            add_chunks,
+        )
         # LanceDB 增量 upsert（merge_insert：同主键更新，防重复行）
         table = _get_lance_table()
         import numpy as np
@@ -338,10 +386,10 @@ class KbRepository:
                 did for did, d in index["documents"].items()
                 if d.get("status") == "indexed" and not d.get("deleted_at")
             }
-            for did, chunks in index["chunks"].items():
+            for did in index["chunks"]:
                 if did not in indexed_docs:
                     continue
-                for c in chunks:
+                for c in _active_chunk_records(index, did):
                     corpus.append((c["chunk_id"], c["content"], cid))
         return corpus
 
@@ -382,11 +430,11 @@ class KbRepository:
             coll_id = coll_dir.name
             index = await self._load_index(uuid.UUID(coll_id))
             doc_by_id = index["documents"]
-            for did, chunks in index["chunks"].items():
+            for did in index["chunks"]:
                 doc = doc_by_id.get(did)
                 if doc is None:
                     continue
-                for c in chunks:
+                for c in _active_chunk_records(index, did):
                     if c["chunk_id"] in wanted:
                         out[c["chunk_id"]] = {
                             "document_id": did,
