@@ -1,0 +1,8 @@
+{"case_id":"zh_phrase","query":"人工智能代理的工具调用机制","category":"zh_phrase","relevant_chunk_ids":["zh-phrase-1"],"expect_no_answer":false}
+{"case_id":"mixed_language","query":"MCP 工具 discovery 配置","category":"mixed_language","relevant_chunk_ids":["mixed-1"],"expect_no_answer":false}
+{"case_id":"identifier","query":"create_fts_index 参数","category":"identifier","relevant_chunk_ids":["identifier-1"],"expect_no_answer":false}
+{"case_id":"version","query":"LanceDB v0.37.1 tokenizer_name","category":"version","relevant_chunk_ids":["version-1"],"expect_no_answer":false}
+{"case_id":"heading","query":"索引恢复策略","category":"heading","relevant_chunk_ids":["heading-1"],"expect_no_answer":false}
+{"case_id":"semantic","query":"如何避免重启后重建关键词索引","category":"semantic","relevant_chunk_ids":["semantic-1","semantic-2"],"expect_no_answer":false}
+{"case_id":"no_answer","query":"北极星基地的随机管理员密码","category":"no_answer","relevant_chunk_ids":[],"expect_no_answer":true}
+{"case_id":"archived_exclusion","query":"旧版归档文档独有标记 ARCHIVED-ONLY-91","category":"archived_exclusion","relevant_chunk_ids":[],"expect_no_answer":true}

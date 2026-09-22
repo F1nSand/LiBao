@@ -30,23 +30,23 @@
 - Create: `apps/backend/app/evaluation/kb_retrieval.py`
 - Create: `apps/backend/tests/fixtures/kb_retrieval_golden.jsonl`
 - Create: `apps/backend/tests/test_kb_retrieval_metrics.py`
+- Create: `apps/backend/tests/test_kb_search_contracts.py`
 - Modify: `apps/backend/tests/test_kb_api.py:79-205`
-- Modify: `apps/backend/tests/test_kb_search.py:83-194`
 - Modify: `apps/backend/tests/test_chunker.py`
 
 **Interfaces:**
 
-- Produce `RetrievalCase(query: str, relevant_chunk_ids: frozenset[str], category: str)`.
+- Produce `RetrievalCase(case_id: str, query: str, relevant_chunk_ids: frozenset[str], category: str, expect_no_answer: bool = False)`.
 - Produce `RetrievalMetrics(recall_at_5: float, recall_at_10: float, mrr: float, ndcg_at_10: float, no_answer_false_positive_rate: float)`.
-- Produce `evaluate_rankings(cases: Sequence[RetrievalCase], rankings: Mapping[str, Sequence[str]]) -> RetrievalMetrics`.
-- Golden JSONL fields are exactly `id`, `query`, `category`, `relevant_chunk_ids`, `expect_no_answer`; categories include `zh_phrase`, `mixed_language`, `identifier`, `version`, `heading`, `semantic`, `no_answer`, and `archived_exclusion`.
+- Produce `load_retrieval_cases(path: Path) -> list[RetrievalCase]` and `evaluate_rankings(cases: Sequence[RetrievalCase], rankings: Mapping[str, Sequence[str]]) -> RetrievalMetrics`; rankings keys are stable `case_id` values.
+- Golden JSONL fields are exactly `case_id`, `query`, `category`, `relevant_chunk_ids`, `expect_no_answer`; categories include `zh_phrase`, `mixed_language`, `identifier`, `version`, `heading`, `semantic`, `no_answer`, and `archived_exclusion`.
 
 - [ ] Step 1: Add metric unit tests with hand-calculated rankings: perfect ranking must return all `1.0`; one relevant item at rank 2 must return `mrr=0.5`; a no-answer case with one result must increment false-positive rate; duplicate chunk IDs must be counted once.
 - [ ] Step 2: Run `uv run pytest tests/test_kb_retrieval_metrics.py -q` from `apps/backend`; expect import failure because the evaluation module does not exist.
 - [ ] Step 3: Implement immutable metric dataclasses, JSONL loader, Recall@K, reciprocal rank, binary-relevance nDCG@10, and no-answer false-positive rate without network calls.
-- [ ] Step 4: Add characterization tests for current contracts: blank query returns `[]`, `top_k` clamps to 10, numeric `hybrid` values behave as booleans, pure BM25 never calls embedding, rerank failure preserves RRF order, and archived content is excluded by the legacy BM25 corpus.
+- [ ] Step 4: Add `test_kb_search_contracts.py` characterization for `top_k` clamping to 10 using 12 synthetic semantic candidates and a reranker spy; retain existing tests that cover blank query, numeric `hybrid` truthiness, pure BM25 without embedding, rerank fallback, and archived BM25 exclusion.
 - [ ] Step 5: Add fixture cases containing Chinese phrases (`人工智能代理`), mixed queries (`MCP 工具 discovery`), identifiers (`create_fts_index`), versions (`v0.37.1`), heading-based questions, semantic paraphrases, no-answer queries, and archived-only terms.
-- [ ] Step 6: Run `uv run pytest tests/test_kb_retrieval_metrics.py tests/test_kb_api.py tests/test_kb_search.py tests/test_chunker.py -q`; expect all baseline and metric tests to pass before storage changes.
+- [ ] Step 6: Run `uv run pytest tests/test_kb_retrieval_metrics.py tests/test_kb_search_contracts.py tests/test_kb_api.py tests/test_kb_search.py tests/test_chunker.py -q`; expect all baseline and metric tests to pass before storage changes.
 - [ ] Step 7: Commit only these files with `test: establish hybrid retrieval baseline`.
 
 ## Task 2: 引入 index.json v2 manifest、索引字段和并发安全原子更新
@@ -331,8 +331,8 @@
 
 **Interfaces:**
 
-- CLI: `uv run python ../../scripts/eval_kb_retrieval.py --fixture tests/fixtures/kb_retrieval_golden.jsonl --output <path> [--live]`.
-- Offline mode evaluates supplied rankings from fixture field `observed_chunk_ids` and requires no API key. `--live` indexes fixture documents in a temporary KB root, uses configured embedding/rerank providers, records per-query stage latency, and never writes to the user's KB root.
+- CLI: `uv run python ../../scripts/eval_kb_retrieval.py --fixture tests/fixtures/kb_retrieval_golden.jsonl --rankings <rankings.json> --output <path> [--live]`.
+- Offline mode evaluates supplied per-case rankings from the separate `--rankings` JSON object keyed by `case_id` and requires no API key. `--live` indexes fixture documents in a temporary KB root, uses configured embedding/rerank providers, records per-query stage latency, and never writes to the user's KB root.
 - JSON report fields: `generated_at`, `mode`, `case_count`, `metrics`, `p50_ms`, `p95_ms`, `channel_failures`, `config`, and `cases`; config contains model names and index versions but no keys/base authorization headers.
 - Exit non-zero when Recall@10 is below the committed baseline, any Chinese exact lexical golden case misses, or no-answer false-positive rate exceeds the baseline threshold stored in the fixture metadata.
 - Operations doc includes data locations, first migration behavior, degraded fallback, health interpretation, forced reindex, optimize policy, backup, rollback, and removal criteria for legacy `rank_bm25`.
