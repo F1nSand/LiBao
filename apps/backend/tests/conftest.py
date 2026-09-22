@@ -21,12 +21,15 @@ async def _filestore(tmp_path):
     每个测试使用独立的临时 FileStore。
     """
     from app.storage.file.store import FileStore, set_store
+    from app.storage.repositories.kb_lance import reset_lance_store
 
+    reset_lance_store()
     settings = SimpleNamespace(agent_data_dir=str(tmp_path / ".agent"), kb_root=str(tmp_path / "kb"))
     store = FileStore(settings)
     await store.init()
     set_store(store)
     yield store
+    reset_lance_store()
     set_store(None)
 
 

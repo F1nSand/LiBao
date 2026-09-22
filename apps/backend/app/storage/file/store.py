@@ -62,6 +62,7 @@ class FileStore:
         self.tables: dict[str, FileTable] = {}
         self._jsonl_locks: dict[str, asyncio.Lock] = {}
         self.bm25: Any = None  # KB BM25 索引（bootstrap 构建，kb repository 读写）
+        self.kb_lance_store: Any = None  # KB Lance 存储惰性创建；测试可按数据目录重置连接缓存
 
     # ---- 初始化 ----
 

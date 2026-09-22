@@ -56,6 +56,7 @@ class KbChunk(Row):
     chunk_index: int
     content: str
     embedding: list | None = None  # 向量（仅 pipeline 传参用，不落 index.json）
+    embedding_model: str | None = None
     generation: str = "legacy-v1"
     retrieval_text: str = ""
     section_path: tuple[str, ...] = ()

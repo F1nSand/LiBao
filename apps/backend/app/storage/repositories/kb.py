@@ -109,6 +109,11 @@ class KbRepository:
         self.store = get_store()
         self.table = self.store.table("kb_collections")
         self.manifests = KbManifestStore(self.store.kb_root)
+        if self.store.kb_lance_store is None:
+            from app.storage.repositories.kb_lance import KbLanceStore
+
+            self.store.kb_lance_store = KbLanceStore(self.store.kb_root)
+        self.lance = self.store.kb_lance_store
 
     # ---- 集合 ----
 

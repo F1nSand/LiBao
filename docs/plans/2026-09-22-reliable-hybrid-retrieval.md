@@ -9,7 +9,7 @@
 **Global Constraints:**
 
 - 不引入 Elasticsearch、OpenSearch、Qdrant 或其他外部检索服务。
-- LanceDB 版本保持 `>=0.37.1`；FTS 默认使用 `tokenizer_name="icu"`、`stem=False`、`remove_stop_words=False`。
+- LanceDB 版本保持 `>=0.37.1`；FTS 默认使用 `base_tokenizer="icu"`、`stem=False`、`remove_stop_words=False`。
 - `POST /kb/search` 的 `hybrid={semantic,bm25}`、`top_k<=10`、命中列表结构和 `kb_search` Agent 工具保持向后兼容；`bm25` 继续作为词法通道的 API 名称。
 - 新 generation 完整写入和验证前不得删除旧 active generation；首次索引失败为 `failed`，已有 active 的重索引失败仍保持旧版本可检索。
 - 归档、软删除和集合删除必须先撤销 manifest 可见性，再进行 Lance 物理清理；清理失败不得导致文档重新可见。
@@ -86,6 +86,7 @@
 - Create: `apps/backend/app/storage/repositories/kb_lance.py`
 - Create: `apps/backend/tests/test_kb_lance.py`
 - Modify: `apps/backend/app/storage/repositories/kb.py:52-96,294-370`
+- Modify: `apps/backend/app/storage/models/kb.py:50-68`
 - Modify: `apps/backend/app/storage/file/store.py:55-80`
 - Modify: `apps/backend/tests/conftest.py:13-31`
 
@@ -94,7 +95,8 @@
 - Produce `LANCE_TABLE_NAME = "chunks_v2"`, `RETRIEVAL_SCHEMA_VERSION = 2`, `FTS_INDEX_NAME = "retrieval_text_fts_v1"`.
 - `chunks_v2` fields: `chunk_id`, `document_id`, `collection_id`, `org_id`, `generation`, `chunk_index`, `content`, `retrieval_text`, `section_path`, `start_offset`, `end_offset`, `token_count`, `chunking_strategy`, `embedding_model`, `schema_version`, `active`, `created_at`, and `vector: float32[1024]`.
 - Produce `RetrievalCandidate(chunk_id: UUID, document_id: UUID, collection_id: UUID, generation: str, content: str, channel_score: float)`.
-- Produce `GenerationValidation(row_count: int, unique_chunk_count: int, vector_dimensions_valid: bool, empty_text_count: int)`.
+- Produce `GenerationValidation(row_count: int, row_count_matches: bool, unique_chunk_count: int, vector_dimensions_valid: bool, empty_text_count: int)`.
+- Extend `KbChunk` with optional `embedding_model` metadata so the Lance row records the model that produced its vector.
 - Produce `class KbLanceStore` with synchronous private Lance calls wrapped by public async methods:
   - `ensure_ready(tokenizer: str = "icu") -> None`
   - `write_generation(chunks: Sequence[KbChunk], *, active: bool = False) -> None`
@@ -106,16 +108,18 @@
   - `fts_search(query, collection_ids, limit) -> list[RetrievalCandidate]`
   - `optimize() -> None`
   - `health() -> dict[str, Any]`.
-- `ensure_ready` creates the FTS once with `create_fts_index("retrieval_text", replace=False, use_tantivy=False, tokenizer_name="icu", with_position=True, lower_case=True, stem=False, remove_stop_words=False, ascii_folding=True, name=FTS_INDEX_NAME)`; it does not call `replace=True` on normal startup.
+- `ensure_ready` creates the FTS once with `create_index("retrieval_text", config=FTS(base_tokenizer="icu", with_position=True, lower_case=True, stem=False, remove_stop_words=False, ascii_folding=True), replace=False, name=FTS_INDEX_NAME)`; it does not call `replace=True` on normal startup.
 - Both search methods use `active = true` and collection filters in Lance; manifest post-filtering remains mandatory in Task 8.
 
-- [ ] Step 1: Write tests that create a temporary Lance database, call `ensure_ready()` twice, insert Chinese/mixed-language chunks, and prove `fts_search("人工智能代理")`, `fts_search("MCP discovery")`, and `fts_search("create_fts_index")` return expected chunks.
+- [ ] Step 1: Write tests that create a temporary Lance database, call `ensure_ready()` twice, insert Chinese/mixed-language chunks, and prove `fts_search("代理")` (a subword of an unspaced Chinese phrase), `fts_search("MCP discovery")`, and `fts_search("create_fts_index")` return expected chunks.
 - [ ] Step 2: Add tests proving a newly appended generation is searchable without recreating the FTS index, inactive rows are excluded, vector search orders cosine neighbors, validation detects wrong counts/empty text, and deleting one generation leaves another generation intact.
 - [ ] Step 3: Run `uv run pytest tests/test_kb_lance.py -q`; expect import failure.
 - [ ] Step 4: Implement `KbLanceStore`; isolate module-level connection/table cache behind `reset_lance_store()` so the autouse temporary `FileStore` fixture cannot leak table handles across tests.
 - [ ] Step 5: Change `KbRepository` to accept or construct `KbLanceStore` but retain legacy `_get_lance_table()` wrappers until migration cutover. Remove Lance schema creation from `kb.py` only after all existing tests use the new store.
 - [ ] Step 6: Run `uv run pytest tests/test_kb_lance.py tests/test_kb_search.py tests/test_kb_api.py -q`; expect all tests to pass.
 - [ ] Step 7: Commit with `feat: add persistent Lance FTS chunk store`.
+
+**Implementation note (verified against the pinned LanceDB 0.37.1 runtime):** `tokenizer_name` is a legacy alias and does not accept `icu`; ICU must be configured through `FTS(base_tokenizer="icu")`. The current `create_index(..., config=FTS(...))` API is used, and an existing named index is left untouched on startup. Lance also fills null vectors during ingestion, so `write_generation` rejects missing or wrong-dimension vectors before writing. See the [official LanceDB FTS documentation](https://lancedb.github.io/lancedb/python/python/) for tokenizer options and the current index API.
 
 ## Task 4: 实现 generation 构建、验证、原子激活和失败回滚
 
@@ -300,7 +304,7 @@
 
 **Interfaces:**
 
-- Extend `CreateCollectionRequest` with validated `chunking_strategy: Literal["auto","semantic"] = "auto"`, `fts_tokenizer: Literal["icu","jieba/default"] = "icu"`, `chunk_size: int` in `128..2048`, and `overlap: int` in `0..min(256, chunk_size//4)`.
+- Extend `CreateCollectionRequest` with validated `chunking_strategy: Literal["auto","semantic"] = "auto"`, `fts_tokenizer: Literal["icu","jieba/default"] = "icu"` (mapped to Lance `FTS.base_tokenizer`), `chunk_size: int` in `128..2048`, and `overlap: int` in `0..min(256, chunk_size//4)`.
 - Preserve existing requests containing only `name`, `chunk_size`, and `overlap`.
 - Add `GET /kb/health` returning `{status,index_mode,schema_version,fts_tokenizer,migration,recovery,pending_cleanup,last_optimize_at,last_error}`; status values are `ok`, `degraded`, or `error`.
 - Add developer-only `POST /kb/search/debug` with the same body as `/kb/search`, returning `{hits,diagnostics}`. Keep `/kb/search` returning a bare hit list inside the standard envelope.
