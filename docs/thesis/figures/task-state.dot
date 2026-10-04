@@ -1,0 +1,20 @@
+digraph LiBaoTaskState {
+  graph [rankdir=LR, bgcolor="white", pad="0.25", nodesep="0.45", ranksep="0.7"];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=12, color="#3b4a5a", fillcolor="#eef4f8", margin="0.18,0.10"];
+  edge [fontname="Microsoft YaHei", fontsize=10, color="#546e7a", arrowsize=0.75];
+  pending [label="pending"];
+  running [label="running", fillcolor="#fff4d6"];
+  waiting [label="waiting_confirm", fillcolor="#fff4d6"];
+  done [label="done", fillcolor="#e6f4ea"];
+  failed [label="failed", fillcolor="#fce8e6"];
+  cancelled [label="cancelled", fillcolor="#fce8e6"];
+
+  pending -> running [label="后台运行器确认"];
+  running -> waiting [label="工具/节点中断"];
+  waiting -> running [label="approved / Command(resume)"];
+  waiting -> cancelled [label="denied"];
+  running -> done [label="finalize"];
+  running -> failed [label="结构化错误"];
+  running -> cancelled [label="用户取消"];
+  failed -> running [label="recover + checkpoint"];
+}

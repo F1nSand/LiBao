@@ -1,0 +1,24 @@
+digraph LiBaoSseRecovery {
+  graph [rankdir=LR, bgcolor="white", pad="0.25", nodesep="0.40", ranksep="0.55"];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=11, color="#3b4a5a", fillcolor="#eef4f8", margin="0.16,0.10"];
+  edge [fontname="Microsoft YaHei", fontsize=9, color="#546e7a", arrowsize=0.75];
+  submit [label="提交任务\n写入 pending"];
+  run [label="后台执行\n模型/工具/检查点", fillcolor="#fff4d6"];
+  publish [label="发布业务事件\n递增 task_seq + JSONL\n再 live-tail"];
+  client [label="前端 SSE\n当前连接 seq\n时间线更新"];
+  disconnect [label="断线/刷新", fillcolor="#fce8e6"];
+  replay [label="重连\nafter_seq 或 Last-Event-ID\n补发历史并去重"];
+  recover [label="可恢复失败\n按 checkpoint 继续\n不重提原消息", fillcolor="#e6f4ea"];
+  terminal [label="done / error / cancelled", fillcolor="#e6f4ea"];
+
+  submit -> run;
+  run -> publish;
+  publish -> client;
+  client -> disconnect;
+  disconnect -> replay;
+  replay -> client [label="继续观察"];
+  run -> recover [label="模型传输失败"];
+  recover -> publish [label="继续发布事件"];
+  run -> terminal;
+  terminal -> publish [label="终态事件"];
+}

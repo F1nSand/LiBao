@@ -59,6 +59,7 @@ def normalize_manifest(raw: Mapping[str, Any]) -> dict[str, Any]:
         if (
             source_version == 1
             and document.get("status") == "indexed"
+            and not document.get("deleted_at")
             and document.get("active_generation") is None
             and LEGACY_GENERATION in generations
         ):

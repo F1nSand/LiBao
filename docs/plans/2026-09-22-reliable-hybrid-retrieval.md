@@ -203,6 +203,9 @@
 - Modify: `apps/backend/app/storage/repositories/bm25.py:1-81`
 - Modify: `apps/backend/app/storage/repositories/kb.py:331-370`
 - Modify: `apps/backend/app/core/config.py:122-128`
+- Modify: `apps/backend/app/api/lifespan.py:28-33` (expose runtime migration/index mode)
+- Modify: `apps/backend/tests/conftest.py` (isolate the preserved legacy Lance table cache)
+- Modify: `apps/backend/tests/test_kb_recovery.py` (populate the expanded Runtime contract)
 
 **Interfaces:**
 
@@ -212,16 +215,19 @@
 - Produce `KbV2Migrator.migrate_all() -> MigrationReport` and `migrate_document(collection_id, document_id) -> DocumentMigrationResult`.
 - Migration copies text from v1 manifest and vectors from legacy `vectors` table when the row count and 1024 dimensions match; it derives `retrieval_text`, writes generation `migrated-v1-<document_id>`, validates it, then atomically activates it. Missing rows or dimension mismatch yield `reindex_required`; no zero vectors are created.
 - Extend `Runtime` with `kb_index_mode: Literal["v2","legacy_degraded"]` and `kb_migration: MigrationReport`.
+- Add `kb_force_legacy_mode: bool = False` as an operator rollback switch; forced legacy mode skips migration and routes lexical/vector queries only through the preserved compatibility indexes.
 - Normal startup with a complete ledger calls only `ensure_ready()` and recovery. Incomplete migration runs before application readiness. A migration exception enables `legacy_degraded`, performs the old BM25 rebuild once to preserve availability, exposes degraded health, and retries next startup; it never deletes the legacy table.
 - Keep `rank-bm25` and `bm25.py` for one compatibility release, but remove all normal-path rebuild calls from insert, archive, delete, and healthy startup.
 
-- [ ] Step 1: Write migration tests for successful vector copy, already-migrated idempotence, interruption after one document followed by resume, missing legacy Lance row, incompatible vector dimension, and rollback to untouched v1 files/table.
-- [ ] Step 2: Add bootstrap tests with spies: completed migration must call zero `BM25Index.rebuild`; failed migration must select `legacy_degraded` and call one rebuild; subsequent healthy startup must not repeat migration writes.
-- [ ] Step 3: Run `uv run pytest tests/test_kb_migration.py tests/test_bootstrap.py -q`; expect failures for missing migrator/runtime fields.
-- [ ] Step 4: Implement the atomic ledger and migrator. Copy vectors directly; do not invoke `EmbeddingService` during compatible migration.
-- [ ] Step 5: Integrate migration into `init_runtime()` before graph readiness, retain legacy query methods only behind `runtime.kb_index_mode == "legacy_degraded"`, and remove ordinary `store.bm25.rebuild(...)` calls.
-- [ ] Step 6: Run `uv run pytest tests/test_kb_migration.py tests/test_bootstrap.py tests/test_bm25.py tests/test_kb_api.py -q`; expect migration and explicit legacy tests to pass.
+- [x] Step 1: Write migration tests for successful vector copy, already-migrated idempotence, interruption after one document followed by resume, missing legacy Lance row, incompatible vector dimension, and rollback to untouched v1 files/table.
+- [x] Step 2: Add bootstrap tests with spies: completed migration must call zero `BM25Index.rebuild`; failed migration must select `legacy_degraded` and call one rebuild; subsequent healthy startup must not repeat migration writes.
+- [x] Step 3: Run the migration/bootstrap tests; they first failed on the missing migrator/runtime contracts and then passed after implementation.
+- [x] Step 4: Implement the atomic ledger and migrator. Copy vectors directly; do not invoke `EmbeddingService` during compatible migration.
+- [x] Step 5: Integrate migration into `init_runtime()` before graph readiness, retain legacy query methods only behind `runtime.kb_index_mode == "legacy_degraded"`, and remove ordinary `store.bm25.rebuild(...)` calls.
+- [x] Step 6: Run the migration, bootstrap, BM25, API, and KB regression suites; all targeted tests pass (106 passed), and focused Ruff passes.
 - [ ] Step 7: Commit with `feat: migrate KB indexes to persistent FTS`.
+
+**Implementation note:** New collection/document writes now start in manifest v2. Bootstrap copies legacy vectors without re-embedding, persists atomic progress per document, initializes FTS once, and exposes both index mode and migration report. Cancellation around manifest activation keeps any generation that the manifest may already reference; unreferenced partial generations are rolled back on ordinary failures. `kb_force_legacy_mode=true` provides an explicit operational rollback path; the v1 vector table and v1 chunk generation remain intact.
 
 ## Task 7: 用结构感知＋递归 token 分块替换固定字符滑窗
 

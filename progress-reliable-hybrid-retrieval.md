@@ -6,8 +6,8 @@
 - [complete] Task 2: 引入 index.json v2 manifest、索引字段和并发安全原子更新 (commit `8eb6d20`; focused KB suite → PASS, 51 passed; Ruff → PASS).
 - [complete] Task 3: 建立 chunks_v2 Lance 存储与持久化 ICU FTS (commit `da96d52`; KB regression suite → PASS, 60 passed; focused Ruff → PASS).
 - [complete] Task 4: 实现 generation 构建、验证、原子激活和失败回滚 (commit `3e24702`; KB regression suite → PASS, 74 passed; focused Ruff → PASS).
-- [complete] Task 5: 修复归档/删除一致性并加入启动恢复和后台维护 (KB regression → PASS, 87 passed; recovery suite → PASS, 13 passed; focused Ruff → PASS).
-- [pending] Task 6: 实现 v1→v2 旁路迁移、断点续跑和 legacy 回退。
+- [complete] Task 5: 修复归档/删除一致性并加入启动恢复和后台维护 (commit `17795ba`; KB regression → PASS, 87 passed; recovery suite → PASS, 13 passed; focused Ruff → PASS).
+- [in_progress] Task 6: 实现 v1→v2 旁路迁移、断点续跑和 legacy 回退；测试已通过，待处理收尾审查发现。
 - [pending] Task 7: 用结构感知＋递归 token 分块替换固定字符滑窗。
 - [pending] Task 8: 拆分并强化混合召回、RRF、rerank 校验和诊断。
 - [pending] Task 9: 补齐配置、健康/调试 API、前端契约和知识库界面。
@@ -28,3 +28,4 @@
 - Task 3 red/green: expected missing-Lance-store-module failure. Pinned LanceDB 0.37.1 rejected legacy `tokenizer_name="icu"`; switched to official `FTS(base_tokenizer="icu")` via `create_index`, then Chinese subword, mixed-language, identifier, vector/FTS filtering, generation deletion, and restart/concurrent initialization tests passed. Enforced non-null 1024D vectors at ingestion because Lance fills null vector values. KB suite PASS (60 passed); Ruff PASS; commit `da96d52`.
 - Task 4 red/green: expected missing-generation-module failure; added generation rollback/activation fault injection, cancellation, reindex serialization, shared lifecycle lock, and v1 legacy preservation tests. KB suite PASS (74 passed); Ruff PASS; commit `3e24702`.
 - Task 5 red/green: added archive/delete visibility revocation before cleanup, startup reconciliation, retryable orphan/pending cleanup, healthy-v2 startup guard against BM25 rebuild/FTS reinitialization, and thresholded Lance optimize. Focused recovery suite PASS (13 passed); KB regression suite PASS (87 passed); focused Ruff PASS. Manual code review found no remaining findings; desktop `/verify`, `/code-review`, and `/simplify` commands were not exposed as callable tools, so the affected end-to-end API/lifecycle paths were validated through pytest.
+- Task 6 verification so far: resumable atomic v1→v2 migration, migration/bootstrap suite PASS (14 passed), KB regression PASS (106 passed), backend suite PASS (847 passed, 4 skipped), repository Ruff PASS. Closing review found unresolved migration-status, archive-race, and degraded/forced-legacy retrieval coverage issues; task and commit remain in progress pending triage/fixes.

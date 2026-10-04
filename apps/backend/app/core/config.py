@@ -124,6 +124,7 @@ class Settings(BaseSettings):
     kb_maintenance_interval_s: int = 3600
     kb_optimize_min_mutations: int = 500
     kb_recovery_enabled: bool = True
+    kb_force_legacy_mode: bool = False
 
     # ---- M3 附件（本地磁盘，~/.LiBao/uploads）----
     upload_dir: str = f"{_LIB}/uploads"

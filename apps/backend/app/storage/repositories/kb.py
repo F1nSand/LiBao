@@ -3,7 +3,7 @@
 本地单机化：
 - 集合：.agent/kb_collections.json（FileTable）
 - 文档+分块：kb/<collection_id>/index.json（documents/chunks 内嵌）+ documents/<doc_id>.md（原文）
-- 向量：kb/vectors.lance（LanceDB 单表，chunk_id 主键，merge_insert 增量 upsert）
+- 向量：旧 `vectors` 表保留作回退；`chunks_v2` 由 KbLanceStore 提供健康路径
 - BM25：FileStore.bm25（仅为尚未迁移的 v1 文档提供兼容回退）
 
 混合检索保留 RRF k=60、rerank 和降级链，并在最终返回前校验 manifest 可见性。
@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import uuid
@@ -68,7 +69,7 @@ _lance_table: Any = None
 
 
 def _get_lance_table() -> Any:
-    """kb/vectors.lance 单表（首次惰性建表；schema 与 P0.5 验证一致）。"""
+    """Open the preserved v1 vectors table (create an empty compatibility table if absent)."""
     global _lance_db, _lance_table
     if _lance_table is not None:
         return _lance_table
@@ -79,7 +80,7 @@ def _get_lance_table() -> Any:
     if _lance_db is None:
         _lance_db = lancedb.connect(str(store.kb_root / "vectors.lance"))
     name = "vectors"
-    if name in _lance_db.table_names():
+    if name in _lance_db.list_tables().tables:
         _lance_table = _lance_db.open_table(name)
     else:
         schema = pa.schema(
@@ -102,6 +103,24 @@ def reset_lance() -> None:
     global _lance_db, _lance_table
     _lance_db = None
     _lance_table = None
+
+
+def _read_legacy_vector_rows(kb_root, document_id: uuid.UUID) -> list[dict[str, Any]]:
+    database_path = kb_root / "vectors.lance"
+    if not database_path.exists():
+        return []
+    import lancedb
+
+    database = lancedb.connect(str(database_path))
+    if "vectors" not in database.list_tables().tables:
+        return []
+    table = database.open_table("vectors")
+    return (
+        table.search()
+        .where(f"document_id = '{document_id}'")
+        .select(["chunk_id", "vector"])
+        .to_list()
+    )
 
 
 class KbRepository:
@@ -151,7 +170,7 @@ class KbRepository:
             org_id=org_id, name=name, description=description, chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
         self.table.register(row)
-        await self._save_index(row.id, {"version": 1, "documents": {}, "chunks": {}})
+        await self._save_index(row.id, {"version": 2, "documents": {}, "chunks": {}}, version=2)
         return row
 
     async def soft_delete_collection(self, coll: KbCollection) -> None:
@@ -173,21 +192,14 @@ class KbRepository:
             }
         return index
 
-    async def _save_index(self, collection_id: uuid.UUID, index: dict[str, Any]) -> None:
-        await self.manifests.save(collection_id, index)
+    async def _save_index(
+        self, collection_id: uuid.UUID, index: dict[str, Any], *, version: int | None = None
+    ) -> None:
+        await self.manifests.save(collection_id, index, version=version)
 
     async def _update_index(self, collection_id: uuid.UUID, mutate) -> dict[str, Any]:
-        def compatible_update(index: dict[str, Any]) -> None:
-            if index.get("_source_version") == 1:
-                index["chunks"] = {
-                    document_id: generations.get(LEGACY_GENERATION, [])
-                    if isinstance(generations, dict)
-                    else generations
-                    for document_id, generations in index["chunks"].items()
-                }
-            mutate(index)
-
-        return await self.manifests.update(collection_id, compatible_update)
+        """Normal repository writes promote manifests to v2; legacy v1 data normalizes atomically."""
+        return await self.manifests.update(collection_id, mutate, version=2)
 
     async def update_manifest(
         self,
@@ -198,6 +210,10 @@ class KbRepository:
     ) -> dict[str, Any]:
         """Update the normalized manifest without applying v1 repository adapters."""
         return await self.manifests.update(collection_id, mutate, version=version)
+
+    async def legacy_vector_rows(self, document_id: uuid.UUID) -> list[dict[str, Any]]:
+        """Read existing v1 vectors without creating or modifying the legacy table."""
+        return await asyncio.to_thread(_read_legacy_vector_rows, self.store.kb_root, document_id)
 
     async def revoke_document_index(
         self,
@@ -374,14 +390,16 @@ class KbRepository:
                 continue
             cids = [c["chunk_id"] for c in removed_chunks]
             await self._lance_delete_document(str(document_id), cids)
-            self.store.bm25.rebuild(await self._bm25_corpus())
+            if self.store.kb_index_mode == "legacy_degraded" and self.store.bm25 is not None:
+                self.store.bm25.rebuild(await self._bm25_corpus())
             return
 
     async def delete_collection_chunks(self, collection_id: uuid.UUID) -> None:
         """集合级分块硬删（集合软删时调用）。"""
         await self._update_index(collection_id, lambda index: index.__setitem__("chunks", {}))
         _get_lance_table().delete(f"collection_id = '{collection_id}'")
-        self.store.bm25.rebuild(await self._bm25_corpus())
+        if self.store.kb_index_mode == "legacy_degraded" and self.store.bm25 is not None:
+            self.store.bm25.rebuild(await self._bm25_corpus())
 
     async def _lance_delete_document(
         self, document_id: str, chunk_ids: list[str], *, raise_errors: bool = False
@@ -452,10 +470,14 @@ class KbRepository:
 
         def add_chunks(index: dict[str, Any]) -> None:
             document_id = str(rows[0].document_id)
-            if index.get("_source_version") == 1:
-                index["chunks"][document_id] = chunks
-            else:
-                index["chunks"].setdefault(document_id, {})[rows[0].generation] = chunks
+            index["chunks"].setdefault(document_id, {})[rows[0].generation] = chunks
+            doc_state = index["documents"].get(document_id)
+            if (
+                doc_state is not None
+                and doc_state.get("status") == "indexed"
+                and not doc_state.get("active_generation")
+            ):
+                doc_state["active_generation"] = rows[0].generation
 
         await self._update_index(
             collection_id,
@@ -478,15 +500,23 @@ class KbRepository:
             for r in rows
         ]
         table.merge_insert("chunk_id").when_matched_update_all().when_not_matched_insert_all().execute(records)
-        # BM25 增量（全量重建，个人量级快）
-        self.store.bm25.rebuild(await self._bm25_corpus())
+        if self.store.kb_index_mode == "legacy_degraded" and self.store.bm25 is not None:
+            self.store.bm25.rebuild(await self._bm25_corpus())
 
     async def _bm25_corpus(self) -> list[tuple[str, str, str]]:
         """全量语料 (chunk_id, content, collection_id)：扫全部集合 index.json 的 indexed 文档分块。"""
         corpus: list[tuple[str, str, str]] = []
         for coll_dir in _collection_dirs(self.store):
             cid = coll_dir.name
-            index = await self._load_index(uuid.UUID(cid))
+            try:
+                index = await self._load_index(uuid.UUID(cid))
+            except Exception as exc:  # noqa: BLE001  one corrupt collection must not block degraded retrieval
+                logger.warning(
+                    "KB BM25 fallback skipped collection_id=%s error_type=%s",
+                    cid,
+                    type(exc).__name__,
+                )
+                continue
             indexed_docs = {
                 did for did, d in index["documents"].items()
                 if d.get("status") == "indexed" and not d.get("deleted_at")
@@ -525,24 +555,73 @@ class KbRepository:
     async def semantic_search(
         self, org_id: uuid.UUID, collection_ids: list[uuid.UUID], query_vec: list[float], limit: int = 50
     ) -> list[tuple[uuid.UUID, str, float]]:
-        """语义通道：LanceDB cosine 距离升序。返回 (chunk_id, content, distance)。"""
-        table = _get_lance_table()
-        if table.count_rows() == 0:
-            return []
-        where = "status = 'indexed'"
-        if collection_ids:
-            ids = ",".join(f"'{c}'" for c in collection_ids)
-            where += f" AND collection_id IN ({ids})"
-        hits = table.search(query_vec).metric("cosine").where(where).limit(limit).to_list()
-        return [(uuid.UUID(h["chunk_id"]), h["content"], float(h["_distance"])) for h in hits]
+        """Search active v2 vectors, also consulting the v1 table during degraded migration."""
+        candidates: dict[uuid.UUID, tuple[str, float]] = {}
+        if self.store.kb_index_mode == "legacy_degraded":
+            try:
+                table = _get_lance_table()
+                if table.count_rows():
+                    where = "status = 'indexed'"
+                    if collection_ids:
+                        ids = ",".join(f"'{c}'" for c in collection_ids)
+                        where += f" AND collection_id IN ({ids})"
+                    hits = table.search(query_vec).metric("cosine").where(where).limit(limit).to_list()
+                    for hit in hits:
+                        chunk_id = uuid.UUID(hit["chunk_id"])
+                        candidates[chunk_id] = (hit["content"], float(hit["_distance"]))
+            except Exception as exc:  # noqa: BLE001  retain the v2 channel if the legacy table is unavailable
+                logger.warning("legacy vector fallback unavailable error_type=%s", type(exc).__name__)
+        if self.store.kb_force_legacy_mode:
+            v2_hits = []
+        elif self.store.kb_index_mode == "legacy_degraded":
+            try:
+                v2_hits = await self.lance.vector_search(query_vec, collection_ids, limit)
+            except Exception as exc:  # noqa: BLE001  v1 results remain usable during a v2 outage
+                logger.warning("v2 vector channel unavailable error_type=%s", type(exc).__name__)
+                v2_hits = []
+        else:
+            v2_hits = await self.lance.vector_search(query_vec, collection_ids, limit)
+        for hit in v2_hits:
+            previous = candidates.get(hit.chunk_id)
+            if previous is None or hit.channel_score < previous[1]:
+                candidates[hit.chunk_id] = (hit.content, hit.channel_score)
+        ranked = sorted(candidates.items(), key=lambda item: (item[1][1], str(item[0])))[:limit]
+        return [(chunk_id, text, distance) for chunk_id, (text, distance) in ranked]
 
     async def bm25_search(
         self, org_id: uuid.UUID, collection_ids: list[uuid.UUID], query: str, limit: int = 50
     ) -> list[tuple[uuid.UUID, str, float]]:
-        """BM25 通道：rank_bm25 打分降序。返回 (chunk_id, content, score)。"""
-        cids = [str(c) for c in collection_ids] if collection_ids else None
-        hits = self.store.bm25.search(query, collection_ids=cids, limit=limit)
-        return [(uuid.UUID(cid), text, score) for cid, text, score in hits]
+        """Lexical channel: persistent FTS normally, legacy BM25 only in degraded mode."""
+        if self.store.kb_force_legacy_mode:
+            fts_hits = []
+        elif self.store.kb_index_mode == "legacy_degraded":
+            try:
+                fts_hits = await self.lance.fts_search(query, collection_ids, limit)
+            except Exception as exc:  # noqa: BLE001  legacy BM25 remains usable during an FTS outage
+                logger.warning("v2 FTS channel unavailable error_type=%s", type(exc).__name__)
+                fts_hits = []
+        else:
+            fts_hits = await self.lance.fts_search(query, collection_ids, limit)
+        if self.store.kb_index_mode != "legacy_degraded" or self.store.bm25 is None:
+            return [(hit.chunk_id, hit.content, hit.channel_score) for hit in fts_hits]
+
+        collection_filter = [str(collection_id) for collection_id in collection_ids] or None
+        try:
+            legacy_hits = self.store.bm25.search(query, collection_ids=collection_filter, limit=limit)
+        except Exception as exc:  # noqa: BLE001  keep FTS results when the in-memory fallback is unhealthy
+            logger.warning("legacy BM25 channel unavailable error_type=%s", type(exc).__name__)
+            legacy_hits = []
+        scores: dict[uuid.UUID, float] = defaultdict(float)
+        texts: dict[uuid.UUID, str] = {}
+        for rank, (chunk_id, content, _score) in enumerate(legacy_hits, 1):
+            parsed_id = uuid.UUID(chunk_id)
+            scores[parsed_id] += 1 / (_RRF_K + rank)
+            texts.setdefault(parsed_id, content)
+        for rank, hit in enumerate(fts_hits, 1):
+            scores[hit.chunk_id] += 1 / (_RRF_K + rank)
+            texts.setdefault(hit.chunk_id, hit.content)
+        ranked = sorted(scores.items(), key=lambda item: (-item[1], str(item[0])))[:limit]
+        return [(chunk_id, texts[chunk_id], score) for chunk_id, score in ranked]
 
     async def chunk_sources(self, chunk_ids: list[uuid.UUID]) -> dict[str, dict]:
         """chunk → 来源信息（文档名/集合名，检索结果 source 字段）。"""

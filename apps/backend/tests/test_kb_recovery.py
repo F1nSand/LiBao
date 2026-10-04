@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from app.core.bootstrap import rebuild_legacy_bm25_if_needed
 from app.services.kb import KbService
 from app.services.kb_generation import KbGenerationService
+from app.services.kb_migration import MigrationReport
 from app.services.kb_recovery import RecoveryReport, kb_maintenance_loop, reconcile_kb_index
 from app.storage.file.store import get_store
 from app.storage.models.kb import EMBED_DIM, KbChunk
@@ -318,7 +319,11 @@ async def test_lifespan_runs_recovery_and_cancels_kb_maintenance(monkeypatch):
         return None
 
     async def fake_init_runtime(settings):
-        return SimpleNamespace(store=object())
+        return SimpleNamespace(
+            store=object(),
+            kb_index_mode="v2",
+            kb_migration=MigrationReport(0, 0, 0, 0, 0, True),
+        )
 
     async def no_task_recovery(*args, **kwargs):
         return {"scanned": 0}
@@ -338,10 +343,13 @@ async def test_lifespan_runs_recovery_and_cancels_kb_maintenance(monkeypatch):
     monkeypatch.setattr(lifespan_module, "session_cache_loop", wait_for_cancel)
     monkeypatch.setattr(lifespan_module, "cleanup_runtime", no_op)
 
-    async with lifespan_module.lifespan(FastAPI()):
+    app = FastAPI()
+    async with lifespan_module.lifespan(app):
         await asyncio.wait_for(started.wait(), timeout=2)
 
     assert recovery_calls == [True]
+    assert app.state.kb_index_mode == "v2"
+    assert app.state.kb_migration.complete
     assert cancelled.is_set()
 
 

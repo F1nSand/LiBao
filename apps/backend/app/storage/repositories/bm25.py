@@ -1,8 +1,9 @@
-"""BM25 检索索引（本地单机化）：rank_bm25 + 复用 space_cjk 分词（复刻 tsvector unigram 语义）。
+"""Legacy degraded-mode BM25 fallback kept for one compatibility release.
 
-- 启动全量重建（扫 kb/*/index.json 的 indexed 文档分块）；
-- 文档变更（索引完成/删除/集合删）后全量重建（个人量级千级 chunk 毫秒级，最简单正确）；
-- 打分差异仅影响排序，下游 RRF(k=60) + rerank 候选 20 有容忍。
+Healthy runtime retrieval uses persistent LanceDB FTS. This in-memory index is rebuilt once
+at startup only when a v1 document could not be migrated; write paths update it only in that
+explicit degraded mode.
+
 - IDF 覆写为恒正平滑（原 BM25Okapi 的 log(N-df+0.5)-log(df+0.5) 对常见词为负 → 负分时
   高频词反而分更低，中文常见词场景排序反转；+1 平滑恒正，与 ts_rank 行为一致）。
 """

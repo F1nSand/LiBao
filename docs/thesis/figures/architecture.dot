@@ -1,0 +1,20 @@
+digraph LiBaoArchitecture {
+  graph [rankdir=TB, bgcolor="white", pad="0.25", nodesep="0.35", ranksep="0.55"];
+  node [shape=box, style="rounded,filled", fontname="Microsoft YaHei", fontsize=12, color="#3b4a5a", fillcolor="#eef4f8", margin="0.18,0.10"];
+  edge [fontname="Microsoft YaHei", fontsize=10, color="#546e7a", arrowsize=0.75];
+
+  dev [label="开发环境\n浏览器 :5173 → Vite /api 代理"];
+  release [label="发布环境\n浏览器 :8000 → FastAPI REST/SSE + SPA", fillcolor="#e6f4ea"];
+  api [label="FastAPI API 层\nREST / SSE / 统一错误信封"];
+  graph [label="LangGraph 编排层\nroute · memory_inject · agent_execute\ntool_execute · context_update · finalize", fillcolor="#fff4d6"];
+  service [label="业务服务层\n会话 · 任务 · 工具 · MCP · 记忆\n知识库 · 附件 · 工作区 · 设置"];
+  capability [label="能力层\n内置工具 · 自定义工具 · MCP\n文件/工作区 · 沙箱 · Tool Registry", fillcolor="#f6e6f7"];
+  storage [label="本地存储层\nFileStore / JSONL · LanceDB/BM25\ncheckpoints · uploads · workspaces", fillcolor="#fce8e6"];
+
+  dev -> api [label="开发请求"];
+  release -> api [label="发布请求"];
+  api -> graph;
+  graph -> service;
+  service -> capability;
+  capability -> storage;
+}

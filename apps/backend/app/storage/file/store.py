@@ -1,6 +1,6 @@
 """文件存储核心（本地单机化）：FileStore 进程单例 + FileContext 请求上下文。
 
-- `FileStore`：目录骨架 + 实体表注册（惰性）+ JSONL 分文件追加/读取 + KB BM25 索引挂载。
+- `FileStore`：目录骨架 + 实体表注册（惰性）+ JSONL 分文件追加/读取 + KB 检索运行时状态。
 - `FileContext`：请求级上下文（替代 AsyncSession）。`commit()` 全量 flush 落盘（tmp+replace 原子），
   `rollback()` 全量重载；`add(row)` 按模型类自动注册（遗留 session.add 调用点兜底）。
 - 桥函数：`set_store/get_store`。
@@ -53,7 +53,7 @@ TABLE_SPECS: dict[str, tuple[str, type]] = {
 
 
 class FileStore:
-    """进程单例：目录骨架 + 表注册 + JSONL 分文件 + KB BM25 索引。"""
+    """进程单例：目录骨架 + 表注册 + JSONL 分文件 + KB 检索运行时状态。"""
 
     def __init__(self, settings: Any = None) -> None:
         settings = settings or get_settings()
@@ -61,8 +61,11 @@ class FileStore:
         self.kb_root = Path(settings.kb_root)
         self.tables: dict[str, FileTable] = {}
         self._jsonl_locks: dict[str, asyncio.Lock] = {}
-        self.bm25: Any = None  # KB BM25 索引（bootstrap 构建，kb repository 读写）
+        self.bm25: Any = None  # KB BM25 仅供启动降级回退和 v1 兼容
         self.kb_lance_store: Any = None  # KB Lance 存储惰性创建；测试可按数据目录重置连接缓存
+        self.kb_index_mode: str = "legacy_degraded"
+        self.kb_force_legacy_mode: bool = False
+        self.kb_migration: Any = None
 
     # ---- 初始化 ----
 

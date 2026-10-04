@@ -27,6 +27,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     runtime = await init_runtime(settings)
     app.state.store = runtime.store
+    app.state.kb_index_mode = runtime.kb_index_mode
+    app.state.kb_migration = runtime.kb_migration
     # 本地单机化：JsonFileSaver（.agent/checkpoints/），resume 语义与 PostgresSaver 等价
     saver = build_checkpointer(settings)
     app.state.checkpointer = saver
